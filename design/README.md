@@ -1,4 +1,4 @@
-# gal-ui
+# ollaic-ui
 
 This is the React/Vite frontend used by the Tauri desktop app.
 

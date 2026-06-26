@@ -1166,35 +1166,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gal"
-version = "0.1.0"
-dependencies = [
- "axum",
- "base64 0.22.1",
- "crc32fast",
- "dirs 5.0.1",
- "futures",
- "futures-util",
- "genai",
- "image",
- "mime_guess",
- "ndarray",
- "ort",
- "percent-encoding",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tokio",
- "tokio-tungstenite 0.21.0",
- "tower-http 0.5.2",
- "ureq",
- "zip",
-]
-
-[[package]]
 name = "gdk"
 version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2601,6 +2572,35 @@ dependencies = [
  "objc2-app-kit",
  "objc2-core-foundation",
  "objc2-foundation",
+]
+
+[[package]]
+name = "ollaic"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "crc32fast",
+ "dirs 5.0.1",
+ "futures",
+ "futures-util",
+ "genai",
+ "image",
+ "mime_guess",
+ "ndarray",
+ "ort",
+ "percent-encoding",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tokio",
+ "tokio-tungstenite 0.21.0",
+ "tower-http 0.5.2",
+ "ureq",
+ "zip",
 ]
 
 [[package]]

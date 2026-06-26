@@ -1,0 +1,99 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: windows-x64
+            runner: windows-latest
+          - label: linux-x64
+            runner: ubuntu-24.04
+          - label: macos-arm64
+            runner: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Enable pnpm
+        shell: bash
+        run: |
+          corepack enable
+          corepack prepare pnpm@10 --activate
+          pnpm --version
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux dependencies
+        if: startsWith(matrix.runner, 'ubuntu-')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            patchelf \
+            pkg-config \
+            curl \
+            wget \
+            file \
+            unzip
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Tauri bundle for release
+        if: github.ref_type == 'tag'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tauriScript: pnpm tauri
+          tagName: ${{ github.ref_name }}
+          releaseName: Ollaic GaLaGame Maker ${{ github.ref_name }}
+          releaseBody: |
+            Ollaic GaLaGame Maker desktop build.
+
+            See the uploaded assets for Windows, Linux, and macOS packages.
+          releaseDraft: true
+          prerelease: false
+          releaseAssetNamePattern: '[name]-[version]-[platform]-[arch]-[bundle][setup].[ext]'
+          uploadWorkflowArtifacts: true
+          workflowArtifactNamePattern: '${{ matrix.label }}-[bundle]'
+
+      - name: Build Tauri bundle artifact
+        if: github.ref_type != 'tag'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tauriScript: pnpm tauri
+          uploadWorkflowArtifacts: true
+          workflowArtifactNamePattern: '${{ matrix.label }}-[bundle]'
+
+      - name: Verify macOS app signature
+        if: startsWith(matrix.label, 'macos-')
+        shell: bash
+        run: codesign --verify --deep --strict --verbose=4 target/release/bundle/macos/Ollaic.app

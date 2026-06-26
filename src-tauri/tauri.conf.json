@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "gal",
+  "productName": "Ollaic",
   "version": "0.1.0",
-  "identifier": "com.misaki.gal",
+  "identifier": "com.ollaic.galagame-maker",
   "build": {
     "beforeDevCommand": "pnpm --dir design dev",
     "beforeBuildCommand": "pnpm --dir design build",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "gal",
+        "title": "Ollaic GaLaGame Maker",
         "width": 1440,
         "height": 900,
         "minWidth": 1100,
@@ -33,9 +33,18 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
     "resources": [
-      "runtime/WebGAL_Template/**/*",
       "models/*.onnx"
-    ]
+    ],
+    "macOS": {
+      "signingIdentity": "-"
+    }
   }
 }

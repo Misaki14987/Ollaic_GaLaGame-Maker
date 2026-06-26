@@ -104,19 +104,12 @@ fn resolve_template_dir(app: &tauri::AppHandle) -> PathBuf {
             return candidate;
         }
     }
-    // 3. Bundled resources (production builds).
-    if let Ok(resource_dir) = app.path().resource_dir() {
-        let candidate = resource_dir.join("runtime/WebGAL_Template");
-        if candidate.join("index.html").is_file() {
-            return candidate;
-        }
-    }
-    // 4. Source tree path (dev builds — populated by scripts/setup-runtime.sh).
+    // 3. Source tree path (dev builds — populated by scripts/setup-runtime.sh).
     let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime/WebGAL_Template");
     if dev_path.join("index.html").is_file() {
         return dev_path;
     }
-    // 5. Last-resort legacy path.
+    // 4. Last-resort legacy path.
     dirs::home_dir()
         .map(|h| h.join("Downloads/webgal/WebGAL/assets/templates/WebGAL_Template"))
         .unwrap_or_else(|| PathBuf::from("./WebGAL_Template"))

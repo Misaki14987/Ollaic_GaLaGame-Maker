@@ -1,7 +1,7 @@
 [package]
-name = "gal"
+name = "ollaic"
 version = "0.1.0"
-description = "A Tauri desktop shell for the gal editor"
+description = "A Tauri desktop shell for Ollaic GaLaGame Maker"
 edition = "2021"
 
 [build-dependencies]
