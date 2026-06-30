@@ -15,6 +15,12 @@
 | AI 辅助 | 已实现 | 对话修改、变更预览、角色/场景/素材规划、供应商配置 |
 | 打包发布 | 准备中 | release workflow 构建 Windows x64、Linux x64 与 macOS Apple Silicon 包 |
 
+## V2 规划
+
+| 模块 | 状态 | 说明 |
+|------|------|------|
+| 端到端 Agent 形态 | **规划中** | 见 [`v2-agent-pipeline.md`](./v2-agent-pipeline.md)：Pipeline Orchestrator、StoryPlan IR、多 Agent 分工、Flow 可视化画布、AssetTaskQueue、自动质检、一键可玩 |
+
 ## 模块索引
 
 | 目录 | 内容 |
@@ -25,6 +31,7 @@
 | [`assets/`](./assets/README.md) | 素材库、元数据、配音管理 |
 | [`characters/`](./characters/README.md) | 角色资料与立绘系统 |
 | [`ai/`](./ai/README.md) | AI Agent、修改预览、会话记忆、媒体生成、供应商配置 |
+| [`v2-agent-pipeline.md`](./v2-agent-pipeline.md) | V2 端到端 Agent 产品与架构基线 |
 
 ## 维护原则
 
