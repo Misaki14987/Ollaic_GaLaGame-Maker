@@ -251,6 +251,7 @@ impl Pipeline {
             prompt: &prompt,
             synopsis: &plan.synopsis,
             chapters: &plan.chapters,
+            worldbook: &plan.memory.worldbook,
         };
         let result = match self.agents.get(kind) {
             Some(agent) => agent.run(&ctx).await,
@@ -355,6 +356,11 @@ fn apply_output(plan: &mut StoryPlan, kind: StepKind, out: &AgentOutput) {
         StepKind::Plan => {
             if let Some(synopsis) = &out.synopsis {
                 plan.synopsis = synopsis.clone();
+            }
+        }
+        StepKind::Memory => {
+            if let Some(worldbook) = &out.worldbook {
+                plan.memory.worldbook = worldbook.clone();
             }
         }
         StepKind::Outline => {

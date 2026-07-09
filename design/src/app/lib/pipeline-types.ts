@@ -61,6 +61,10 @@ export interface ChapterPlan {
   summary: string;
 }
 
+export interface StoryMemory {
+  worldbook: string;
+}
+
 export interface PipelineRunSummary {
   runId: string;
   status: string;
@@ -72,7 +76,9 @@ export interface StoryPlan {
   version: number;
   prompt: string;
   synopsis: string;
+  memory: StoryMemory;
   chapters: ChapterPlan[];
+  scenes: string[];
   pipelineRuns: PipelineRunSummary[];
 }
 

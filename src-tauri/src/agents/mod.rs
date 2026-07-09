@@ -3,6 +3,7 @@
 //! without an LLM (ADR 0056). P0 ships deterministic stubs for Plan and
 //! Outline; real `genai`-backed agents arrive in P1.
 
+pub mod memory;
 pub mod outline;
 pub mod plan;
 pub mod scene;
@@ -16,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use crate::pipeline::dsl::StepKind;
 use crate::story_plan::types::ChapterPlan;
 
+pub use memory::MemoryAgent;
 pub use outline::OutlineAgent;
 pub use plan::PlanAgent;
 pub use scene::SceneAgent;
@@ -28,6 +30,9 @@ pub struct AgentContext<'a> {
     /// Read by future Scene/Dialogist agents; unused in P0.
     #[allow(dead_code)]
     pub chapters: &'a [ChapterPlan],
+    /// Worldbook produced by the Memory (Worldbuilder) step; read by the
+    /// Outline (Plotter) step.
+    pub worldbook: &'a str,
 }
 
 /// What an Agent produced for a step.
@@ -35,6 +40,8 @@ pub struct AgentContext<'a> {
 pub struct AgentOutput {
     #[serde(default)]
     pub synopsis: Option<String>,
+    #[serde(default)]
+    pub worldbook: Option<String>,
     #[serde(default)]
     pub chapters: Option<Vec<ChapterPlan>>,
     #[serde(default)]
@@ -73,10 +80,11 @@ impl AgentRegistry {
         }
     }
 
-    /// The default P0/P1 registry: Plan + Outline + Scene stub agents.
+    /// The default P0/P1 registry: Plan + Memory + Outline + Scene stub agents.
     pub fn with_defaults() -> Self {
         let mut registry = Self::new();
         registry.register(StepKind::Plan, Box::new(PlanAgent));
+        registry.register(StepKind::Memory, Box::new(MemoryAgent));
         registry.register(StepKind::Outline, Box::new(OutlineAgent));
         registry.register(StepKind::Scene, Box::new(SceneAgent));
         registry

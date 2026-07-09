@@ -20,12 +20,20 @@ impl Agent for OutlineAgent {
             } else {
                 ctx.synopsis
             };
+            // The Plotter incorporates the Worldbuilder's worldbook into the
+            // first chapter's summary, so the memory -> plot link is real.
+            let worldbook_head: String = ctx.worldbook.chars().take(12).collect();
+            let first_summary = if worldbook_head.is_empty() {
+                synopsis.to_string()
+            } else {
+                format!("{}：{}", worldbook_head, synopsis)
+            };
             let head: String = synopsis.chars().take(16).collect();
             let chapters = vec![
                 ChapterPlan {
                     id: "ch1".to_string(),
                     title: "序章".to_string(),
-                    summary: synopsis.to_string(),
+                    summary: first_summary,
                 },
                 ChapterPlan {
                     id: "ch2".to_string(),
@@ -35,6 +43,7 @@ impl Agent for OutlineAgent {
             ];
             Ok(AgentOutput {
                 synopsis: None,
+                worldbook: None,
                 chapters: Some(chapters),
                 scene: None,
             })
@@ -53,12 +62,15 @@ mod tests {
             prompt: "",
             synopsis: "主角在校园发现异常信号",
             chapters: &[],
+            worldbook: "霓虹学园",
         };
         let out = agent.run(&ctx).await.unwrap();
         let chapters = out.chapters.expect("outline should produce chapters");
         assert_eq!(chapters.len(), 2);
         assert_eq!(chapters[0].id, "ch1");
         assert_eq!(chapters[1].id, "ch2");
+        // The Plotter incorporates the Worldbuilder's worldbook into ch1.
+        assert!(chapters[0].summary.contains("霓虹学园"));
         assert!(chapters[0].summary.contains("异常信号"));
         assert!(out.synopsis.is_none());
     }

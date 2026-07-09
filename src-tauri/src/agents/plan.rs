@@ -23,6 +23,7 @@ impl Agent for PlanAgent {
             let synopsis = format!("【梗概】{}", prompt);
             Ok(AgentOutput {
                 synopsis: Some(synopsis),
+                worldbook: None,
                 chapters: None,
                 scene: None,
             })
@@ -41,6 +42,7 @@ mod tests {
             prompt: "赛博朋克校园恋爱",
             synopsis: "",
             chapters: &[],
+            worldbook: "",
         };
         let out = agent.run(&ctx).await.unwrap();
         assert_eq!(out.synopsis.as_deref(), Some("【梗概】赛博朋克校园恋爱"));
@@ -54,6 +56,7 @@ mod tests {
             prompt: "   ",
             synopsis: "",
             chapters: &[],
+            worldbook: "",
         };
         assert!(agent.run(&ctx).await.is_err());
     }
