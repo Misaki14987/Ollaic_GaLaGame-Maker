@@ -26,6 +26,7 @@ impl Agent for SceneAgent {
             let content = lines.join("\n") + "\n";
             Ok(AgentOutput {
                 synopsis: None,
+                worldbook: None,
                 chapters: None,
                 scene: Some(SceneScript {
                     name: "scene_01.txt".to_string(),
@@ -57,6 +58,7 @@ mod tests {
             prompt: "",
             synopsis: "",
             chapters: &ch,
+            worldbook: "",
         };
         let out = agent.run(&ctx).await.unwrap();
         let scene = out.scene.expect("scene agent should produce a script");
@@ -72,6 +74,7 @@ mod tests {
             prompt: "",
             synopsis: "",
             chapters: &[],
+            worldbook: "",
         };
         assert!(agent.run(&ctx).await.is_err());
     }

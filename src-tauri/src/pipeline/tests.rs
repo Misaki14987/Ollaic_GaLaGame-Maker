@@ -122,6 +122,7 @@ impl Agent for CountingAgent {
 fn synopsis_output(text: &str) -> AgentOutput {
     AgentOutput {
         synopsis: Some(text.to_string()),
+        worldbook: None,
         chapters: None,
         scene: None,
     }
@@ -130,6 +131,7 @@ fn synopsis_output(text: &str) -> AgentOutput {
 fn chapters_output() -> AgentOutput {
     AgentOutput {
         synopsis: None,
+        worldbook: None,
         chapters: Some(vec![
             ChapterPlan {
                 id: "ch1".to_string(),
@@ -288,6 +290,8 @@ async fn runs_two_step_recipe_in_order_and_updates_plan() {
             "run_started",
             "step_started:plan",
             "step_succeeded:plan",
+            "step_started:memory",
+            "step_succeeded:memory",
             "step_started:outline",
             "step_succeeded:outline",
             "step_started:scene",
@@ -296,11 +300,15 @@ async fn runs_two_step_recipe_in_order_and_updates_plan() {
         ]
     );
 
-    // The StoryPlan absorbed both steps' outputs.
+    // The StoryPlan absorbed every step's output.
     let plan = crate::story_plan::load_plan(&project).unwrap().unwrap();
     assert!(plan.synopsis.contains("赛博朋克校园恋爱"));
+    // The Memory (Worldbuilder) step wrote a worldbook derived from the synopsis.
+    assert!(plan.memory.worldbook.contains("赛博朋克校园恋爱"));
     assert_eq!(plan.chapters.len(), 2);
     assert_eq!(plan.chapters[0].id, "ch1");
+    // The Plotter incorporated the worldbook into the first chapter.
+    assert!(plan.chapters[0].summary.contains("赛博朋克校园恋爱"));
 
     // P1 content link: a scene script was written to game/scene/.
     assert_eq!(plan.scenes, vec!["scene_01.txt".to_string()]);
@@ -333,6 +341,7 @@ async fn failed_step_fails_run_and_skips_downstream() {
     agents.register(StepKind::Plan, Box::new(FailingAgent {
         message: "model overload".to_string(),
     }));
+    agents.register(StepKind::Memory, Box::new(crate::agents::MemoryAgent));
     agents.register(StepKind::Outline, Box::new(crate::agents::OutlineAgent));
     agents.register(StepKind::Scene, Box::new(crate::agents::SceneAgent));
     let pipeline = Pipeline::new(agents);
@@ -386,6 +395,7 @@ async fn pause_then_resume_completes_run() {
             output: synopsis_output("【梗概】暂停测试"),
         }),
     );
+    agents.register(StepKind::Memory, Box::new(crate::agents::MemoryAgent));
     agents.register(StepKind::Outline, Box::new(crate::agents::OutlineAgent));
     agents.register(StepKind::Scene, Box::new(crate::agents::SceneAgent));
     let pipeline = Pipeline::new(agents);
@@ -455,6 +465,7 @@ async fn crash_resume_does_not_redo_succeeded_steps() {
             output: synopsis_output("【梗概】崩溃恢复"),
         }),
     );
+    agents.register(StepKind::Memory, Box::new(crate::agents::MemoryAgent));
     agents.register(
         StepKind::Outline,
         Box::new(ControllableAgent {
@@ -553,6 +564,7 @@ async fn skip_step_unblocks_downstream() {
             output: synopsis_output("skipped-plan"),
         }),
     );
+    agents.register(StepKind::Memory, Box::new(crate::agents::MemoryAgent));
     agents.register(StepKind::Outline, Box::new(crate::agents::OutlineAgent));
     agents.register(StepKind::Scene, Box::new(crate::agents::SceneAgent));
     let pipeline = Pipeline::new(agents);
@@ -615,6 +627,7 @@ async fn retry_step_reruns_and_completes() {
             output: synopsis_output("【梗概】重试成功"),
         }),
     );
+    agents.register(StepKind::Memory, Box::new(crate::agents::MemoryAgent));
     agents.register(StepKind::Outline, Box::new(crate::agents::OutlineAgent));
     agents.register(StepKind::Scene, Box::new(crate::agents::SceneAgent));
     let pipeline = Pipeline::new(agents);
@@ -648,6 +661,7 @@ async fn retry_step_reruns_and_completes() {
     let pipeline_for_resume = Pipeline::new({
         let mut a = AgentRegistry::new();
         a.register(StepKind::Plan, Box::new(crate::agents::PlanAgent));
+        a.register(StepKind::Memory, Box::new(crate::agents::MemoryAgent));
         a.register(StepKind::Outline, Box::new(crate::agents::OutlineAgent));
         a.register(StepKind::Scene, Box::new(crate::agents::SceneAgent));
         a

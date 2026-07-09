@@ -12,6 +12,9 @@ pub struct StoryPlan {
     /// One-paragraph synopsis produced by the Plan step.
     #[serde(default)]
     pub synopsis: String,
+    /// Long-form worldbook + glossary produced by the Memory (Worldbuilder) step.
+    #[serde(default)]
+    pub memory: StoryMemory,
     /// Chapter outline produced by the Outline step.
     #[serde(default)]
     pub chapters: Vec<ChapterPlan>,
@@ -30,11 +33,21 @@ impl StoryPlan {
             version: 1,
             prompt: prompt.into(),
             synopsis: String::new(),
+            memory: StoryMemory::default(),
             chapters: Vec::new(),
             scenes: Vec::new(),
             pipeline_runs: Vec::new(),
         }
     }
+}
+
+/// Long-form worldbuilding context produced by the Worldbuilder (Memory) step.
+/// The Plotter (Outline) reads this when building the chapter outline.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct StoryMemory {
+    #[serde(default)]
+    pub worldbook: String,
 }
 
 /// A single chapter in the story outline.

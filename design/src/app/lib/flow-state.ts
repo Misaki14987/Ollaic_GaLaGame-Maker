@@ -18,9 +18,10 @@ export interface FlowState {
   steps: FlowStepView[];
 }
 
-/** The built-in recipe: Plan -> Outline -> Scene. */
+/** The built-in recipe: Plan -> Memory -> Outline -> Scene. */
 export const DEFAULT_RECIPE_STEPS: ReadonlyArray<{ id: string; kind: string }> = [
   { id: 'plan', kind: 'plan' },
+  { id: 'memory', kind: 'memory' },
   { id: 'outline', kind: 'outline' },
   { id: 'scene', kind: 'scene' },
 ];

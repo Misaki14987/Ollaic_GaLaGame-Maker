@@ -1,5 +1,5 @@
 use super::*;
-use crate::story_plan::types::{ChapterPlan, PipelineRunSummary, StoryPlan};
+use crate::story_plan::types::{ChapterPlan, PipelineRunSummary, StoryMemory, StoryPlan};
 use std::fs;
 
 fn fresh_project_dir(name: &str) -> std::path::PathBuf {
@@ -28,6 +28,9 @@ fn plan_round_trips_through_disk() {
                 summary: "追查信号来源，与女主关系推进。".to_string(),
             },
         ],
+        memory: StoryMemory {
+            worldbook: "霓虹学园的世界设定。".to_string(),
+        },
         scenes: vec!["scene_01.txt".to_string()],
         pipeline_runs: vec![PipelineRunSummary {
             run_id: "run_1".to_string(),
@@ -97,6 +100,7 @@ fn refuses_to_save_an_invalid_plan() {
         version: 2,
         prompt: "p".to_string(),
         synopsis: String::new(),
+        memory: StoryMemory::default(),
         chapters: Vec::new(),
         scenes: Vec::new(),
         pipeline_runs: Vec::new(),
