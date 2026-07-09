@@ -1,13 +1,17 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod agents;
 mod ai;
 mod assets;
 mod characters;
 mod matting;
+mod pipeline;
+mod story_plan;
 mod webgal;
 
 use std::path::PathBuf;
 use tauri::Manager;
+use pipeline::commands::Orchestrator;
 use webgal::runtime_manager::{self, RuntimeInfo};
 use webgal::runtime_server::RuntimeServer;
 
@@ -137,6 +141,7 @@ fn main() {
                     }
                 }
             });
+            app.manage(Orchestrator::new());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -218,6 +223,15 @@ fn main() {
             characters::commands::delete_character,
             characters::commands::list_character_names,
             characters::commands::save_characters,
+            // V2 Pipeline (Agent Flow)
+            pipeline::commands::pipeline_start,
+            pipeline::commands::pipeline_pause,
+            pipeline::commands::pipeline_resume,
+            pipeline::commands::pipeline_resume_run,
+            pipeline::commands::pipeline_retry_step,
+            pipeline::commands::pipeline_skip_step,
+            pipeline::commands::pipeline_get_state,
+            pipeline::commands::pipeline_get_plan,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

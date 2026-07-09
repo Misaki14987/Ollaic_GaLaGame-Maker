@@ -1,0 +1,89 @@
+/**
+ * V2 Pipeline types. Mirror the Rust structs in src-tauri/src/pipeline and
+ * src-tauri/src/story_plan. Field names are camelCase to match the Rust
+ * `#[serde(rename_all = "camelCase")]` output (pinned by the
+ * `ipc_contract_serializes_to_camel_case` Rust test).
+ */
+
+export type StepKind =
+  | 'plan'
+  | 'memory'
+  | 'outline'
+  | 'character'
+  | 'scene'
+  | 'asset'
+  | 'lint'
+  | 'review'
+  | 'export'
+  | 'userInput';
+
+export type StepStatus =
+  | 'pending'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'awaitingInput'
+  | 'skipped';
+
+export type RunStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed';
+
+export interface StepDef {
+  id: string;
+  kind: StepKind;
+  dependsOn: string[];
+  agent?: string | null;
+  prompt: string;
+}
+
+export interface StepState {
+  def: StepDef;
+  status: StepStatus;
+  attempt: number;
+  output?: string | null;
+  error?: string | null;
+  startedAt?: number | null;
+  finishedAt?: number | null;
+}
+
+export interface RunState {
+  runId: string;
+  projectPath: string;
+  prompt: string;
+  status: RunStatus;
+  steps: StepState[];
+  startedAt: number;
+  updatedAt: number;
+}
+
+export interface ChapterPlan {
+  id: string;
+  title: string;
+  summary: string;
+}
+
+export interface PipelineRunSummary {
+  runId: string;
+  status: string;
+  startedAt: number;
+  updatedAt: number;
+}
+
+export interface StoryPlan {
+  version: number;
+  prompt: string;
+  synopsis: string;
+  chapters: ChapterPlan[];
+  pipelineRuns: PipelineRunSummary[];
+}
+
+/** A pipeline event streamed on the `pipeline:{runId}` channel (ADR 0055). */
+export type PipelineEvent =
+  | { type: 'runStarted'; runId: string }
+  | { type: 'stepStarted'; runId: string; stepId: string; kind: string }
+  | { type: 'stepSucceeded'; runId: string; stepId: string; output: string | null }
+  | { type: 'stepFailed'; runId: string; stepId: string; error: string }
+  | { type: 'stepSkipped'; runId: string; stepId: string }
+  | { type: 'runPaused'; runId: string }
+  | { type: 'runResumed'; runId: string }
+  | { type: 'runCompleted'; runId: string }
+  | { type: 'runFailed'; runId: string; error: string };

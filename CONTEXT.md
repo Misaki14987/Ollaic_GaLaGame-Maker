@@ -205,6 +205,37 @@ _Avoid_: Partial export, demo export
 
 The production-level standard for generated story text, covering readability, character voice, style consistency, terminology, pacing, foreshadowing, branch motivation, emotional curve, and player choice feedback.
 _Avoid_: Text quality, writing quality
+
+### Stale Asset
+
+A Project asset whose existing binding may no longer match changed story, scene, character, or voice context. It remains in the Project until reused, rebound, regenerated, or removed by the user.
+_Avoid_: Invalid asset, orphan media
+
+### Asset Consistency Task
+
+A suggested regeneration, rebinding, or review task created when related Project assets may no longer share the intended style, character design, voice, or narrative context.
+_Avoid_: Batch regenerate, consistency fix
+
+### Creator Preference
+
+A user-level or project-level preference that influences future Agent Flows, such as writing style, pacing, visual style, voice direction, or common rejection patterns. It must be visible and editable.
+_Avoid_: Hidden memory, personalization
+
+### Local-First Project
+
+A Project whose playable files, assets, Flow history, AI settings, preferences, and generated artifacts are primarily stored and controlled on the user's machine. Cloud services may assist with optional sync or sharing, but they do not own the Project.
+_Avoid_: Cloud project, hosted workspace
+
+### Project Flow
+
+An Agent Flow run that acts on one Project as its single playable content boundary. Batch production may coordinate multiple Project Flows, but one Project Flow does not own multiple Projects.
+_Avoid_: Batch flow, multi-project flow
+
+### Target Engine
+
+The visual novel runtime or export format a Project is produced for. WebGAL is the first and primary Target Engine, while V2 keeps production concepts from being unnecessarily WebGAL-only.
+_Avoid_: Runtime, platform
+
 ### Flow Cost
 
 The estimated and actual provider usage cost for an Agent Flow, Flow Step, or Playability promotion. It is displayed for transparency rather than used as a default execution gate.
