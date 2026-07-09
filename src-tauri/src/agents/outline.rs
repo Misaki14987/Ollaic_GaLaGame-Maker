@@ -36,6 +36,7 @@ impl Agent for OutlineAgent {
             Ok(AgentOutput {
                 synopsis: None,
                 chapters: Some(chapters),
+                scene: None,
             })
         })
     }

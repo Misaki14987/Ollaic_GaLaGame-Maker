@@ -15,6 +15,9 @@ pub struct StoryPlan {
     /// Chapter outline produced by the Outline step.
     #[serde(default)]
     pub chapters: Vec<ChapterPlan>,
+    /// Scene files written to `game/scene/` by Scene steps (P1 content link).
+    #[serde(default)]
+    pub scenes: Vec<String>,
     /// History of pipeline runs against this plan (newest last).
     #[serde(default)]
     pub pipeline_runs: Vec<PipelineRunSummary>,
@@ -28,6 +31,7 @@ impl StoryPlan {
             prompt: prompt.into(),
             synopsis: String::new(),
             chapters: Vec::new(),
+            scenes: Vec::new(),
             pipeline_runs: Vec::new(),
         }
     }

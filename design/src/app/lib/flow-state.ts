@@ -18,10 +18,11 @@ export interface FlowState {
   steps: FlowStepView[];
 }
 
-/** The P0 built-in recipe: Plan -> Outline. */
+/** The built-in recipe: Plan -> Outline -> Scene. */
 export const DEFAULT_RECIPE_STEPS: ReadonlyArray<{ id: string; kind: string }> = [
   { id: 'plan', kind: 'plan' },
   { id: 'outline', kind: 'outline' },
+  { id: 'scene', kind: 'scene' },
 ];
 
 export function initialFlowState(): FlowState {

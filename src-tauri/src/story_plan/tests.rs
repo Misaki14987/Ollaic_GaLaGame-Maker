@@ -28,6 +28,7 @@ fn plan_round_trips_through_disk() {
                 summary: "追查信号来源，与女主关系推进。".to_string(),
             },
         ],
+        scenes: vec!["scene_01.txt".to_string()],
         pipeline_runs: vec![PipelineRunSummary {
             run_id: "run_1".to_string(),
             status: "completed".to_string(),
@@ -97,6 +98,7 @@ fn refuses_to_save_an_invalid_plan() {
         prompt: "p".to_string(),
         synopsis: String::new(),
         chapters: Vec::new(),
+        scenes: Vec::new(),
         pipeline_runs: Vec::new(),
     };
     let err = save_plan(&project, &plan).unwrap_err();

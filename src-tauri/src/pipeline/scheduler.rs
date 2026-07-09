@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use tokio::sync::{Mutex, Notify};
 
-use crate::agents::{AgentContext, AgentError, AgentOutput, AgentRegistry};
+use crate::agents::{AgentContext, AgentError, AgentOutput, AgentRegistry, SceneScript};
 use crate::pipeline::dsl::{FlowRecipe, StepKind};
 use crate::pipeline::events::{EventSink, PipelineEvent};
 use crate::pipeline::state::{Clock, RunState, RunStatus, StepStatus};
@@ -268,7 +268,17 @@ impl Pipeline {
                 // on resume, then re-run. P0 stub agents are deterministic, so
                 // re-applying is idempotent. P1 LLM agents need reconciliation
                 // (e.g. output versioning) to avoid double-applying - see ADR 0054.
-                apply_output(&mut plan, kind, out.clone());
+                apply_output(&mut plan, kind, &out);
+                if kind == StepKind::Scene {
+                    if let Some(scene) = &out.scene {
+                        if let Err(e) = write_scene_file(project_path, scene) {
+                            eprintln!(
+                                "[pipeline] failed to write scene {}: {}",
+                                scene.name, e
+                            );
+                        }
+                    }
+                }
                 let _ = story_plan::save_plan(project_path, &plan);
 
                 let mut state = handle.state.lock().await;
@@ -340,22 +350,36 @@ impl Pipeline {
 }
 
 /// Apply an agent's output to the in-memory StoryPlan.
-fn apply_output(plan: &mut StoryPlan, kind: StepKind, out: AgentOutput) {
+fn apply_output(plan: &mut StoryPlan, kind: StepKind, out: &AgentOutput) {
     match kind {
         StepKind::Plan => {
-            if let Some(synopsis) = out.synopsis {
-                plan.synopsis = synopsis;
+            if let Some(synopsis) = &out.synopsis {
+                plan.synopsis = synopsis.clone();
             }
         }
         StepKind::Outline => {
-            if let Some(chapters) = out.chapters {
-                plan.chapters = chapters;
+            if let Some(chapters) = &out.chapters {
+                plan.chapters = chapters.clone();
+            }
+        }
+        StepKind::Scene => {
+            if let Some(scene) = &out.scene {
+                if !plan.scenes.contains(&scene.name) {
+                    plan.scenes.push(scene.name.clone());
+                }
             }
         }
         _ => {
             // Future slices produce memory/characters/assets/etc.
         }
     }
+}
+
+/// Write a generated scene script to `<project>/game/scene/<name>`.
+fn write_scene_file(project_path: &Path, scene: &SceneScript) -> std::io::Result<()> {
+    let dir = project_path.join("game").join("scene");
+    std::fs::create_dir_all(&dir)?;
+    std::fs::write(dir.join(&scene.name), &scene.content)
 }
 
 fn serialize_output(out: &AgentOutput) -> String {

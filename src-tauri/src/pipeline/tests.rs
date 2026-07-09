@@ -123,6 +123,7 @@ fn synopsis_output(text: &str) -> AgentOutput {
     AgentOutput {
         synopsis: Some(text.to_string()),
         chapters: None,
+        scene: None,
     }
 }
 
@@ -141,6 +142,7 @@ fn chapters_output() -> AgentOutput {
                 summary: "s2".to_string(),
             },
         ]),
+        scene: None,
     }
 }
 
@@ -288,6 +290,8 @@ async fn runs_two_step_recipe_in_order_and_updates_plan() {
             "step_succeeded:plan",
             "step_started:outline",
             "step_succeeded:outline",
+            "step_started:scene",
+            "step_succeeded:scene",
             "run_completed",
         ]
     );
@@ -297,6 +301,14 @@ async fn runs_two_step_recipe_in_order_and_updates_plan() {
     assert!(plan.synopsis.contains("赛博朋克校园恋爱"));
     assert_eq!(plan.chapters.len(), 2);
     assert_eq!(plan.chapters[0].id, "ch1");
+
+    // P1 content link: a scene script was written to game/scene/.
+    assert_eq!(plan.scenes, vec!["scene_01.txt".to_string()]);
+    let scene_path = project.join("game").join("scene").join("scene_01.txt");
+    assert!(scene_path.is_file(), "scene file should be written");
+    let scene_text = std::fs::read_to_string(&scene_path).unwrap();
+    assert!(scene_text.contains("intro:自动生成的场景;"));
+    assert!(scene_text.contains("序章"));
 
     // Run history was recorded.
     assert_eq!(plan.pipeline_runs.len(), 1);
@@ -322,6 +334,7 @@ async fn failed_step_fails_run_and_skips_downstream() {
         message: "model overload".to_string(),
     }));
     agents.register(StepKind::Outline, Box::new(crate::agents::OutlineAgent));
+    agents.register(StepKind::Scene, Box::new(crate::agents::SceneAgent));
     let pipeline = Pipeline::new(agents);
 
     let handle = pipeline
@@ -374,6 +387,7 @@ async fn pause_then_resume_completes_run() {
         }),
     );
     agents.register(StepKind::Outline, Box::new(crate::agents::OutlineAgent));
+    agents.register(StepKind::Scene, Box::new(crate::agents::SceneAgent));
     let pipeline = Pipeline::new(agents);
 
     let handle = pipeline
@@ -448,6 +462,7 @@ async fn crash_resume_does_not_redo_succeeded_steps() {
             output: chapters_output(),
         }),
     );
+    agents.register(StepKind::Scene, Box::new(crate::agents::SceneAgent));
     let pipeline = Arc::new(Pipeline::new(agents));
 
     let handle = pipeline
@@ -539,6 +554,7 @@ async fn skip_step_unblocks_downstream() {
         }),
     );
     agents.register(StepKind::Outline, Box::new(crate::agents::OutlineAgent));
+    agents.register(StepKind::Scene, Box::new(crate::agents::SceneAgent));
     let pipeline = Pipeline::new(agents);
 
     let handle = pipeline
@@ -558,28 +574,28 @@ async fn skip_step_unblocks_downstream() {
     })
     .await;
 
-    // While Plan is running, skip the still-pending Outline step. (Skipping a
-    // running step would need agent cancellation; P0 skip targets pending steps.)
-    handle.skip_step(&project, "outline", sink.as_ref(), &SystemClock).await.unwrap();
+    // While Plan is running, skip the still-pending Scene step (the user opts
+    // out of scene generation). Plan then Outline run; Scene is never started.
+    handle.skip_step(&project, "scene", sink.as_ref(), &SystemClock).await.unwrap();
 
-    // Let Plan finish; Outline is Skipped, so the run completes without it.
+    // Let Plan finish; Outline runs, Scene is skipped, the run completes.
     plan_gate.notify_one();
     timeout(Duration::from_secs(3), task).await.expect("run did not complete");
 
     let seq = labels(&sink.events());
-    assert!(seq.contains(&"step_skipped:outline".to_string()));
+    assert!(seq.contains(&"step_skipped:scene".to_string()));
     assert!(
-        !seq.iter().any(|s| s == "step_started:outline"),
-        "outline must not run: {:?}",
+        !seq.iter().any(|s| s == "step_started:scene"),
+        "scene must not run: {:?}",
         seq
     );
+    assert!(seq.contains(&"step_started:outline".to_string()));
     assert!(seq.contains(&"run_completed".to_string()));
-    // Outline ran even though Plan was skipped is not the case here; Plan ran
-    // and Outline was skipped, yet the run completes.
     let run_state = crate::pipeline::load_run_state(&project, "run_skip").unwrap().unwrap();
     assert_eq!(run_state.status, RunStatus::Completed);
     assert_eq!(run_state.find_step("plan").unwrap().status, StepStatus::Succeeded);
-    assert_eq!(run_state.find_step("outline").unwrap().status, StepStatus::Skipped);
+    assert_eq!(run_state.find_step("outline").unwrap().status, StepStatus::Succeeded);
+    assert_eq!(run_state.find_step("scene").unwrap().status, StepStatus::Skipped);
 }
 
 // ---------- scheduler: retry ----------
@@ -600,6 +616,7 @@ async fn retry_step_reruns_and_completes() {
         }),
     );
     agents.register(StepKind::Outline, Box::new(crate::agents::OutlineAgent));
+    agents.register(StepKind::Scene, Box::new(crate::agents::SceneAgent));
     let pipeline = Pipeline::new(agents);
 
     let handle = pipeline
@@ -632,6 +649,7 @@ async fn retry_step_reruns_and_completes() {
         let mut a = AgentRegistry::new();
         a.register(StepKind::Plan, Box::new(crate::agents::PlanAgent));
         a.register(StepKind::Outline, Box::new(crate::agents::OutlineAgent));
+        a.register(StepKind::Scene, Box::new(crate::agents::SceneAgent));
         a
     });
     let resume_task = tokio::spawn(async move {

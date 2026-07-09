@@ -5,6 +5,7 @@
 
 pub mod outline;
 pub mod plan;
+pub mod scene;
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -17,6 +18,7 @@ use crate::story_plan::types::ChapterPlan;
 
 pub use outline::OutlineAgent;
 pub use plan::PlanAgent;
+pub use scene::SceneAgent;
 
 /// The slice of StoryPlan context an Agent may read. Grows per slice as new
 /// agents need more context (worldbook, characters, branches, ...).
@@ -35,6 +37,17 @@ pub struct AgentOutput {
     pub synopsis: Option<String>,
     #[serde(default)]
     pub chapters: Option<Vec<ChapterPlan>>,
+    #[serde(default)]
+    pub scene: Option<SceneScript>,
+}
+
+/// A generated WebGAL scene script. The scheduler writes `content` to
+/// `<project>/game/scene/<name>` - this is the "readable script" output of
+/// the P1 content link (V2 doc section 6).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SceneScript {
+    pub name: String,
+    pub content: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -60,11 +73,12 @@ impl AgentRegistry {
         }
     }
 
-    /// The default P0 registry: Plan + Outline stub agents.
+    /// The default P0/P1 registry: Plan + Outline + Scene stub agents.
     pub fn with_defaults() -> Self {
         let mut registry = Self::new();
         registry.register(StepKind::Plan, Box::new(PlanAgent));
         registry.register(StepKind::Outline, Box::new(OutlineAgent));
+        registry.register(StepKind::Scene, Box::new(SceneAgent));
         registry
     }
 
