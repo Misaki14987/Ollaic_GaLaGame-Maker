@@ -142,12 +142,14 @@ impl FlowRecipe {
     }
 }
 
-/// A default two-step recipe: `Plan` then `Outline` (depends on `Plan`).
-/// This is the P0 built-in Flow.
+/// The default built-in recipe: `Plan` -> `Outline` -> `Scene`
+/// (Plan: brief->synopsis; Outline: synopsis->chapters; Scene: chapters->
+/// a WebGAL scene script written to game/scene/). This is the P1 content link.
 pub fn default_recipe() -> FlowRecipe {
     FlowRecipe::new()
         .step(StepDef::new("plan", StepKind::Plan))
         .step(StepDef::new("outline", StepKind::Outline).depends_on("plan"))
+        .step(StepDef::new("scene", StepKind::Scene).depends_on("outline"))
 }
 
 impl StepDef {

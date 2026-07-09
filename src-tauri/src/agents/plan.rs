@@ -24,6 +24,7 @@ impl Agent for PlanAgent {
             Ok(AgentOutput {
                 synopsis: Some(synopsis),
                 chapters: None,
+                scene: None,
             })
         })
     }
