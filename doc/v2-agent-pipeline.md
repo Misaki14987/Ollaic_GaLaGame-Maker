@@ -30,6 +30,12 @@ V2 的产品定位是 **AI Galgame Production Studio**：用户通过可复用�
 
 目标态是 **Studio Complete**：应用不仅生成一次性的可玩 Demo，而是支持把项目推进到接近发布候选的完整生产状态，并能在后续持续维护、重跑、替换资产、审阅修复、预览和导出。
 
+V2 是 **local-first**：Project、素材、Flow history、AI 配置、Creator Preference 和 Flow Artifact 默认存储并受控于本机。云端能力只作为后续可选同步、备份、分享或模板分发，不作为项目事实源。
+
+Agent Flow 以单 Project 为核心边界。未来可以有批量生产能力，但批量只是编排多个 Project Flow；单个 Flow 不同时拥有多个 Project 的可玩内容事实源。
+
+V2 是 WebGAL-first：WebGAL 是首发和当前主要 Target Engine。StoryPlan、Flow Template、Asset Coverage、Narrative Quality 等生产概念尽量保持引擎无关；WebGAL 语法、运行时预览、导出和引擎专项 Quality Gate 放在 Target Engine 边界内。
+
 ### 用户入口：Prompt-first，Template-driven
 
 用户先输入 **Production Brief**（题材、类型、篇幅、女主数、语言、资产/配音要求等），系统将 brief 匹配到一个可审阅的 **Template Match**：
@@ -41,6 +47,10 @@ V2 的产品定位是 **AI Galgame Production Studio**：用户通过可复用�
 5. 展示所需 **Model Capability** 与本地 provider 配置之间的缺口；
 6. 展示 Content Rating / provider policy risk 与模板兼容性；
 7. 允许用户更换模板、调整参数、配置模型、接受降级、禁用模块、覆盖内容分级建议、修改 pending 依赖后再运行。
+
+Template Match 与后续 Agent Flow 可以参考 Creator Preference：用户级偏好影响新项目默认值，项目级偏好影响当前作品的风格、节奏、视觉方向、音色和常见拒绝模式。偏好必须可见、可编辑，不作为隐藏记忆黑箱。
+
+Creator Preference 可以由用户手动填写，也可以由系统根据接受、拒绝、重生成、手动编辑等行为提出建议；建议必须经用户确认后才保存，不能隐藏自动生效。
 
 ### 题材与类型
 
@@ -77,6 +87,10 @@ V2 不把「可玩」视为单一成功状态，而是分为三档：
 影响范围优先基于引用追踪精确计算：例如 scene 文件改动影响对应 Scene Step 及其下游资产、审查、导出检查；素材或角色改动影响引用它们的 scene 和相关 Quality Gate。若无法可靠追踪影响范围，FlowBoard 必须保守地扩大 stale 范围。
 
 Flow 运行中使用分区锁：正在运行的 step 涉及的 scene / asset / character / record 暂时只读，其他不相关内容仍可编辑。用户对未锁定内容的修改会按 Flow Impact 标记 stale，避免全项目锁死，也避免与自动写入产生竞态。
+
+当章节、scene、角色设定或对白被重写时，相关资产和语音不会被自动删除；系统基于引用追踪标记为 Stale Asset，并提供复用、重绑、重生成或用户删除的路径，避免旧媒体悄悄挂在新剧情上。
+
+当用户替换角色设计、视觉风格、音色或其他资产定义上下文时，系统生成 Asset Consistency Task 队列，建议哪些表情、CG、语音或场景资产需要重生成 / 重绑 / 复查；用户选择执行范围，不自动覆盖所有相关资产。
 
 Asset Coverage 随 Playability Level 提供默认值，并可作为 Template Parameter 调整：Draft Playable 可以只生成占位或关键资产，Review Playable 应覆盖主要角色/场景，Release Candidate 才追求完整背景、立绘、语音或音乐覆盖。
 
@@ -276,6 +290,8 @@ FlowBoard 的主按钮随当前状态变化：初始为「生成草稿试玩」�
 **验收**：每次 Export 前自动跑；阻断性问题不可绕过；关键 Quality Gate 如果使用了降级能力，不能显示为完全通过，必须要求用户补配能力、重跑或显式接受风险进入非发布级预览。
 
 Narrative Quality 目标是生产级：不只检查文本可读，还要检查角色口吻、风格一致、术语一致、节奏、伏笔、分支动机、情绪曲线和玩家选择反馈。Draft Playable 可先做轻量检查，Review Playable / Release Candidate 逐步加严。
+
+Release Candidate 可以被结构性叙事问题阻断，例如分支缺乏动机、角色严重 OOC、必要伏笔未回收、情绪弧断裂、玩家选择缺少反馈等；主观审美建议默认作为 warning。Flow Template 可在系统质量门分类内调整阈值。
 
 ---
 
