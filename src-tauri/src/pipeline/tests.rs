@@ -949,6 +949,61 @@ async fn stop_discards_in_flight_output_and_persists_cancelled() {
 }
 
 #[tokio::test]
+async fn retry_after_stop_ignores_the_cancelled_attempt_result() {
+    let project = fresh_project("stop_retry");
+    let sink = Arc::new(RecordingSink::new());
+    let clock = StepClock::new();
+    let gate = Arc::new(Notify::new());
+    let mut agents = AgentRegistry::new();
+    agents.register(
+        StepKind::Plan,
+        Box::new(ControllableAgent {
+            gate: gate.clone(),
+            output: synopsis_output("accepted only on retry"),
+        }),
+    );
+    agents.register(StepKind::Outline, Box::new(crate::agents::OutlineAgent));
+    let pipeline = Arc::new(Pipeline::new(agents));
+    let handle = pipeline
+        .create_run(&project, "run_stop_retry", "brief", &default_recipe(), &clock, sink.as_ref())
+        .unwrap();
+    let task = {
+        let pipeline = pipeline.clone();
+        let project = project.clone();
+        let handle = handle.clone();
+        let sink = sink.clone();
+        tokio::spawn(async move {
+            pipeline.execute(&project, handle, sink.as_ref(), &SystemClock).await;
+        })
+    };
+    wait_until(&sink, |events| {
+        events.iter().filter(|event| matches!(event, PipelineEvent::StepStarted { step_id, .. } if step_id == "plan")).count() == 1
+    })
+    .await;
+
+    handle.stop(&project, sink.as_ref(), &clock).await.unwrap();
+    handle.retry_step(&project, "plan", sink.as_ref(), &clock).await.unwrap();
+    gate.notify_one();
+    wait_until(&sink, |events| {
+        events.iter().filter(|event| matches!(event, PipelineEvent::StepStarted { step_id, .. } if step_id == "plan")).count() == 2
+    })
+    .await;
+    gate.notify_one();
+    timeout(Duration::from_secs(3), task)
+        .await
+        .expect("retried driver did not finish")
+        .unwrap();
+
+    let state = handle.state().lock().await;
+    assert_eq!(state.status, RunStatus::Completed);
+    let history = &state.find_step("plan").unwrap().history;
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[0].error.as_deref(), Some("cancelled before completion"));
+    assert!(history[0].output.is_none());
+    assert!(history[1].output.is_some());
+}
+
+#[tokio::test]
 async fn step_once_runs_one_ready_step_then_pauses() {
     let project = fresh_project("step_once");
     let sink = Arc::new(RecordingSink::new());
