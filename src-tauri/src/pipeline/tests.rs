@@ -1112,6 +1112,39 @@ fn a_new_run_updates_the_story_plan_production_brief() {
     );
 }
 
+#[test]
+fn failed_run_creation_restores_the_previous_production_brief() {
+    let project = fresh_project("brief_rollback");
+    let sink = RecordingSink::new();
+    let clock = StepClock::new();
+    let pipeline = Pipeline::with_default_agents();
+    pipeline.create_run(&project, "run_old", "old brief", &default_recipe(), &clock, &sink).unwrap();
+    let pipeline_dir = project.join(".ollaic").join("pipeline");
+    std::fs::remove_dir_all(&pipeline_dir).unwrap();
+    std::fs::write(&pipeline_dir, "blocks run persistence").unwrap();
+
+    assert!(pipeline.create_run(&project, "run_new", "new brief", &default_recipe(), &clock, &sink).is_err());
+    assert_eq!(crate::story_plan::load_plan(&project).unwrap().unwrap().prompt, "old brief");
+}
+
+#[tokio::test]
+async fn run_history_can_be_pinned_and_cleared_when_not_running() {
+    let project = fresh_project("history_controls");
+    let sink = RecordingSink::new();
+    let clock = StepClock::new();
+    let pipeline = Pipeline::with_default_agents();
+    let handle = pipeline.create_run(
+        &project, "run_history_controls", "brief", &default_recipe(), &clock, &sink,
+    ).unwrap();
+    pipeline.execute(&project, handle.clone(), &sink, &clock).await;
+
+    handle.set_pinned(&project, true, &clock).await.unwrap();
+    assert!(handle.state().lock().await.pinned);
+    assert!(handle.state().lock().await.steps.iter().any(|step| !step.history.is_empty()));
+    handle.clear_history(&project, &clock).await.unwrap();
+    assert!(handle.state().lock().await.steps.iter().all(|step| step.history.is_empty()));
+}
+
 #[tokio::test]
 async fn edited_step_prompt_is_used_by_retry() {
     let project = fresh_project("prompt_retry");

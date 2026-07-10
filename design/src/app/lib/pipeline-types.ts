@@ -68,6 +68,7 @@ export interface RunState {
   steps: StepState[];
   startedAt: number;
   updatedAt: number;
+  pinned: boolean;
 }
 
 export interface ChapterPlan {
