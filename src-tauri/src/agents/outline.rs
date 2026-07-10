@@ -19,6 +19,19 @@ struct OutlineResponse {
     branches: BranchGraph,
 }
 
+fn fill_missing_summaries(response: &mut OutlineResponse, synopsis: &str) {
+    for chapter in &mut response.chapters {
+        if chapter.summary.trim().is_empty() {
+            chapter.summary = format!("章节“{}”围绕故事主线继续推进：{}", chapter.title, synopsis);
+        }
+    }
+    for scene in &mut response.scene_plans {
+        if scene.summary.trim().is_empty() {
+            scene.summary = format!("围绕“{}”展开，推进主线冲突与人物关系。", scene.title);
+        }
+    }
+}
+
 impl Agent for OutlineAgent {
     fn run<'a>(
         &'a self,
@@ -37,14 +50,19 @@ impl Agent for OutlineAgent {
                 "stepInstruction": ctx.instruction,
                 "requirements": "生成 3 章、至少 5 个 scene。入口 scene 的 file 必须是 start.txt；其他 file 只能是无路径的 .txt 文件名。scene id 唯一，chapterId 必须引用章节 id。branches.entryScene 和每条 edge 的 from/to 使用 scene id，至少包含一次有 choice 文本的分支。"
             });
-            if let Some(routed) = generate_structured::<OutlineResponse>(
+            if let Some(mut routed) = generate_structured::<OutlineResponse>(
                 "Plotter / 剧情结构",
-                "输出可执行的章节、场景卡和分支拓扑。JSON 字段为 chapters、scenePlans、branches。",
+                concat!(
+                    "输出可执行的章节、场景卡和分支拓扑。严格使用 JSON：",
+                    r#"{"chapters":[{"id":"ch1","title":"...","summary":"..."}],"scenePlans":[{"id":"opening","file":"start.txt","chapterId":"ch1","title":"...","summary":"...","characterIds":["protagonist"]}],"branches":{"entryScene":"opening","edges":[{"from":"opening","to":"next_scene","choice":null}]}}"#,
+                    "。每个 chapter 和 scenePlan 都必须包含非空 summary。"
+                ),
                 &input,
                 ctx.allow_local_fallback,
             )
             .await?
             {
+                fill_missing_summaries(&mut routed.value, synopsis);
                 if routed.value.chapters.is_empty() || routed.value.scene_plans.len() < 2 {
                     return Err(AgentError(
                         "Plotter returned too little story structure".to_string(),
@@ -182,6 +200,21 @@ fn edge(from: &str, to: &str, choice: Option<&str>) -> BranchEdge {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_response_without_summaries_does_not_abort_plotter() {
+        let response = r#"{
+            "chapters":[{"id":"ch1","title":"序章"}],
+            "scenePlans":[{"id":"opening","file":"start.txt","chapterId":"ch1","title":"相遇"}],
+            "branches":{"entryScene":"","edges":[]}
+        }"#;
+
+        let mut parsed: OutlineResponse =
+            serde_json::from_str(response).expect("missing summary should be recoverable");
+        fill_missing_summaries(&mut parsed, "校园悬疑");
+        assert!(!parsed.chapters[0].summary.is_empty());
+        assert!(!parsed.scene_plans[0].summary.is_empty());
+    }
 
     #[tokio::test]
     async fn outline_agent_produces_two_chapters_from_synopsis() {
