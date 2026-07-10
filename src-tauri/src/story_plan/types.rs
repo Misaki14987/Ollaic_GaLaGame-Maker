@@ -121,6 +121,7 @@ pub struct BranchEdge {
 #[serde(rename_all = "camelCase")]
 pub struct SceneDraft {
     pub scene_id: String,
+    #[serde(default)]
     pub title: String,
     #[serde(default)]
     pub beats: Vec<DialogueBeat>,
