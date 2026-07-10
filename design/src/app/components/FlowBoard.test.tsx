@@ -5,26 +5,49 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import * as React from 'react';
 import type { PipelineEvent, RunState } from '../lib/pipeline-types';
+import { flowLayoutStorageKey } from '../lib/flow-layout';
 import { FlowBoard } from './FlowBoard';
 
 // React Flow's real renderer needs DOM measurements jsdom doesn't provide.
 // Mock it as a passthrough that renders each node through its `nodeTypes`
 // component, so we test our wiring + StepNode, not the library.
 vi.mock('reactflow', () => ({
-  default: ({ nodes, nodeTypes, onNodeClick }: { nodes: any[]; nodeTypes: Record<string, any>; onNodeClick?: Function }) =>
+  default: ({ nodes, edges, nodeTypes, onNodeClick, onNodesChange, onNodeDragStop, onEdgesDelete }: { nodes: any[]; edges: any[]; nodeTypes: Record<string, any>; onNodeClick?: Function; onNodesChange?: Function; onNodeDragStop?: Function; onEdgesDelete?: Function }) =>
     React.createElement(
       'div',
       { 'data-testid': 'reactflow-mock' },
-      nodes.map((n) =>
-        nodeTypes?.[n.type]
-          ? React.createElement(
-            'button',
-            { key: n.id, 'aria-label': `open-${n.id}`, onClick: (event) => onNodeClick?.(event, n) },
-            React.createElement(nodeTypes[n.type], { data: n.data }),
-          )
-          : null,
-      ),
+      ...nodes.flatMap((n) => nodeTypes?.[n.type] ? [
+        React.createElement(
+          'button',
+          { key: `open-${n.id}`, 'aria-label': `open-${n.id}`, onClick: (event) => onNodeClick?.(event, n) },
+          React.createElement(nodeTypes[n.type], { data: n.data }),
+        ),
+        React.createElement('button', {
+          key: `move-${n.id}`,
+          'aria-label': `move-${n.id}`,
+          onClick: () => {
+            const moved = { ...n, position: { x: 410, y: 220 } };
+            onNodesChange?.([{ id: n.id, type: 'position', position: moved.position }]);
+            onNodeDragStop?.({}, moved);
+          },
+        }),
+      ] : []),
+      edges[0] ? React.createElement('button', {
+        key: 'delete-edge',
+        'aria-label': 'delete-first-edge',
+        onClick: () => onEdgesDelete?.([edges[0]]),
+      }) : null,
     ),
+  useNodesState: (initialNodes: any[]) => {
+    const [nodes, setNodes] = React.useState(initialNodes);
+    const onNodesChange = React.useCallback((changes: any[]) => {
+      setNodes((current: any[]) => current.map((node) => {
+        const change = changes.find((candidate) => candidate.id === node.id);
+        return change?.position ? { ...node, position: change.position } : node;
+      }));
+    }, []);
+    return [nodes, setNodes, onNodesChange];
+  },
   Handle: () => null,
   Background: () => null,
   Controls: () => null,
@@ -68,6 +91,7 @@ function runState(status: RunState['status'] = 'running'): RunState {
 }
 
 beforeEach(() => {
+  localStorage.clear();
   lastListenHandler = null;
   mockedInvoke.mockReset();
   mockedListen.mockReset();
@@ -129,7 +153,7 @@ describe('FlowBoard', () => {
     expect(stepStatus('outline')).toBe('succeeded');
 
     emit({ type: 'runCompleted', runId: 'run_1' });
-    expect(screen.getByTestId('flow-run-status').textContent).toBe('completed');
+    expect(screen.getByTestId('flow-run-status')).toHaveTextContent('已完成');
   });
 
   it('disables run while the brief is empty', () => {
@@ -167,7 +191,7 @@ describe('FlowBoard', () => {
 
     emit({ type: 'stepStarted', runId: 'run_1', stepId: 'plan', kind: 'plan' });
     emit({ type: 'runPaused', runId: 'run_1' });
-    expect(screen.getByRole('button', { name: '续跑' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '继续运行' })).toBeInTheDocument();
   });
 
   it('hydrates completed state when fast steps finished before event subscription', async () => {
@@ -183,7 +207,7 @@ describe('FlowBoard', () => {
     await user.type(screen.getByLabelText('production brief'), 'x');
     await user.click(screen.getByRole('button', { name: '创建流程' }));
 
-    await vi.waitFor(() => expect(screen.getByTestId('flow-run-status')).toHaveTextContent('completed'));
+    await vi.waitFor(() => expect(screen.getByTestId('flow-run-status')).toHaveTextContent('已完成'));
     expect(stepStatus('plan')).toBe('succeeded');
     expect(stepStatus('outline')).toBe('succeeded');
   });
@@ -196,7 +220,7 @@ describe('FlowBoard', () => {
     const user = userEvent.setup();
     render(<FlowBoard projectPath="/tmp/proj" />);
 
-    const resume = await screen.findByRole('button', { name: '续跑' });
+    const resume = await screen.findByRole('button', { name: '恢复运行' });
     await user.click(resume);
 
     expect(mockedInvoke).toHaveBeenCalledWith('pipeline_resume_run', {
@@ -226,5 +250,119 @@ describe('FlowBoard', () => {
       stepId: 'plan',
       projectPath: '/tmp/proj',
     });
+  });
+
+  it('persists a dragged node position for the current project and run', async () => {
+    const user = userEvent.setup();
+    render(<FlowBoard projectPath="/tmp/proj" />);
+
+    await user.click(await screen.findByRole('button', { name: 'move-plan' }));
+
+    expect(JSON.parse(localStorage.getItem(flowLayoutStorageKey('/tmp/proj', null)) ?? '{}')).toMatchObject({
+      plan: { x: 410, y: 220 },
+    });
+  });
+
+  it('supports dependency deletion while a prepared run is locally paused', async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'pipeline_start') return Promise.resolve('run_1' as unknown);
+      if (cmd === 'pipeline_get_state') return Promise.resolve(runState('paused') as unknown);
+      if (cmd === 'pipeline_list_runs') return Promise.resolve([] as unknown);
+      return Promise.resolve(undefined);
+    });
+    const user = userEvent.setup();
+    render(<FlowBoard projectPath="/tmp/proj" />);
+
+    await user.type(screen.getByLabelText('production brief'), 'x');
+    await user.click(screen.getByRole('button', { name: '创建流程' }));
+    await user.click(await screen.findByRole('button', { name: 'delete-first-edge' }));
+
+    expect(mockedInvoke).toHaveBeenCalledWith('pipeline_update_dependencies', {
+      runId: 'run_1',
+      stepId: 'outline',
+      dependsOn: [],
+    });
+  });
+
+  it('exposes stop and single-step execution as deterministic controls', async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'pipeline_start') return Promise.resolve('run_1' as unknown);
+      if (cmd === 'pipeline_get_state') return Promise.resolve(runState('paused') as unknown);
+      if (cmd === 'pipeline_list_runs') return Promise.resolve([] as unknown);
+      return Promise.resolve(undefined);
+    });
+    const user = userEvent.setup();
+    render(<FlowBoard projectPath="/tmp/proj" />);
+
+    await user.type(screen.getByLabelText('production brief'), 'x');
+    await user.click(screen.getByRole('button', { name: '创建流程' }));
+    await user.click(await screen.findByRole('button', { name: '单步' }));
+    expect(mockedInvoke).toHaveBeenCalledWith('pipeline_step_once', {
+      runId: 'run_1',
+      projectPath: '/tmp/proj',
+    });
+
+    emit({ type: 'runResumed', runId: 'run_1' });
+    await user.click(screen.getByRole('button', { name: '停止' }));
+    expect(mockedInvoke).toHaveBeenCalledWith('pipeline_stop', { runId: 'run_1' });
+  });
+
+  it('edits a step prompt and reruns it from the inspector', async () => {
+    const failed = runState('failed');
+    failed.steps[0].status = 'failed';
+    failed.steps[0].def.prompt = '旧提示词';
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'pipeline_list_runs') return Promise.resolve([failed] as unknown);
+      if (cmd === 'pipeline_get_state') return Promise.resolve(failed as unknown);
+      return Promise.resolve(undefined);
+    });
+    const user = userEvent.setup();
+    render(<FlowBoard projectPath="/tmp/proj" />);
+
+    await user.click(await screen.findByRole('button', { name: 'open-plan' }));
+    const promptEditor = screen.getByLabelText('plan 步骤 Prompt');
+    await user.clear(promptEditor);
+    await user.type(promptEditor, '突出女主冲突与选择');
+    await user.click(screen.getByRole('button', { name: '保存并重跑' }));
+
+    expect(mockedInvoke).toHaveBeenCalledWith('pipeline_update_step_prompt', {
+      runId: 'run_1',
+      stepId: 'plan',
+      prompt: '突出女主冲突与选择',
+      projectPath: '/tmp/proj',
+    });
+    expect(mockedInvoke).toHaveBeenCalledWith('pipeline_retry_step', {
+      runId: 'run_1',
+      stepId: 'plan',
+      projectPath: '/tmp/proj',
+    });
+  });
+
+  it('shows StoryPlan summary and a recoverable loading error', async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'pipeline_list_runs') return Promise.reject(new Error('disk unavailable'));
+      return Promise.resolve(undefined);
+    });
+    const user = userEvent.setup();
+    render(<FlowBoard projectPath="/tmp/proj" />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('disk unavailable');
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'pipeline_list_runs') return Promise.resolve([runState('completed')] as unknown);
+      if (cmd === 'pipeline_get_plan') return Promise.resolve({
+        version: 2,
+        prompt: 'brief',
+        synopsis: '两位创作者在共同制作游戏时重新理解彼此。',
+        memory: { worldbook: '' },
+        chapters: [{ id: 'c1', title: '重逢', summary: '' }],
+        scenes: ['scene-1'],
+        pipelineRuns: [],
+      } as unknown);
+      return Promise.resolve(undefined);
+    });
+    await user.click(screen.getByRole('button', { name: '重试加载' }));
+
+    expect(await screen.findByText('两位创作者在共同制作游戏时重新理解彼此。')).toBeInTheDocument();
+    expect(screen.getByText('1 章 / 1 场景')).toBeInTheDocument();
   });
 });

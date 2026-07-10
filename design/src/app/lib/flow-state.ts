@@ -23,6 +23,8 @@ export interface FlowStepView {
 export interface FlowState {
   runId: string | null;
   runStatus: RunStatus;
+  startedAt: number | null;
+  updatedAt: number | null;
   steps: FlowStepView[];
 }
 
@@ -36,6 +38,8 @@ export function initialFlowState(): FlowState {
   return {
     runId: null,
     runStatus: 'idle',
+    startedAt: null,
+    updatedAt: null,
     steps: DEFAULT_RECIPE_STEPS.map((s) => ({
       id: s.id,
       kind: s.kind,
@@ -61,6 +65,8 @@ export function reduceFlowEvent(state: FlowState, event: FlowAction): FlowState 
     return {
       runId: event.state.runId,
       runStatus: event.state.status,
+      startedAt: event.state.startedAt,
+      updatedAt: event.state.updatedAt,
       steps: event.state.steps.map((step) => ({
         id: step.def.id,
         kind: step.def.kind,
