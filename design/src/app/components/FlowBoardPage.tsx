@@ -12,7 +12,7 @@ export function FlowBoardPage() {
     : '';
 
   return (
-    <div className="story-shell h-full">
+    <div className="story-shell h-full overflow-hidden">
       <StoryOsTopBar title="Agent Flow" />
       <StoryOsSideNav
         active="flow"

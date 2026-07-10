@@ -91,6 +91,7 @@ export interface StepNodeData {
   status: StepStatus;
   attempt?: number;
   progress?: number;
+  cost?: number;
   selected?: boolean;
 }
 
@@ -117,6 +118,7 @@ function StepNodeComponent({ data, selected = false, isConnectable = true }: Ste
     : Math.min(100, Math.max(0, explicitProgress));
   const progressWidth = progress == null ? '42%' : `${progress}%`;
   const kindLabel = KIND_LABEL[data.kind] ?? data.kind;
+  const cost = Number.isFinite(data.cost) ? Math.max(0, data.cost ?? 0) : null;
 
   return (
     <div
@@ -162,7 +164,10 @@ function StepNodeComponent({ data, selected = false, isConnectable = true }: Ste
         <div className="mt-auto">
           <div className="mb-1.5 flex items-center justify-between gap-3 font-mono-family text-[10px] text-muted-foreground">
             <span>{attempt ? `尝试 ${attempt}` : '未尝试'}</span>
-            <span>{progress == null ? (data.status === 'running' ? '进行中' : '未计量') : `${Math.round(progress)}%`}</span>
+            <span>
+              {cost == null ? '' : `$${cost.toFixed(4)} · `}
+              {progress == null ? (data.status === 'running' ? '进行中' : '未计量') : `${Math.round(progress)}%`}
+            </span>
           </div>
           <div
             className="h-1 overflow-hidden bg-surface-container-high"
