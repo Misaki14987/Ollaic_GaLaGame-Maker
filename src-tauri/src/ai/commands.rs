@@ -3,8 +3,8 @@ use base64::Engine;
 use futures::{SinkExt, StreamExt};
 use genai::adapter::AdapterKind;
 use genai::chat::{
-    ChatMessage, ChatOptions, ChatRequest, ChatStreamEvent, StreamChunk, Tool, ToolCall,
-    ToolResponse,
+    ChatMessage, ChatOptions, ChatRequest, ChatResponseFormat, ChatStreamEvent, StreamChunk, Tool,
+    ToolCall, ToolResponse,
 };
 use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
 use genai::{Client, ModelIden, ServiceTarget};
@@ -858,7 +858,11 @@ pub(crate) async fn complete_agent_text(
         ChatMessage::user(user_prompt),
     ]);
     let endpoint = effective_endpoint(&cfg);
-    let options = chat_debug_options();
+    let options = if matches!(cfg.provider.as_str(), "openai" | "deepseek") {
+        chat_debug_options().with_response_format(ChatResponseFormat::JsonMode)
+    } else {
+        chat_debug_options()
+    };
     match build_client(&cfg)
         .exec_chat(&cfg.model, request, Some(&options))
         .await
