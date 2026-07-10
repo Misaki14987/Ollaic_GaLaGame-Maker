@@ -43,7 +43,16 @@ describe('FlowStepInspector', () => {
     const onSkip = vi.fn();
     const onPromptRerun = vi.fn();
     render(
-      <FlowStepInspector selected={step} busy={false} detached={false} onClose={vi.fn()} onRetry={onRetry} onSkip={onSkip} onPromptRerun={onPromptRerun} />,
+      <FlowStepInspector
+        selected={step}
+        busy={false}
+        detached={false}
+        onClose={vi.fn()}
+        onRetry={onRetry}
+        onSkip={onSkip}
+        onPromptRerun={onPromptRerun}
+        events={[{ event: { type: 'stepSucceeded', runId: 'run_1', stepId: 'outline', output: step.output }, receivedAt: 30 }]}
+      />,
     );
 
     expect(screen.getByRole('complementary', { name: 'outline 步骤检查器' })).toBeInTheDocument();
@@ -60,6 +69,8 @@ describe('FlowStepInspector', () => {
     expect(screen.getByText('synopsis updated')).toBeInTheDocument();
     expect(screen.getByText('输出经过规范化')).toBeInTheDocument();
     expect(screen.getByText('fallback-agent')).toBeInTheDocument();
+    await user.click(screen.getByRole('tab', { name: '日志' }));
+    expect(screen.getByText('执行完成')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '从此步重跑' }));
     await user.click(screen.getByRole('button', { name: '跳过' }));

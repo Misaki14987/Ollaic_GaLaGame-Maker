@@ -92,6 +92,7 @@ export interface StepNodeData {
   attempt?: number;
   progress?: number;
   cost?: number;
+  summary?: string;
   selected?: boolean;
 }
 
@@ -160,6 +161,10 @@ function StepNodeComponent({ data, selected = false, isConnectable = true }: Ste
             {state.label}
           </span>
         </div>
+
+        <p className="mt-2 line-clamp-2 min-h-8 text-[11px] leading-4 text-muted-foreground" title={data.summary}>
+          {data.summary || '等待步骤输入'}
+        </p>
 
         <div className="mt-auto">
           <div className="mb-1.5 flex items-center justify-between gap-3 font-mono-family text-[10px] text-muted-foreground">
