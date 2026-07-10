@@ -30,11 +30,12 @@ pub enum RunStatus {
     Paused,
     Completed,
     Failed,
+    Cancelled,
 }
 
 impl RunStatus {
     pub fn is_terminal(self) -> bool {
-        matches!(self, RunStatus::Completed | RunStatus::Failed)
+        matches!(self, RunStatus::Completed | RunStatus::Failed | RunStatus::Cancelled)
     }
 }
 

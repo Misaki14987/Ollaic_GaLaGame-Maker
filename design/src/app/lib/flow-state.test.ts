@@ -56,6 +56,13 @@ describe('flow-state reducer', () => {
     expect(s.runStatus).toBe('running');
   });
 
+  it('marks a stopped run as cancelled', () => {
+    let s = initialFlowState();
+    s = reduceFlowEvent(s, ev({ type: 'runStarted', runId: 'run_1' }));
+    s = reduceFlowEvent(s, ev({ type: 'runStopped', runId: 'run_1' }));
+    expect(s.runStatus).toBe('cancelled');
+  });
+
   it('skips a step', () => {
     let s = initialFlowState();
     s = reduceFlowEvent(s, ev({ type: 'runStarted', runId: 'run_1' }));

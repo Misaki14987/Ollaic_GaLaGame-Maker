@@ -5,6 +5,7 @@
 
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use tokio::sync::{Mutex, Notify};
@@ -22,9 +23,48 @@ use crate::story_plan::types::PipelineRunSummary;
 pub struct RunHandle {
     pub state: Arc<Mutex<RunState>>,
     notify: Arc<Notify>,
+    pause_after_step: AtomicBool,
 }
 
 impl RunHandle {
+    pub async fn stop(
+        &self,
+        project_path: &Path,
+        sink: &dyn EventSink,
+        clock: &dyn Clock,
+    ) -> Result<(), PipelineError> {
+        let mut state = self.state.lock().await;
+        if state.status.is_terminal() {
+            return Ok(());
+        }
+        let previous = state.clone();
+        let stopped_at = clock.now_ms();
+        for step in &mut state.steps {
+            if step.status == StepStatus::Running {
+                step.status = StepStatus::Pending;
+                step.started_at = None;
+                step.finished_at = None;
+                if let Some(attempt) = step.history.last_mut() {
+                    attempt.error = Some("cancelled before completion".to_string());
+                    attempt.finished_at = Some(stopped_at);
+                    attempt.duration_ms = Some(stopped_at.saturating_sub(attempt.started_at));
+                }
+            }
+        }
+        state.status = RunStatus::Cancelled;
+        state.updated_at = stopped_at;
+        let run_id = state.run_id.clone();
+        if let Err(error) = store::save_run_state(project_path, &state) {
+            *state = previous;
+            return Err(PipelineError::Store(error));
+        }
+        drop(state);
+        self.pause_after_step.store(false, Ordering::SeqCst);
+        self.notify.notify_one();
+        sink.emit(PipelineEvent::RunStopped { run_id });
+        Ok(())
+    }
+
     pub fn state(&self) -> &Arc<Mutex<RunState>> {
         &self.state
     }
@@ -83,6 +123,7 @@ impl Pipeline {
         Ok(Arc::new(RunHandle {
             state: Arc::new(Mutex::new(state)),
             notify: Arc::new(Notify::new()),
+            pause_after_step: AtomicBool::new(false),
         }))
     }
 
@@ -105,6 +146,12 @@ impl Pipeline {
         let mut state = store::load_run_state(project_path, run_id)
             .map_err(PipelineError::Store)?
             .ok_or(PipelineError::RunNotFound(run_id.to_string()))?;
+        if state.status.is_terminal() {
+            return Err(PipelineError::InvalidRunTransition(
+                run_id.to_string(),
+                "terminal runs cannot be resumed".to_string(),
+            ));
+        }
         // Crash recovery: a step left `Running` when the process died did not
         // complete, so reset it to `Pending` to be re-run. `Succeeded` steps
         // are never re-run.
@@ -130,6 +177,7 @@ impl Pipeline {
         Ok(Arc::new(RunHandle {
             state: Arc::new(Mutex::new(state)),
             notify: Arc::new(Notify::new()),
+            pause_after_step: AtomicBool::new(false),
         }))
     }
 
@@ -153,6 +201,7 @@ impl Pipeline {
         Ok(Arc::new(RunHandle {
             state: Arc::new(Mutex::new(state)),
             notify: Arc::new(Notify::new()),
+            pause_after_step: AtomicBool::new(false),
         }))
     }
 
@@ -190,6 +239,27 @@ impl Pipeline {
                 Action::Run { id, kind, prompt } => {
                     self.run_step(project_path, &handle, sink, clock, id, kind, prompt)
                         .await;
+                    if handle.pause_after_step.swap(false, Ordering::SeqCst) {
+                        let should_pause = {
+                            let state = handle.state.lock().await;
+                            !state.status.is_terminal() && !state.is_complete()
+                        };
+                        if should_pause {
+                            if let Err(error) = handle.pause(project_path, sink, clock).await {
+                                let mut state = handle.state.lock().await;
+                                state.status = RunStatus::Failed;
+                                state.updated_at = clock.now_ms();
+                                let run_id = state.run_id.clone();
+                                let _ = store::save_run_state(project_path, &state);
+                                drop(state);
+                                sink.emit(PipelineEvent::RunFailed {
+                                    run_id,
+                                    error: format!("failed to persist single-step pause: {}", error),
+                                });
+                                return;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -391,10 +461,20 @@ impl Pipeline {
                 kind.as_str()
             ))),
         };
-        let result = match result {
+        match result {
             Ok(out) => {
-                // Apply output before marking the step succeeded. A failed
-                // content write is a failed step, not a warning.
+                // Crash-safety order: apply output to the plan and persist it
+                // BEFORE marking the step Succeeded. If the process dies between
+                // these two writes, the step is left Running and reset to Pending
+                // on resume, then re-run. P0 stub agents are deterministic, so
+                // re-applying is idempotent. P1 LLM agents need reconciliation
+                // (e.g. output versioning) to avoid double-applying - see ADR 0054.
+                let mut state = handle.state.lock().await;
+                if state.status == RunStatus::Cancelled {
+                    return;
+                }
+                // Keep stop() outside the two durable writes: cancellation
+                // takes effect either before output or after a full commit.
                 apply_output(&mut plan, kind, &out);
                 let persist_result = if let Some(scene) = out.scene.as_ref() {
                     write_scene_file(project_path, scene).map_err(|e| {
@@ -407,20 +487,12 @@ impl Pipeline {
                     story_plan::save_plan(project_path, &plan)
                         .map_err(|e| AgentError(format!("failed to save StoryPlan: {}", e)))
                 });
-                persist_result.map(|_| out)
-            }
-            Err(err) => Err(err),
-        };
-
-        match result {
-            Ok(out) => {
-                // Crash-safety order: apply output to the plan and persist it
-                // BEFORE marking the step Succeeded. If the process dies between
-                // these two writes, the step is left Running and reset to Pending
-                // on resume, then re-run. P0 stub agents are deterministic, so
-                // re-applying is idempotent. P1 LLM agents need reconciliation
-                // (e.g. output versioning) to avoid double-applying - see ADR 0054.
-                let mut state = handle.state.lock().await;
+                if let Err(error) = persist_result {
+                    drop(state);
+                    self.fail_step(project_path, handle, sink, clock, id, error.0)
+                        .await;
+                    return;
+                }
                 {
                     let step = state.find_step_mut(&id).expect("step exists");
                     let finished_at = clock.now_ms();
@@ -480,6 +552,9 @@ impl Pipeline {
         error: String,
     ) {
         let mut state = handle.state.lock().await;
+        if state.status == RunStatus::Cancelled {
+            return;
+        }
         let finished_at = clock.now_ms();
         if let Some(step) = state.find_step_mut(&step_id) {
             step.status = StepStatus::Failed;
@@ -508,7 +583,7 @@ impl Pipeline {
         let _ = self.record_run_summary(project_path, &run_id, clock);
     }
 
-    fn record_run_summary(
+    pub(crate) fn record_run_summary(
         &self,
         project_path: &Path,
         run_id: &str,
@@ -585,10 +660,15 @@ impl RunHandle {
         if state.status != RunStatus::Running {
             return Ok(());
         }
+        let previous_updated_at = state.updated_at;
         state.status = RunStatus::Paused;
         state.updated_at = clock.now_ms();
         let run_id = state.run_id.clone();
-        store::save_run_state(project_path, &state).map_err(PipelineError::Store)?;
+        if let Err(error) = store::save_run_state(project_path, &state) {
+            state.status = RunStatus::Running;
+            state.updated_at = previous_updated_at;
+            return Err(PipelineError::Store(error));
+        }
         drop(state);
         sink.emit(PipelineEvent::RunPaused { run_id });
         Ok(())
@@ -612,6 +692,36 @@ impl RunHandle {
             drop(state);
             sink.emit(PipelineEvent::RunResumed { run_id });
         }
+        self.notify.notify_one();
+        Ok(())
+    }
+
+    pub async fn step_once(
+        &self,
+        project_path: &Path,
+        sink: &dyn EventSink,
+        clock: &dyn Clock,
+    ) -> Result<(), PipelineError> {
+        let mut state = self.state.lock().await;
+        if state.status != RunStatus::Paused {
+            return Err(PipelineError::InvalidRunTransition(
+                state.run_id.clone(),
+                "single-step requires a paused run".to_string(),
+            ));
+        }
+        let previous_updated_at = state.updated_at;
+        state.status = RunStatus::Running;
+        state.updated_at = clock.now_ms();
+        let run_id = state.run_id.clone();
+        self.pause_after_step.store(true, Ordering::SeqCst);
+        if let Err(error) = store::save_run_state(project_path, &state) {
+            state.status = RunStatus::Paused;
+            state.updated_at = previous_updated_at;
+            self.pause_after_step.store(false, Ordering::SeqCst);
+            return Err(PipelineError::Store(error));
+        }
+        drop(state);
+        sink.emit(PipelineEvent::RunResumed { run_id });
         self.notify.notify_one();
         Ok(())
     }
@@ -742,6 +852,35 @@ impl RunHandle {
         state.updated_at = clock.now_ms();
         store::save_run_state(project_path, &state).map_err(PipelineError::Store)
     }
+
+    pub async fn update_step_prompt(
+        &self,
+        project_path: &Path,
+        step_id: &str,
+        prompt: String,
+        clock: &dyn Clock,
+    ) -> Result<(), PipelineError> {
+        let mut state = self.state.lock().await;
+        let step = state
+            .find_step_mut(step_id)
+            .ok_or_else(|| PipelineError::StepNotFound(step_id.to_string()))?;
+        if step.status == StepStatus::Running {
+            return Err(PipelineError::InvalidStepTransition(
+                step_id.to_string(),
+                "cannot edit the prompt of a running step".to_string(),
+            ));
+        }
+        let previous_prompt = step.def.prompt.clone();
+        step.def.prompt = prompt;
+        let previous_updated_at = state.updated_at;
+        state.updated_at = clock.now_ms();
+        if let Err(error) = store::save_run_state(project_path, &state) {
+            state.find_step_mut(step_id).expect("step exists").def.prompt = previous_prompt;
+            state.updated_at = previous_updated_at;
+            return Err(PipelineError::Store(error));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -753,6 +892,7 @@ pub enum PipelineError {
     RunNotFound(String),
     StepNotFound(String),
     InvalidStepTransition(String, String),
+    InvalidRunTransition(String, String),
 }
 
 impl std::fmt::Display for PipelineError {
@@ -766,6 +906,9 @@ impl std::fmt::Display for PipelineError {
             PipelineError::StepNotFound(id) => write!(f, "step not found: {}", id),
             PipelineError::InvalidStepTransition(id, reason) => {
                 write!(f, "invalid transition for step '{}': {}", id, reason)
+            }
+            PipelineError::InvalidRunTransition(id, reason) => {
+                write!(f, "invalid transition for run '{}': {}", id, reason)
             }
         }
     }

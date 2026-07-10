@@ -148,6 +148,29 @@ where
     f(entry)
 }
 
+async fn attach_run_if_needed(
+    orchestrator: &Orchestrator,
+    project_path: &PathBuf,
+    run_id: &str,
+) -> Result<(), String> {
+    let mut runs = orchestrator.runs.lock().await;
+    if !runs.contains_key(run_id) {
+        let handle = orchestrator
+            .pipeline
+            .attach_run(project_path, run_id)
+            .map_err(|error| error.to_string())?;
+        runs.insert(
+            run_id.to_string(),
+            ManagedRun {
+                handle,
+                project_path: project_path.clone(),
+                driving: Arc::new(AtomicBool::new(false)),
+            },
+        );
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn pipeline_pause(
     orchestrator: tauri::State<'_, Orchestrator>,
@@ -191,6 +214,52 @@ pub async fn pipeline_resume(
 }
 
 #[tauri::command]
+pub async fn pipeline_stop(
+    orchestrator: tauri::State<'_, Orchestrator>,
+    app: tauri::AppHandle,
+    run_id: String,
+) -> Result<(), String> {
+    let (handle, project_path) = with_run(&orchestrator, &run_id, |entry| {
+        Ok((entry.handle.clone(), entry.project_path.clone()))
+    })
+    .await?;
+    handle
+        .stop(&project_path, &make_sink(&app), &SystemClock)
+        .await
+        .map_err(|error| error.to_string())?;
+    orchestrator
+        .pipeline
+        .record_run_summary(&project_path, &run_id, &SystemClock)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn pipeline_step_once(
+    orchestrator: tauri::State<'_, Orchestrator>,
+    app: tauri::AppHandle,
+    run_id: String,
+    project_path: String,
+) -> Result<(), String> {
+    let requested_path = PathBuf::from(project_path);
+    attach_run_if_needed(&orchestrator, &requested_path, &run_id).await?;
+    let (handle, project_path, driving) = with_run(&orchestrator, &run_id, |entry| {
+        Ok((entry.handle.clone(), entry.project_path.clone(), entry.driving.clone()))
+    })
+    .await?;
+    handle
+        .step_once(&project_path, &make_sink(&app), &SystemClock)
+        .await
+        .map_err(|error| error.to_string())?;
+    if driving
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+    {
+        spawn_driver(orchestrator.pipeline.clone(), handle, driving, project_path, app);
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn pipeline_retry_step(
     orchestrator: tauri::State<'_, Orchestrator>,
     app: tauri::AppHandle,
@@ -199,23 +268,7 @@ pub async fn pipeline_retry_step(
     project_path: String,
 ) -> Result<(), String> {
     let requested_path = PathBuf::from(project_path);
-    {
-        let mut runs = orchestrator.runs.lock().await;
-        if !runs.contains_key(&run_id) {
-            let handle = orchestrator
-                .pipeline
-                .attach_run(&requested_path, &run_id)
-                .map_err(|e| e.to_string())?;
-            runs.insert(
-                run_id.clone(),
-                ManagedRun {
-                    handle,
-                    project_path: requested_path,
-                    driving: Arc::new(AtomicBool::new(false)),
-                },
-            );
-        }
-    }
+    attach_run_if_needed(&orchestrator, &requested_path, &run_id).await?;
     let (handle, project_path, driving) = {
         let guard = orchestrator.runs.lock().await;
         let entry = guard
@@ -279,6 +332,26 @@ pub async fn pipeline_update_dependencies(
     .await?;
     handle
         .update_dependencies(&project_path, &step_id, depends_on, &SystemClock)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn pipeline_update_step_prompt(
+    orchestrator: tauri::State<'_, Orchestrator>,
+    run_id: String,
+    step_id: String,
+    prompt: String,
+    project_path: String,
+) -> Result<(), String> {
+    let requested_path = PathBuf::from(project_path);
+    attach_run_if_needed(&orchestrator, &requested_path, &run_id).await?;
+    let (handle, project_path) = with_run(&orchestrator, &run_id, |entry| {
+        Ok((entry.handle.clone(), entry.project_path.clone()))
+    })
+    .await?;
+    handle
+        .update_step_prompt(&project_path, &step_id, prompt, &SystemClock)
         .await
         .map_err(|error| error.to_string())
 }

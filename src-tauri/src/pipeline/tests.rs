@@ -169,6 +169,7 @@ fn labels(events: &[PipelineEvent]) -> Vec<String> {
             PipelineEvent::RunResumed { .. } => "run_resumed".to_string(),
             PipelineEvent::RunCompleted { .. } => "run_completed".to_string(),
             PipelineEvent::RunFailed { .. } => "run_failed".to_string(),
+            PipelineEvent::RunStopped { .. } => "run_stopped".to_string(),
         })
         .collect()
 }
@@ -224,6 +225,14 @@ fn ipc_contract_serializes_to_camel_case() {
     assert_eq!(
         serde_json::to_value(&run_failed).unwrap(),
         json!({ "type": "runFailed", "runId": "run_1", "error": "boom" })
+    );
+
+    assert_eq!(
+        serde_json::to_value(PipelineEvent::RunStopped {
+            run_id: "run_1".to_string(),
+        })
+        .unwrap(),
+        json!({ "type": "runStopped", "runId": "run_1" })
     );
 
     // RunState / StepState / StepDef / enums also camelCase.
@@ -881,4 +890,146 @@ async fn pending_dependencies_are_editable_but_cycles_are_rejected() {
         .unwrap()
         .unwrap();
     assert!(persisted.find_step("outline").unwrap().def.depends_on.is_empty());
+}
+
+#[tokio::test]
+async fn stop_discards_in_flight_output_and_persists_cancelled() {
+    let project = fresh_project("stop");
+    let sink = Arc::new(RecordingSink::new());
+    let clock = StepClock::new();
+    let gate = Arc::new(Notify::new());
+    let mut agents = AgentRegistry::new();
+    agents.register(
+        StepKind::Plan,
+        Box::new(ControllableAgent {
+            gate: gate.clone(),
+            output: synopsis_output("must not be applied"),
+        }),
+    );
+    agents.register(StepKind::Outline, Box::new(crate::agents::OutlineAgent));
+    let pipeline = Arc::new(Pipeline::new(agents));
+    let handle = pipeline
+        .create_run(&project, "run_stop", "brief", &default_recipe(), &clock, sink.as_ref())
+        .unwrap();
+    let task = {
+        let pipeline = pipeline.clone();
+        let project = project.clone();
+        let handle = handle.clone();
+        let sink = sink.clone();
+        tokio::spawn(async move {
+            pipeline.execute(&project, handle, sink.as_ref(), &SystemClock).await;
+        })
+    };
+    wait_until(&sink, |events| {
+        events.iter().any(|event| matches!(event, PipelineEvent::StepStarted { step_id, .. } if step_id == "plan"))
+    })
+    .await;
+
+    handle.stop(&project, sink.as_ref(), &clock).await.unwrap();
+    gate.notify_one();
+    timeout(Duration::from_secs(3), task)
+        .await
+        .expect("cancelled driver did not finish")
+        .unwrap();
+
+    let persisted = crate::pipeline::load_run_state(&project, "run_stop").unwrap().unwrap();
+    assert_eq!(persisted.status, RunStatus::Cancelled);
+    let plan_step = persisted.find_step("plan").unwrap();
+    assert_eq!(plan_step.status, StepStatus::Pending);
+    assert_eq!(
+        plan_step.history.last().unwrap().error.as_deref(),
+        Some("cancelled before completion")
+    );
+    assert!(labels(&sink.events()).contains(&"run_stopped".to_string()));
+    assert!(crate::story_plan::load_plan(&project)
+        .unwrap()
+        .unwrap()
+        .synopsis
+        .is_empty());
+}
+
+#[tokio::test]
+async fn step_once_runs_one_ready_step_then_pauses() {
+    let project = fresh_project("step_once");
+    let sink = Arc::new(RecordingSink::new());
+    let clock = StepClock::new();
+    let pipeline = Arc::new(Pipeline::with_default_agents());
+    let handle = pipeline
+        .create_run(
+            &project,
+            "run_step_once",
+            "brief",
+            &default_recipe(),
+            &clock,
+            sink.as_ref(),
+        )
+        .unwrap();
+    handle.pause(&project, sink.as_ref(), &clock).await.unwrap();
+    let task = {
+        let pipeline = pipeline.clone();
+        let project = project.clone();
+        let handle = handle.clone();
+        let sink = sink.clone();
+        tokio::spawn(async move {
+            pipeline.execute(&project, handle, sink.as_ref(), &SystemClock).await;
+        })
+    };
+
+    handle.step_once(&project, sink.as_ref(), &clock).await.unwrap();
+    wait_until(&sink, |events| {
+        events
+            .iter()
+            .filter(|event| matches!(event, PipelineEvent::RunPaused { .. }))
+            .count()
+            >= 2
+    })
+    .await;
+    {
+        let state = handle.state().lock().await;
+        assert_eq!(state.status, RunStatus::Paused);
+        assert_eq!(state.find_step("plan").unwrap().status, StepStatus::Succeeded);
+        assert_eq!(state.find_step("outline").unwrap().status, StepStatus::Pending);
+    }
+
+    handle.step_once(&project, sink.as_ref(), &clock).await.unwrap();
+    timeout(Duration::from_secs(3), task)
+        .await
+        .expect("second single-step did not complete the run")
+        .unwrap();
+    assert_eq!(handle.state().lock().await.status, RunStatus::Completed);
+}
+
+#[tokio::test]
+async fn edited_step_prompt_is_used_by_retry() {
+    let project = fresh_project("prompt_retry");
+    let sink = RecordingSink::new();
+    let clock = StepClock::new();
+    let pipeline = Pipeline::with_default_agents();
+    let handle = pipeline
+        .create_run(
+            &project,
+            "run_prompt_retry",
+            "original brief",
+            &default_recipe(),
+            &clock,
+            &sink,
+        )
+        .unwrap();
+    pipeline.execute(&project, handle.clone(), &sink, &clock).await;
+
+    handle
+        .update_step_prompt(&project, "plan", "revised direction".to_string(), &clock)
+        .await
+        .unwrap();
+    handle
+        .retry_step(&project, "plan", &sink, &clock)
+        .await
+        .unwrap();
+    pipeline.execute(&project, handle.clone(), &sink, &clock).await;
+
+    let state = handle.state().lock().await;
+    let history = &state.find_step("plan").unwrap().history;
+    assert_eq!(history.len(), 2);
+    let input: serde_json::Value = serde_json::from_str(&history[1].input_snapshot).unwrap();
+    assert_eq!(input["prompt"], "revised direction");
 }
