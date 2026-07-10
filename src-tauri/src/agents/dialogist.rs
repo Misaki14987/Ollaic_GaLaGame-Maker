@@ -16,6 +16,16 @@ struct DialogistResponse {
     scene_drafts: Vec<SceneDraft>,
 }
 
+fn fill_missing_titles(plans: &[ScenePlan], drafts: &mut [SceneDraft]) {
+    for draft in drafts {
+        if draft.title.trim().is_empty() {
+            if let Some(plan) = plans.iter().find(|plan| plan.id == draft.scene_id) {
+                draft.title = plan.title.clone();
+            }
+        }
+    }
+}
+
 impl Agent for DialogistAgent {
     fn run<'a>(
         &'a self,
@@ -38,12 +48,13 @@ impl Agent for DialogistAgent {
                 "stepInstruction": ctx.instruction,
                 "requirements": "每个 scenePlan 对应一个 sceneDraft，sceneId 必须一致；每场至少 8 个 beat。speaker 为角色 name 或 null（旁白），text 不含 WebGAL 命令。对白要推进冲突、体现人物口吻，避免说明书式复述。"
             });
-            if let Some(routed) = generate_structured::<DialogistResponse>(
+            if let Some(mut routed) = generate_structured::<DialogistResponse>(
                 "Dialogist / 场景对白",
                 "把场景卡扩写成可编译的结构化旁白和对白。JSON 格式：{\"sceneDrafts\":[{\"sceneId\":\"...\",\"title\":\"...\",\"beats\":[{\"speaker\":null,\"text\":\"...\"}]}]}。",
                 &input,
                 ctx.allow_local_fallback,
             ).await? {
+                fill_missing_titles(ctx.scene_plans, &mut routed.value.scene_drafts);
                 validate_drafts(ctx.scene_plans, &routed.value.scene_drafts)?;
                 return Ok(AgentOutput {
                     scene_drafts: Some(routed.value.scene_drafts),
@@ -182,6 +193,29 @@ fn validate_drafts(plans: &[ScenePlan], drafts: &[SceneDraft]) -> Result<(), Age
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_response_without_draft_title_uses_scene_title() {
+        let response = r#"{
+            "sceneDrafts":[{
+                "sceneId":"opening",
+                "beats":[{"speaker":null,"text":"黄昏的教室很安静。"}]
+            }]
+        }"#;
+        let plans = vec![ScenePlan {
+            id: "opening".into(),
+            file: "start.txt".into(),
+            chapter_id: "ch1".into(),
+            title: "初次相遇".into(),
+            summary: String::new(),
+            character_ids: Vec::new(),
+        }];
+
+        let mut parsed: DialogistResponse =
+            serde_json::from_str(response).expect("missing draft title should be recoverable");
+        fill_missing_titles(&plans, &mut parsed.scene_drafts);
+        assert_eq!(parsed.scene_drafts[0].title, "初次相遇");
+    }
 
     #[test]
     fn local_opening_is_readable_dialogue() {
