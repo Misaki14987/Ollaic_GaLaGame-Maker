@@ -159,6 +159,14 @@ mod tests {
     use super::*;
     use crate::story_plan::types::{BranchGraph, ScenePlan};
 
+    #[test]
+    fn model_response_accepts_numeric_character_age() {
+        let response = r#"{"characters":[{"id":"heroine","name":"未来","age":28}]}"#;
+        let parsed: CharacterResponse =
+            serde_json::from_str(response).expect("numeric age should be accepted");
+        assert_eq!(parsed.characters[0].age, "28");
+    }
+
     #[tokio::test]
     async fn local_character_agent_produces_editable_character_cards() {
         let scenes = vec![ScenePlan {
