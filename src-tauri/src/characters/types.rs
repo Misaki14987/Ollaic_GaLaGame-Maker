@@ -1,4 +1,18 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+fn deserialize_text_or_number<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    match serde_json::Value::deserialize(deserializer)? {
+        serde_json::Value::String(value) => Ok(value),
+        serde_json::Value::Number(value) => Ok(value.to_string()),
+        serde_json::Value::Null => Ok(String::new()),
+        value => Err(serde::de::Error::custom(format!(
+            "expected text or number, got {value}"
+        ))),
+    }
+}
 
 /// A single sprite/expression variation for a character.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -58,7 +72,7 @@ pub struct Character {
     #[serde(default)]
     pub gender: String,
     /// Age group or specific age as free text.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_text_or_number")]
     pub age: String,
     /// Emotion → figure file mappings.
     #[serde(default)]
