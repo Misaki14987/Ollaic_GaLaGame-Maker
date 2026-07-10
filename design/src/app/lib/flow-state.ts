@@ -29,10 +29,15 @@ export interface FlowState {
   steps: FlowStepView[];
 }
 
-/** The P0 built-in recipe: Plan -> Outline. */
+/** The P1 prompt-to-editable-WebGAL production recipe. */
 export const DEFAULT_RECIPE_STEPS: ReadonlyArray<{ id: string; kind: string; dependsOn: string[] }> = [
   { id: 'plan', kind: 'plan', dependsOn: [] },
-  { id: 'outline', kind: 'outline', dependsOn: ['plan'] },
+  { id: 'memory', kind: 'memory', dependsOn: ['plan'] },
+  { id: 'outline', kind: 'outline', dependsOn: ['memory'] },
+  { id: 'character', kind: 'character', dependsOn: ['outline'] },
+  { id: 'dialogist', kind: 'scene', dependsOn: ['character'] },
+  { id: 'asset', kind: 'asset', dependsOn: ['dialogist'] },
+  { id: 'scene', kind: 'scene', dependsOn: ['asset'] },
 ];
 
 export function initialFlowState(): FlowState {

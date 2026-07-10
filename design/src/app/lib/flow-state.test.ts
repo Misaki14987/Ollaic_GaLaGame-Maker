@@ -9,7 +9,9 @@ describe('flow-state reducer', () => {
     const s = initialFlowState();
     expect(s.runStatus).toBe('idle');
     expect(s.runId).toBeNull();
-    expect(s.steps.map((x) => x.id)).toEqual(['plan', 'outline']);
+    expect(s.steps.map((x) => x.id)).toEqual([
+      'plan', 'memory', 'outline', 'character', 'dialogist', 'asset', 'scene',
+    ]);
     expect(s.steps.every((x) => x.status === 'pending')).toBe(true);
   });
 

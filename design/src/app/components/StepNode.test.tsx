@@ -58,4 +58,12 @@ describe('StepNode', () => {
     expect(screen.getByTestId('target-handle')).toHaveAttribute('data-connectable', 'false');
     expect(screen.getByTestId('source-handle')).toHaveAttribute('data-connectable', 'false');
   });
+
+  it('keeps a downgraded success visibly distinct from a trusted success', () => {
+    render(<StepNode data={{ id: 'dialogist', kind: 'scene', status: 'succeeded', attempt: 1, downgraded: true }} />);
+    const node = screen.getByRole('group', { name: 'dialogist 节点，场景编排，已降级，尝试 1' });
+    expect(node).toHaveAttribute('data-downgraded', 'true');
+    expect(node).toHaveClass('border-amber-600/60');
+    expect(screen.getByText('已降级')).toBeInTheDocument();
+  });
 });

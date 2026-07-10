@@ -33,6 +33,7 @@ import { StepNode, type StepNodeData } from './StepNode';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Progress } from './ui/progress';
+import { Switch } from './ui/switch';
 import { initialFlowState, reduceFlowEvent, type FlowStepView } from '../lib/flow-state';
 import { layoutFlowSteps, loadFlowPositions, saveFlowPositions } from '../lib/flow-layout';
 import {
@@ -69,6 +70,7 @@ const RUN_STATUS: Record<RunStatus, string> = {
 
 export interface FlowBoardProps {
   projectPath: string;
+  onOpenArtifact?: (step: FlowStepView, plan: StoryPlan | null) => void;
 }
 
 function formatElapsed(milliseconds: number) {
@@ -82,16 +84,37 @@ function summarizeStep(step: FlowStepView) {
   try {
     const output = JSON.parse(step.output) as Record<string, unknown>;
     if (typeof output.synopsis === 'string') return output.synopsis;
+    if (typeof output.worldbook === 'string') return output.worldbook;
     if (Array.isArray(output.chapters)) {
       return output.chapters
         .map((chapter) => chapter && typeof chapter === 'object' && 'title' in chapter ? String(chapter.title) : '')
         .filter(Boolean)
         .join(' / ');
     }
+    if (Array.isArray(output.characters)) {
+      return output.characters
+        .map((character) => character && typeof character === 'object' && 'name' in character ? String(character.name) : '')
+        .filter(Boolean)
+        .join(' / ');
+    }
+    if (Array.isArray(output.sceneDrafts)) return `${output.sceneDrafts.length} 个场景对白草稿`;
+    if (Array.isArray(output.assetPlan)) return `${output.assetPlan.length} 项资产需求`;
+    if (Array.isArray(output.scenes)) return `${output.scenes.length} 个 WebGAL 场景文件`;
   } catch {
     // Plain text is already suitable as a compact node summary.
   }
   return step.output;
+}
+
+function isDowngraded(step: FlowStepView) {
+  if (step.history.some((attempt) => Boolean(attempt.downgrade))) return true;
+  if (!step.output) return false;
+  try {
+    const output = JSON.parse(step.output) as { downgrade?: unknown };
+    return typeof output.downgrade === 'string' && output.downgrade.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 function recordsFromSnapshot(snapshot: RunState): PipelineEventRecord[] {
@@ -138,10 +161,11 @@ function recordsFromSnapshot(snapshot: RunState): PipelineEventRecord[] {
   return events;
 }
 
-export function FlowBoard({ projectPath }: FlowBoardProps) {
+export function FlowBoard({ projectPath, onOpenArtifact }: FlowBoardProps) {
   const [state, dispatch] = useReducer(reduceFlowEvent, undefined, initialFlowState);
   const [nodes, setNodes, onNodesChange] = useNodesState<StepNodeData>([]);
   const [prompt, setPrompt] = useState('');
+  const [allowLocalFallback, setAllowLocalFallback] = useState(false);
   const [plan, setPlan] = useState<StoryPlan | null>(null);
   const [events, setEvents] = useState<PipelineEventRecord[]>([]);
   const [busy, setBusy] = useState(false);
@@ -301,6 +325,7 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
             ? step.history.reduce((sum, attempt) => sum + (attempt.cost ?? 0), 0)
             : undefined,
           summary: summarizeStep(step),
+          downgraded: isDowngraded(step),
           selected: step.id === selectedStepId,
         },
       };
@@ -349,12 +374,12 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
       unlistenRef.current?.();
       unlistenRef.current = null;
       dispatch({ type: 'reset' });
-      const runId = await pipelineStart(projectPath, prompt.trim());
+      const runId = await pipelineStart(projectPath, prompt.trim(), allowLocalFallback);
       await subscribe(runId);
       setDetached(false);
       await Promise.all([refresh(runId), refreshPlan()]);
     });
-  }, [projectPath, prompt, refresh, refreshPlan, runCommand, subscribe]);
+  }, [allowLocalFallback, projectPath, prompt, refresh, refreshPlan, runCommand, subscribe]);
 
   const pause = useCallback(async () => {
     const runId = runIdRef.current;
@@ -524,6 +549,11 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
   const finishedSteps = state.steps.filter((step) => ['succeeded', 'failed', 'skipped'].includes(step.status)).length;
   const progress = state.steps.length ? Math.round((finishedSteps / state.steps.length) * 100) : 0;
   const totalCost = state.steps.reduce((sum, step) => sum + step.history.reduce((stepSum, attempt) => stepSum + (attempt.cost ?? 0), 0), 0);
+  const hasPricedAttempts = state.steps.some((step) => step.history.some((attempt) => attempt.cost != null));
+  const totalTokens = state.steps.reduce((sum, step) => sum + step.history.reduce(
+    (stepSum, attempt) => stepSum + (attempt.promptTokens ?? 0) + (attempt.completionTokens ?? 0),
+    0,
+  ), 0);
   const elapsedUntil = running ? now : (state.updatedAt ?? now);
   const elapsed = state.startedAt == null ? 0 : elapsedUntil - state.startedAt;
   const canCreate = !running && !paused;
@@ -549,6 +579,16 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
             />
           </label>
           <div className="flex min-h-9 flex-wrap items-center gap-2 lg:self-end">
+            {canCreate && (
+              <label className="flex h-9 items-center gap-2 border border-border bg-surface-container-low px-2 text-[11px] text-muted-foreground">
+                <Switch
+                  checked={allowLocalFallback}
+                  onCheckedChange={setAllowLocalFallback}
+                  aria-label="允许本地内容降级"
+                />
+                允许本地降级
+              </label>
+            )}
             {canCreate && (
               <Button onClick={start} disabled={busy || loading || !prompt.trim()}>
                 {busy ? <Loader2 className="animate-spin" /> : <Play />}
@@ -611,10 +651,10 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
             <Progress value={progress} className="mt-2 h-1 rounded-none" aria-label="总体进度" />
           </div>
           <div className="px-3 py-2">
-            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground"><Clock3 className="size-3" />已用时间 / 成本</div>
+            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground"><Clock3 className="size-3" />已用时间 / Token / 成本</div>
             <div className="mt-1 flex items-center justify-between gap-2 font-mono-family text-xs">
               <span>{formatElapsed(elapsed)}</span>
-              <span className="text-muted-foreground">${totalCost.toFixed(4)}</span>
+              <span className="text-muted-foreground">{totalTokens.toLocaleString()} tk / {hasPricedAttempts ? `$${totalCost.toFixed(4)}` : '未计价'}</span>
             </div>
           </div>
         </div>
@@ -626,7 +666,7 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
             {plan?.synopsis || '等待策划步骤生成故事梗概'}
           </span>
           <span className="shrink-0 font-mono-family text-[10px] text-muted-foreground">
-            {plan?.chapters.length ?? 0} 章 / {plan?.scenes.length ?? 0} 场景
+            {plan?.characters?.length ?? 0} 角色 / {plan?.scenes?.length ?? 0} 场景 / {plan?.assetPlan?.length ?? 0} 资产需求
           </span>
         </div>
       </header>
@@ -665,6 +705,12 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
                 onNodesChange={onNodesChange}
                 onNodeDragStop={persistNodePositions}
                 onNodeClick={(_event, node: Node) => openInspector(node.id)}
+                onNodeDoubleClick={(_event, node: Node) => {
+                  const step = state.steps.find((candidate) => candidate.id === node.id);
+                  if (step?.status === 'succeeded' && (['character', 'asset'].includes(step.kind) || step.id === 'scene')) {
+                    onOpenArtifact?.(step, plan);
+                  }
+                }}
                 onNodeContextMenu={(event, node) => {
                   event.preventDefault();
                   openInspector(node.id);
@@ -694,7 +740,7 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
               <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-6 text-center">
                 <div className="max-w-sm border-y border-border bg-surface-container-lowest/90 px-6 py-5">
                   <p className="text-sm font-semibold">从生产简报建立第一条流程</p>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">默认流程会先完成故事规划，再生成章节大纲。创建后可先检查依赖再运行。</p>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">流程将完成世界观、剧情、角色、对白和资产规划，并写入可编辑的 WebGAL 场景。</p>
                 </div>
               </div>
             )}
@@ -741,6 +787,7 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
               onRetry={retryStep}
               onSkip={skipStep}
               onPromptRerun={updatePromptAndRetry}
+              onOpenArtifact={(step) => onOpenArtifact?.(step, plan)}
               events={events}
             />
           </div>

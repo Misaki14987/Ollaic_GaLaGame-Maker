@@ -1,4 +1,8 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
+
+use crate::characters::types::Character;
 
 /// Project-owned planning record for an Agent Flow. Explains and resumes
 /// generation work; the playable story remains in the Project's WebGAL files.
@@ -18,6 +22,21 @@ pub struct StoryPlan {
     /// Chapter outline produced by the Outline step.
     #[serde(default)]
     pub chapters: Vec<ChapterPlan>,
+    /// Editable characters shared with `game/config/characters.json`.
+    #[serde(default)]
+    pub characters: Vec<Character>,
+    /// Planned scenes and their navigation before WebGAL compilation.
+    #[serde(default)]
+    pub scene_plans: Vec<ScenePlan>,
+    /// Branch topology rooted at the playable entry scene.
+    #[serde(default)]
+    pub branches: BranchGraph,
+    /// Structured dialogue produced by the Dialogist.
+    #[serde(default)]
+    pub scene_drafts: Vec<SceneDraft>,
+    /// P1 asset requirements. Asset generation and binding begin in P2.
+    #[serde(default)]
+    pub asset_plan: Vec<AssetTaskPlan>,
     /// Scene files written to `game/scene/` by Scene steps (P1 content link).
     #[serde(default)]
     pub scenes: Vec<String>,
@@ -35,6 +54,11 @@ impl StoryPlan {
             synopsis: String::new(),
             memory: StoryMemory::default(),
             chapters: Vec::new(),
+            characters: Vec::new(),
+            scene_plans: Vec::new(),
+            branches: BranchGraph::default(),
+            scene_drafts: Vec::new(),
+            asset_plan: Vec::new(),
             scenes: Vec::new(),
             pipeline_runs: Vec::new(),
         }
@@ -48,6 +72,8 @@ impl StoryPlan {
 pub struct StoryMemory {
     #[serde(default)]
     pub worldbook: String,
+    #[serde(default)]
+    pub glossary: BTreeMap<String, String>,
 }
 
 /// A single chapter in the story outline.
@@ -57,6 +83,72 @@ pub struct ChapterPlan {
     pub id: String,
     pub title: String,
     pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScenePlan {
+    pub id: String,
+    pub file: String,
+    pub chapter_id: String,
+    pub title: String,
+    pub summary: String,
+    #[serde(default)]
+    pub character_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchGraph {
+    #[serde(default)]
+    pub entry_scene: String,
+    #[serde(default)]
+    pub edges: Vec<BranchEdge>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchEdge {
+    pub from: String,
+    pub to: String,
+    #[serde(default)]
+    pub choice: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SceneDraft {
+    pub scene_id: String,
+    pub title: String,
+    #[serde(default)]
+    pub beats: Vec<DialogueBeat>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DialogueBeat {
+    #[serde(default)]
+    pub speaker: Option<String>,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetTaskPlan {
+    pub id: String,
+    pub kind: String,
+    pub target_stem: String,
+    pub prompt: String,
+    #[serde(default)]
+    pub scene_ref: Option<String>,
+    #[serde(default)]
+    pub character_ref: Option<String>,
+    #[serde(default = "pending_status")]
+    pub status: String,
+}
+
+fn pending_status() -> String {
+    "pending".to_string()
 }
 
 /// A retained summary of one pipeline run, kept inside the plan's history.

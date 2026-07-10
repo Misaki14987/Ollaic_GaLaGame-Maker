@@ -37,7 +37,10 @@ pub enum RunStatus {
 
 impl RunStatus {
     pub fn is_terminal(self) -> bool {
-        matches!(self, RunStatus::Completed | RunStatus::Failed | RunStatus::Cancelled)
+        matches!(
+            self,
+            RunStatus::Completed | RunStatus::Failed | RunStatus::Cancelled
+        )
     }
 }
 
@@ -81,9 +84,15 @@ pub struct StepRunHistory {
     #[serde(default)]
     pub cost: Option<f64>,
     #[serde(default)]
+    pub prompt_tokens: Option<u32>,
+    #[serde(default)]
+    pub completion_tokens: Option<u32>,
+    #[serde(default)]
     pub warnings: Vec<String>,
     #[serde(default)]
     pub downgrade: Option<String>,
+    #[serde(default)]
+    pub rollback_snapshot: Option<String>,
 }
 
 impl StepState {
@@ -107,12 +116,18 @@ impl StepState {
         )
     }
 
-    pub fn record_attempt(&mut self, history: StepRunHistory, retain_all: bool) {
+    pub fn record_attempt(&mut self, history: StepRunHistory, retain_all: bool) -> Vec<String> {
+        let mut removed_snapshots = Vec::new();
         if !retain_all && self.history.len() >= MAX_STEP_HISTORY {
             let remove = self.history.len() + 1 - MAX_STEP_HISTORY;
-            self.history.drain(..remove);
+            removed_snapshots.extend(
+                self.history
+                    .drain(..remove)
+                    .filter_map(|attempt| attempt.rollback_snapshot),
+            );
         }
         self.history.push(history);
+        removed_snapshots
     }
 }
 
@@ -130,6 +145,10 @@ pub struct RunState {
     pub updated_at: u64,
     #[serde(default)]
     pub pinned: bool,
+    #[serde(default)]
+    pub allow_local_fallback: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_snapshot_cleanup: Vec<String>,
 }
 
 impl RunState {
@@ -153,6 +172,8 @@ impl RunState {
             started_at: now_ms,
             updated_at: now_ms,
             pinned: false,
+            allow_local_fallback: false,
+            pending_snapshot_cleanup: Vec::new(),
         }
     }
 
@@ -287,26 +308,40 @@ mod tests {
     fn step_history_keeps_only_the_latest_attempts() {
         let mut step = StepState::pending(StepDef::new("a", StepKind::Plan));
         for attempt in 1..=MAX_STEP_HISTORY as u32 + 3 {
-            step.record_attempt(StepRunHistory {
-                attempt,
-                input_snapshot: attempt.to_string(),
-                output: None,
-                error: None,
-                started_at: attempt as u64,
-                finished_at: None,
-                duration_ms: None,
-                diff: None,
-                cost: None,
-                warnings: Vec::new(),
-                downgrade: None,
-            }, false);
+            let removed = step.record_attempt(
+                StepRunHistory {
+                    attempt,
+                    input_snapshot: attempt.to_string(),
+                    output: None,
+                    error: None,
+                    started_at: attempt as u64,
+                    finished_at: None,
+                    duration_ms: None,
+                    diff: None,
+                    cost: None,
+                    prompt_tokens: None,
+                    completion_tokens: None,
+                    warnings: Vec::new(),
+                    downgrade: None,
+                    rollback_snapshot: None,
+                },
+                false,
+            );
+            if attempt == 1 {
+                step.history[0].rollback_snapshot = Some("old-snapshot".to_string());
+            }
+            if attempt == MAX_STEP_HISTORY as u32 + 1 {
+                assert_eq!(removed, vec!["old-snapshot"]);
+            } else {
+                assert!(removed.is_empty());
+            }
         }
         assert_eq!(step.history.len(), MAX_STEP_HISTORY);
         assert_eq!(step.history.first().unwrap().attempt, 4);
         assert_eq!(step.history.last().unwrap().attempt, 23);
 
         let retained = step.history.last().unwrap().clone();
-        step.record_attempt(retained, true);
+        assert!(step.record_attempt(retained, true).is_empty());
         assert_eq!(step.history.len(), MAX_STEP_HISTORY + 1);
     }
 }
