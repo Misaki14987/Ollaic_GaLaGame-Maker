@@ -16,6 +16,14 @@ struct AssetPlanResponse {
     asset_plan: Vec<AssetTaskPlan>,
 }
 
+fn fill_missing_task_ids(tasks: &mut [AssetTaskPlan]) {
+    for task in tasks {
+        if task.id.trim().is_empty() {
+            task.id = format!("{}_{}", task.kind.trim(), task.target_stem.trim());
+        }
+    }
+}
+
 impl Agent for AssetPlannerAgent {
     fn run<'a>(
         &'a self,
@@ -36,12 +44,17 @@ impl Agent for AssetPlannerAgent {
                 "stepInstruction": ctx.instruction,
                 "requirements": "仅规划需求，不生成或绑定素材。kind 使用 background、figure、bgm、sfx 之一；targetStem 使用安全英文/数字/下划线；sceneRef/characterRef 引用已有 id；status 固定 pending。覆盖每个场景的背景、每个主要角色的默认立绘，以及全局 BGM。"
             });
-            if let Some(routed) = generate_structured::<AssetPlanResponse>(
+            if let Some(mut routed) = generate_structured::<AssetPlanResponse>(
                 "AssetPlanner / 资产规划",
-                "把故事内容转成 P2 可消费的结构化资产任务。JSON 格式：{\"assetPlan\":[AssetTaskPlan]}，字段使用 camelCase。",
+                concat!(
+                    "把故事内容转成 P2 可消费的结构化资产任务。严格使用 JSON：",
+                    r#"{"assetPlan":[{"id":"bg_opening","kind":"background","targetStem":"bg_opening","prompt":"...","sceneRef":"opening","characterRef":null,"status":"pending"}]}"#,
+                    "。每项都必须包含 id、kind、targetStem、prompt 和 status，字段使用 camelCase。"
+                ),
                 &input,
                 ctx.allow_local_fallback,
             ).await? {
+                fill_missing_task_ids(&mut routed.value.asset_plan);
                 if routed.value.asset_plan.is_empty() {
                     return Err(AgentError("AssetPlanner returned no tasks".to_string()));
                 }
@@ -104,6 +117,24 @@ impl Agent for AssetPlannerAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_response_without_task_id_does_not_abort_asset_planner() {
+        let response = r#"{
+            "assetPlan":[{
+                "kind":"background",
+                "targetStem":"bg_opening",
+                "prompt":"黄昏教室",
+                "sceneRef":"opening",
+                "status":"pending"
+            }]
+        }"#;
+
+        let mut parsed: AssetPlanResponse =
+            serde_json::from_str(response).expect("missing task id should be recoverable");
+        fill_missing_task_ids(&mut parsed.asset_plan);
+        assert_eq!(parsed.asset_plan[0].id, "background_bg_opening");
+    }
 
     #[test]
     fn planned_tasks_are_pending_by_default() {

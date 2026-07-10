@@ -38,8 +38,11 @@ pub async fn generate_structured<T: DeserializeOwned>(
     };
     let json =
         extract_json(&text).ok_or_else(|| AgentError(format!("{role} returned no JSON object")))?;
-    let value = serde_json::from_str(json)
-        .map_err(|error| AgentError(format!("{role} returned invalid JSON: {error}")))?;
+    let value = serde_json::from_str(json).map_err(|error| {
+        AgentError(format!(
+            "{role} returned JSON with an invalid structure: {error}"
+        ))
+    })?;
     Ok(Some(Routed {
         value,
         model,

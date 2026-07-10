@@ -137,6 +137,7 @@ pub struct DialogueBeat {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AssetTaskPlan {
+    #[serde(default)]
     pub id: String,
     pub kind: String,
     pub target_stem: String,
