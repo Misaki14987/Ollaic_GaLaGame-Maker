@@ -3,6 +3,7 @@
 //! and updates the StoryPlan as steps produce output. The Tauri adapter
 //! (commands.rs) wraps this testable core.
 
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -124,6 +125,23 @@ impl Pipeline {
         }))
     }
 
+    /// Attach a persisted run without changing or driving it. Commands use
+    /// this after an app restart when the user wants to retry a completed or
+    /// failed step.
+    pub fn attach_run(
+        &self,
+        project_path: &Path,
+        run_id: &str,
+    ) -> Result<Arc<RunHandle>, PipelineError> {
+        let state = store::load_run_state(project_path, run_id)
+            .map_err(PipelineError::Store)?
+            .ok_or(PipelineError::RunNotFound(run_id.to_string()))?;
+        Ok(Arc::new(RunHandle {
+            state: Arc::new(Mutex::new(state)),
+            notify: Arc::new(Notify::new()),
+        }))
+    }
+
     /// Drive the run: pick ready steps in dependency order, run their agent,
     /// update state + plan, persist after each transition, emit events.
     /// Returns when the run is `Completed`, `Failed`, or `Paused`.
@@ -187,7 +205,16 @@ impl Pipeline {
                     (step.def.kind, step.def.prompt.clone())
                 };
                 state.updated_at = clock.now_ms();
-                let _ = store::save_run_state(project_path, &state);
+                if let Err(err) = store::save_run_state(project_path, &state) {
+                    state.status = RunStatus::Failed;
+                    let run_id = state.run_id.clone();
+                    drop(state);
+                    sink.emit(PipelineEvent::RunFailed {
+                        run_id,
+                        error: format!("failed to persist step transition: {}", err),
+                    });
+                    return Action::Idle;
+                }
                 drop(state);
                 sink.emit(PipelineEvent::StepStarted {
                     run_id: run_id.clone(),
@@ -207,7 +234,16 @@ impl Pipeline {
                     state.status = RunStatus::Completed;
                     state.updated_at = clock.now_ms();
                     let run_id = state.run_id.clone();
-                    let _ = store::save_run_state(project_path, &state);
+                    if let Err(err) = store::save_run_state(project_path, &state) {
+                        state.status = RunStatus::Failed;
+                        let run_id = state.run_id.clone();
+                        drop(state);
+                        sink.emit(PipelineEvent::RunFailed {
+                            run_id,
+                            error: format!("failed to persist run completion: {}", err),
+                        });
+                        return Action::Idle;
+                    }
                     drop(state);
                     sink.emit(PipelineEvent::RunCompleted {
                         run_id: run_id.clone(),
@@ -260,6 +296,26 @@ impl Pipeline {
                 kind.as_str()
             ))),
         };
+        let result = match result {
+            Ok(out) => {
+                // Apply output before marking the step succeeded. A failed
+                // content write is a failed step, not a warning.
+                apply_output(&mut plan, kind, &out);
+                let persist_result = if let Some(scene) = out.scene.as_ref() {
+                    write_scene_file(project_path, scene).map_err(|e| {
+                        AgentError(format!("failed to write scene '{}': {}", scene.name, e))
+                    })
+                } else {
+                    Ok(())
+                }
+                .and_then(|_| {
+                    story_plan::save_plan(project_path, &plan)
+                        .map_err(|e| AgentError(format!("failed to save StoryPlan: {}", e)))
+                });
+                persist_result.map(|_| out)
+            }
+            Err(err) => Err(err),
+        };
 
         match result {
             Ok(out) => {
@@ -269,19 +325,6 @@ impl Pipeline {
                 // on resume, then re-run. P0 stub agents are deterministic, so
                 // re-applying is idempotent. P1 LLM agents need reconciliation
                 // (e.g. output versioning) to avoid double-applying - see ADR 0054.
-                apply_output(&mut plan, kind, &out);
-                if kind == StepKind::Scene {
-                    if let Some(scene) = &out.scene {
-                        if let Err(e) = write_scene_file(project_path, scene) {
-                            eprintln!(
-                                "[pipeline] failed to write scene {}: {}",
-                                scene.name, e
-                            );
-                        }
-                    }
-                }
-                let _ = story_plan::save_plan(project_path, &plan);
-
                 let mut state = handle.state.lock().await;
                 {
                     let step = state.find_step_mut(&id).expect("step exists");
@@ -292,7 +335,23 @@ impl Pipeline {
                 state.updated_at = clock.now_ms();
                 let run_id = state.run_id.clone();
                 let output_ref = state.find_step(&id).expect("step exists").output.clone();
-                let _ = store::save_run_state(project_path, &state);
+                if let Err(err) = store::save_run_state(project_path, &state) {
+                    let error = format!("failed to persist step success: {}", err);
+                    if let Some(step) = state.find_step_mut(&id) {
+                        step.status = StepStatus::Failed;
+                        step.error = Some(error.clone());
+                    }
+                    state.status = RunStatus::Failed;
+                    let run_id = state.run_id.clone();
+                    drop(state);
+                    sink.emit(PipelineEvent::StepFailed {
+                        run_id: run_id.clone(),
+                        step_id: id,
+                        error: error.clone(),
+                    });
+                    sink.emit(PipelineEvent::RunFailed { run_id, error });
+                    return;
+                }
                 drop(state);
                 sink.emit(PipelineEvent::StepSucceeded {
                     run_id,
@@ -434,7 +493,8 @@ impl RunHandle {
         Ok(())
     }
 
-    /// Reset a failed/pending step to `Pending` so the scheduler re-runs it.
+    /// Reset a step and everything downstream so the scheduler re-runs a
+    /// coherent suffix of the DAG without repeating completed upstream work.
     pub async fn retry_step(
         &self,
         project_path: &Path,
@@ -444,14 +504,37 @@ impl RunHandle {
     ) -> Result<(), PipelineError> {
         {
             let mut state = self.state.lock().await;
-            let step = state
-                .find_step_mut(step_id)
+            let target = state
+                .find_step(step_id)
                 .ok_or_else(|| PipelineError::StepNotFound(step_id.to_string()))?;
-            step.status = StepStatus::Pending;
-            step.error = None;
-            step.output = None;
-            step.attempt = step.attempt.saturating_sub(1);
-            if state.status == RunStatus::Failed {
+            if target.status == StepStatus::Running {
+                return Err(PipelineError::InvalidStepTransition(
+                    step_id.to_string(),
+                    "cannot retry a running step".to_string(),
+                ));
+            }
+            let mut reset = HashSet::from([step_id.to_string()]);
+            loop {
+                let before = reset.len();
+                for step in &state.steps {
+                    if step.def.depends_on.iter().any(|dep| reset.contains(dep)) {
+                        reset.insert(step.def.id.clone());
+                    }
+                }
+                if reset.len() == before {
+                    break;
+                }
+            }
+            for step in &mut state.steps {
+                if reset.contains(&step.def.id) {
+                    step.status = StepStatus::Pending;
+                    step.error = None;
+                    step.output = None;
+                    step.started_at = None;
+                    step.finished_at = None;
+                }
+            }
+            if state.status.is_terminal() {
                 state.status = RunStatus::Running;
             }
             state.updated_at = clock.now_ms();
@@ -477,6 +560,12 @@ impl RunHandle {
             let step = state
                 .find_step_mut(step_id)
                 .ok_or_else(|| PipelineError::StepNotFound(step_id.to_string()))?;
+            if step.status != StepStatus::Pending {
+                return Err(PipelineError::InvalidStepTransition(
+                    step_id.to_string(),
+                    "only pending steps can be skipped".to_string(),
+                ));
+            }
             step.status = StepStatus::Skipped;
             step.error = None;
             step.finished_at = Some(clock.now_ms());
@@ -503,6 +592,7 @@ pub enum PipelineError {
     Plan(crate::story_plan::PlanError),
     RunNotFound(String),
     StepNotFound(String),
+    InvalidStepTransition(String, String),
 }
 
 impl std::fmt::Display for PipelineError {
@@ -513,6 +603,9 @@ impl std::fmt::Display for PipelineError {
             PipelineError::Plan(e) => write!(f, "story plan error: {}", e),
             PipelineError::RunNotFound(id) => write!(f, "run not found: {}", id),
             PipelineError::StepNotFound(id) => write!(f, "step not found: {}", id),
+            PipelineError::InvalidStepTransition(id, reason) => {
+                write!(f, "invalid transition for step '{}': {}", id, reason)
+            }
         }
     }
 }

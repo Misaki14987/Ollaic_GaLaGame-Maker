@@ -4,20 +4,24 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import * as React from 'react';
-import type { PipelineEvent } from '../lib/pipeline-types';
+import type { PipelineEvent, RunState } from '../lib/pipeline-types';
 import { FlowBoard } from './FlowBoard';
 
 // React Flow's real renderer needs DOM measurements jsdom doesn't provide.
 // Mock it as a passthrough that renders each node through its `nodeTypes`
 // component, so we test our wiring + StepNode, not the library.
 vi.mock('reactflow', () => ({
-  default: ({ nodes, nodeTypes }: { nodes: any[]; nodeTypes: Record<string, any> }) =>
+  default: ({ nodes, nodeTypes, onNodeClick }: { nodes: any[]; nodeTypes: Record<string, any>; onNodeClick?: Function }) =>
     React.createElement(
       'div',
       { 'data-testid': 'reactflow-mock' },
       nodes.map((n) =>
         nodeTypes?.[n.type]
-          ? React.createElement(nodeTypes[n.type], { key: n.id, data: n.data })
+          ? React.createElement(
+            'button',
+            { key: n.id, 'aria-label': `open-${n.id}`, onClick: (event) => onNodeClick?.(event, n) },
+            React.createElement(nodeTypes[n.type], { data: n.data }),
+          )
           : null,
       ),
     ),
@@ -32,13 +36,47 @@ const mockedListen = vi.mocked(listen);
 
 let lastListenHandler: ((event: { payload: PipelineEvent }) => void) | null = null;
 
+function runState(status: RunState['status'] = 'running'): RunState {
+  return {
+    runId: 'run_1',
+    projectPath: '/tmp/proj',
+    prompt: 'brief',
+    status,
+    startedAt: 1,
+    updatedAt: 2,
+    steps: [
+      {
+        def: { id: 'plan', kind: 'plan', dependsOn: [], agent: null, prompt: '' },
+        status: status === 'completed' ? 'succeeded' : 'pending',
+        attempt: status === 'completed' ? 1 : 0,
+        output: null,
+        error: null,
+        startedAt: null,
+        finishedAt: null,
+      },
+      {
+        def: { id: 'outline', kind: 'outline', dependsOn: ['plan'], agent: null, prompt: '' },
+        status: status === 'completed' ? 'succeeded' : 'pending',
+        attempt: status === 'completed' ? 1 : 0,
+        output: null,
+        error: null,
+        startedAt: null,
+        finishedAt: null,
+      },
+    ],
+  };
+}
+
 beforeEach(() => {
   lastListenHandler = null;
   mockedInvoke.mockReset();
   mockedListen.mockReset();
-  mockedInvoke.mockImplementation((cmd: string) =>
-    Promise.resolve(cmd === 'pipeline_start' ? ('run_1' as unknown) : undefined),
-  );
+  mockedInvoke.mockImplementation((cmd: string) => {
+    if (cmd === 'pipeline_start') return Promise.resolve('run_1' as unknown);
+    if (cmd === 'pipeline_get_state') return Promise.resolve(runState() as unknown);
+    if (cmd === 'pipeline_list_runs') return Promise.resolve([] as unknown);
+    return Promise.resolve(undefined);
+  });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   mockedListen.mockImplementation((_channel: string, handler: any) => {
     lastListenHandler = handler as typeof lastListenHandler;
@@ -112,5 +150,63 @@ describe('FlowBoard', () => {
 
     emit({ type: 'runPaused', runId: 'run_1' });
     expect(screen.getByRole('button', { name: '续跑' })).toBeInTheDocument();
+  });
+
+  it('hydrates completed state when fast steps finished before event subscription', async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'pipeline_start') return Promise.resolve('run_1' as unknown);
+      if (cmd === 'pipeline_get_state') return Promise.resolve(runState('completed') as unknown);
+      if (cmd === 'pipeline_list_runs') return Promise.resolve([] as unknown);
+      return Promise.resolve(undefined);
+    });
+    const user = userEvent.setup();
+    render(<FlowBoard projectPath="/tmp/proj" />);
+
+    await user.type(screen.getByLabelText('production brief'), 'x');
+    await user.click(screen.getByRole('button', { name: '运行' }));
+
+    await vi.waitFor(() => expect(screen.getByTestId('flow-run-status')).toHaveTextContent('completed'));
+    expect(stepStatus('plan')).toBe('succeeded');
+    expect(stepStatus('outline')).toBe('succeeded');
+  });
+
+  it('discovers a persisted paused run and resumes it through crash recovery', async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'pipeline_list_runs') return Promise.resolve([runState('paused')] as unknown);
+      return Promise.resolve(undefined);
+    });
+    const user = userEvent.setup();
+    render(<FlowBoard projectPath="/tmp/proj" />);
+
+    const resume = await screen.findByRole('button', { name: '续跑' });
+    await user.click(resume);
+
+    expect(mockedInvoke).toHaveBeenCalledWith('pipeline_resume_run', {
+      projectPath: '/tmp/proj',
+      runId: 'run_1',
+    });
+    expect(mockedInvoke).not.toHaveBeenCalledWith('pipeline_resume', { runId: 'run_1' });
+  });
+
+  it('retries a selected failed step with enough context to attach a persisted run', async () => {
+    const failed = runState('failed');
+    failed.steps[0].status = 'failed';
+    failed.steps[0].error = 'boom';
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'pipeline_list_runs') return Promise.resolve([failed] as unknown);
+      if (cmd === 'pipeline_get_state') return Promise.resolve(failed as unknown);
+      return Promise.resolve(undefined);
+    });
+    const user = userEvent.setup();
+    render(<FlowBoard projectPath="/tmp/proj" />);
+
+    await user.click(await screen.findByRole('button', { name: 'open-plan' }));
+    await user.click(screen.getByRole('button', { name: '从此步重跑' }));
+
+    expect(mockedInvoke).toHaveBeenCalledWith('pipeline_retry_step', {
+      runId: 'run_1',
+      stepId: 'plan',
+      projectPath: '/tmp/proj',
+    });
   });
 });

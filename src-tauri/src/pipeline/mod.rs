@@ -15,14 +15,12 @@ pub mod store;
 pub use dsl::{default_recipe, FlowRecipe, RecipeError, StepDef, StepKind};
 #[allow(unused_imports)]
 pub use events::{EventSink, PipelineEvent};
-#[cfg(test)]
-pub use events::RecordingSink;
 #[allow(unused_imports)]
 pub use scheduler::{Pipeline, PipelineError, RunHandle};
 #[allow(unused_imports)]
 pub use state::{Clock, RunState, RunStatus, StepState, StepStatus, SystemClock};
 #[allow(unused_imports)]
-pub use store::{load_run_state, run_state_path, save_run_state, RunStoreError};
+pub use store::{list_run_states, load_run_state, run_state_path, save_run_state, RunStoreError};
 
 #[cfg(test)]
 #[path = "tests.rs"]

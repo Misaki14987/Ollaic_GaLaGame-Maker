@@ -84,7 +84,6 @@ async fn drive(
     project_path: PathBuf,
     app: tauri::AppHandle,
 ) {
-    driving.store(true, Ordering::SeqCst);
     let sink = make_sink(&app);
     pipeline
         .execute(&project_path, handle, &sink, &SystemClock)
@@ -99,6 +98,7 @@ fn spawn_driver(
     project_path: PathBuf,
     app: tauri::AppHandle,
 ) {
+    driving.store(true, Ordering::SeqCst);
     tauri::async_runtime::spawn(drive(
         pipeline, handle, driving, project_path, app,
     ));
@@ -192,7 +192,26 @@ pub async fn pipeline_retry_step(
     app: tauri::AppHandle,
     run_id: String,
     step_id: String,
+    project_path: String,
 ) -> Result<(), String> {
+    let requested_path = PathBuf::from(project_path);
+    {
+        let mut runs = orchestrator.runs.lock().await;
+        if !runs.contains_key(&run_id) {
+            let handle = orchestrator
+                .pipeline
+                .attach_run(&requested_path, &run_id)
+                .map_err(|e| e.to_string())?;
+            runs.insert(
+                run_id.clone(),
+                ManagedRun {
+                    handle,
+                    project_path: requested_path,
+                    driving: Arc::new(AtomicBool::new(false)),
+                },
+            );
+        }
+    }
     let (handle, project_path, driving) = {
         let guard = orchestrator.runs.lock().await;
         let entry = guard
@@ -299,6 +318,12 @@ pub async fn pipeline_resume_run(
 #[tauri::command]
 pub async fn pipeline_get_plan(project_path: String) -> Result<Option<StoryPlan>, String> {
     story_plan::load_plan(&PathBuf::from(project_path)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn pipeline_list_runs(project_path: String) -> Result<Vec<RunState>, String> {
+    crate::pipeline::store::list_run_states(&PathBuf::from(project_path))
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

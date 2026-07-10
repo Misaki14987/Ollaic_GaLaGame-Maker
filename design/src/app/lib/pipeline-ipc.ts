@@ -31,8 +31,8 @@ export async function pipelineResumeRun(projectPath: string, runId: string): Pro
 }
 
 /** Re-run a step (resets it to pending and, if the run was failed, restarts it). */
-export async function pipelineRetryStep(runId: string, stepId: string): Promise<void> {
-  return invoke<void>('pipeline_retry_step', { runId, stepId });
+export async function pipelineRetryStep(runId: string, stepId: string, projectPath: string): Promise<void> {
+  return invoke<void>('pipeline_retry_step', { runId, stepId, projectPath });
 }
 
 /** Skip a pending step; downstream steps whose only dep is it become ready. */
@@ -48,6 +48,11 @@ export async function pipelineGetState(runId: string): Promise<RunState | null> 
 /** The project's StoryPlan (`.ollaic/plan.json`), if one exists. */
 export async function pipelineGetPlan(projectPath: string): Promise<StoryPlan | null> {
   return invoke<StoryPlan | null>('pipeline_get_plan', { projectPath });
+}
+
+/** Persisted runs for a project, newest first. */
+export async function pipelineListRuns(projectPath: string): Promise<RunState[]> {
+  return invoke<RunState[]>('pipeline_list_runs', { projectPath });
 }
 
 /** Subscribe to `pipeline:{runId}` events. Returns an unlisten function. */

@@ -26,6 +26,31 @@ pub fn load_run_state(project_path: &Path, run_id: &str) -> Result<Option<RunSta
     Ok(Some(state))
 }
 
+pub fn list_run_states(project_path: &Path) -> Result<Vec<RunState>, RunStoreError> {
+    let dir = run_state_dir(project_path);
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let entries = std::fs::read_dir(&dir)
+        .map_err(|e| RunStoreError::ReadFailed(dir.display().to_string(), e.to_string()))?;
+    let mut runs = Vec::new();
+    for entry in entries {
+        let entry = entry
+            .map_err(|e| RunStoreError::ReadFailed(dir.display().to_string(), e.to_string()))?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path)
+            .map_err(|e| RunStoreError::ReadFailed(path.display().to_string(), e.to_string()))?;
+        let state = serde_json::from_str(&text)
+            .map_err(|e| RunStoreError::InvalidJson(e.to_string()))?;
+        runs.push(state);
+    }
+    runs.sort_by_key(|run: &RunState| std::cmp::Reverse(run.updated_at));
+    Ok(runs)
+}
+
 pub fn save_run_state(project_path: &Path, state: &RunState) -> Result<(), RunStoreError> {
     let dir = run_state_dir(project_path);
     std::fs::create_dir_all(&dir)
@@ -117,5 +142,22 @@ mod tests {
             loaded.find_step("b").unwrap().status,
             crate::pipeline::state::StepStatus::Pending
         );
+    }
+
+    #[test]
+    fn lists_run_states_newest_first() {
+        let project = fresh_dir("list");
+        let mut older = sample_state("run_old");
+        older.updated_at = 100;
+        let mut newer = sample_state("run_new");
+        newer.updated_at = 200;
+        save_run_state(&project, &older).unwrap();
+        save_run_state(&project, &newer).unwrap();
+
+        let runs = list_run_states(&project).unwrap();
+        assert_eq!(runs.iter().map(|run| run.run_id.as_str()).collect::<Vec<_>>(), vec![
+            "run_new",
+            "run_old",
+        ]);
     }
 }
