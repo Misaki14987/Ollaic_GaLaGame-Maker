@@ -23,7 +23,7 @@ describe('PipelineEventLedger', () => {
 
   it('sorts events chronologically and renders localized run and step activity', () => {
     const events = [
-      record({ type: 'runCompleted', runId: 'run-1' }, at(8, 9)),
+      record({ type: 'runCompleted', runId: 'run-1' }, at(8, 10)),
       record({ type: 'stepFailed', runId: 'run-1', stepId: 'outline', error: '模型超时' }, at(8, 4)),
       record({ type: 'runStarted', runId: 'run-1' }, at(8, 1)),
       record({ type: 'stepStarted', runId: 'run-1', stepId: 'plan', kind: 'plan' }, at(8, 2)),
@@ -31,7 +31,8 @@ describe('PipelineEventLedger', () => {
       record({ type: 'stepSkipped', runId: 'run-1', stepId: 'outline' }, at(8, 5)),
       record({ type: 'runPaused', runId: 'run-1' }, at(8, 6)),
       record({ type: 'runResumed', runId: 'run-1' }, at(8, 7)),
-      record({ type: 'runFailed', runId: 'run-1', error: '写盘失败' }, at(8, 8)),
+      record({ type: 'runStopped', runId: 'run-1' }, at(8, 8)),
+      record({ type: 'runFailed', runId: 'run-1', error: '写盘失败' }, at(8, 9)),
     ];
 
     render(<PipelineEventLedger events={events} steps={steps} />);
@@ -39,7 +40,7 @@ describe('PipelineEventLedger', () => {
     const ledger = screen.getByRole('list', { name: '生产事件' });
     expect(ledger).toHaveAttribute('aria-live', 'polite');
     const entries = within(ledger).getAllByRole('listitem');
-    expect(entries).toHaveLength(9);
+    expect(entries).toHaveLength(10);
     expect(entries.map((entry) => entry.textContent)).toEqual([
       expect.stringContaining('生产流程已启动'),
       expect.stringContaining('plan策划开始执行'),
@@ -48,11 +49,12 @@ describe('PipelineEventLedger', () => {
       expect.stringContaining('outline大纲已跳过'),
       expect.stringContaining('生产流程已暂停'),
       expect.stringContaining('生产流程继续执行'),
+      expect.stringContaining('生产流程已停止'),
       expect.stringContaining('生产流程失败：写盘失败'),
       expect.stringContaining('生产流程已完成'),
     ]);
     expect(entries[0]).toHaveTextContent(/08:05:01/);
-    expect(screen.getByText('9 条')).toBeInTheDocument();
+    expect(screen.getByText('10 条')).toBeInTheDocument();
   });
 
   it('learns an unknown step type from its start event', () => {

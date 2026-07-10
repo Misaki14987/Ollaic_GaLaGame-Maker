@@ -51,6 +51,8 @@ function eventDescription(event: PipelineEvent): { text: string; tone: EventTone
       return { text: '生产流程已暂停', tone: 'warning' };
     case 'runResumed':
       return { text: '生产流程继续执行', tone: 'active' };
+    case 'runStopped':
+      return { text: '生产流程已停止', tone: 'warning' };
     case 'runCompleted':
       return { text: '生产流程已完成', tone: 'success' };
     case 'runFailed':
