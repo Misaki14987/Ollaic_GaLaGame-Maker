@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::pipeline::dsl::FlowRecipe;
 
+pub const MAX_STEP_HISTORY: usize = 20;
+
 /// Lifecycle of a single Flow Step within a run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -103,6 +105,14 @@ impl StepState {
             self.status,
             StepStatus::Succeeded | StepStatus::Failed | StepStatus::Skipped
         )
+    }
+
+    pub fn record_attempt(&mut self, history: StepRunHistory) {
+        if self.history.len() >= MAX_STEP_HISTORY {
+            let remove = self.history.len() + 1 - MAX_STEP_HISTORY;
+            self.history.drain(..remove);
+        }
+        self.history.push(history);
     }
 }
 
@@ -268,5 +278,28 @@ mod tests {
         // `b` is still pending but its (skipped) dependency no longer blocks it.
         assert_eq!(state.next_ready_step_id().as_deref(), Some("b"));
         assert!(!state.is_complete(), "b is still pending");
+    }
+
+    #[test]
+    fn step_history_keeps_only_the_latest_attempts() {
+        let mut step = StepState::pending(StepDef::new("a", StepKind::Plan));
+        for attempt in 1..=MAX_STEP_HISTORY as u32 + 3 {
+            step.record_attempt(StepRunHistory {
+                attempt,
+                input_snapshot: attempt.to_string(),
+                output: None,
+                error: None,
+                started_at: attempt as u64,
+                finished_at: None,
+                duration_ms: None,
+                diff: None,
+                cost: None,
+                warnings: Vec::new(),
+                downgrade: None,
+            });
+        }
+        assert_eq!(step.history.len(), MAX_STEP_HISTORY);
+        assert_eq!(step.history.first().unwrap().attempt, 4);
+        assert_eq!(step.history.last().unwrap().attempt, 23);
     }
 }

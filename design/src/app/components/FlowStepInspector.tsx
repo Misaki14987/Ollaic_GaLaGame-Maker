@@ -5,6 +5,7 @@ import {
   Clock3,
   GitBranch,
   History,
+  ListTree,
   PencilLine,
   RotateCcw,
   SkipForward,
@@ -13,6 +14,7 @@ import {
 } from 'lucide-react';
 import type { FlowStepView } from '../lib/flow-state';
 import type { StepStatus } from '../lib/pipeline-types';
+import type { PipelineEventRecord } from './PipelineEventLedger';
 import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
@@ -36,6 +38,7 @@ export interface FlowStepInspectorProps {
   onRetry: (stepId: string) => void;
   onSkip: (stepId: string) => void;
   onPromptRerun: (stepId: string, prompt: string) => void;
+  events?: readonly PipelineEventRecord[];
 }
 
 function formatted(value: string | null | undefined) {
@@ -82,6 +85,7 @@ export function FlowStepInspector({
   onRetry,
   onSkip,
   onPromptRerun,
+  events = [],
 }: FlowStepInspectorProps) {
   const [promptDraft, setPromptDraft] = useState(selected?.prompt ?? '');
 
@@ -92,6 +96,9 @@ export function FlowStepInspector({
   if (!selected) return null;
 
   const state = STATUS[selected.status];
+  const stepEvents = events.filter((record) => (
+    'stepId' in record.event && record.event.stepId === selected.id
+  ));
 
   return (
     <aside
@@ -115,7 +122,7 @@ export function FlowStepInspector({
               <span>尝试 {selected.attempt}</span>
             </div>
           </div>
-          <Button type="button" variant="ghost" size="icon" onClick={onClose} aria-label="关闭步骤检查器">
+          <Button type="button" variant="ghost" size="icon" onClick={onClose} aria-label="关闭步骤检查器" autoFocus>
             <X />
           </Button>
         </div>
@@ -131,6 +138,9 @@ export function FlowStepInspector({
           </TabsTrigger>
           <TabsTrigger value="history" className="h-10 rounded-none border-0 px-4 text-xs data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
             <History /> 记录
+          </TabsTrigger>
+          <TabsTrigger value="logs" className="h-10 rounded-none border-0 px-4 text-xs data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
+            <ListTree /> 日志
           </TabsTrigger>
         </TabsList>
 
@@ -266,6 +276,30 @@ export function FlowStepInspector({
               </div>
             ) : (
               <p className="p-4 text-xs text-muted-foreground">暂无执行记录</p>
+            )}
+          </ScrollArea>
+        </TabsContent>
+
+        <TabsContent value="logs" className="min-h-0 flex-1">
+          <ScrollArea className="h-full">
+            {stepEvents.length ? (
+              <ol className="divide-y divide-border">
+                {stepEvents.map(({ event, receivedAt }, index) => (
+                  <li key={`${receivedAt}-${event.type}-${index}`} className="grid grid-cols-[5rem_minmax(0,1fr)] gap-3 px-4 py-3 text-xs">
+                    <time className="font-mono-family text-[10px] text-muted-foreground">
+                      {new Date(receivedAt).toLocaleTimeString('zh-CN', { hour12: false })}
+                    </time>
+                    <span>
+                      {event.type === 'stepStarted' && '开始执行'}
+                      {event.type === 'stepSucceeded' && '执行完成'}
+                      {event.type === 'stepSkipped' && '已跳过'}
+                      {event.type === 'stepFailed' && `执行失败：${event.error}`}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="p-4 text-xs text-muted-foreground">暂无此步骤的运行日志</p>
             )}
           </ScrollArea>
         </TabsContent>

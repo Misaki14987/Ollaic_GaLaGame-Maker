@@ -16,11 +16,12 @@ vi.mock('reactflow', () => ({
 
 describe('StepNode', () => {
   it('presents the step hierarchy and named connection targets', () => {
-    render(<StepNode data={{ id: 'outline', kind: 'outline', status: 'pending', attempt: 0 }} />);
+    render(<StepNode data={{ id: 'outline', kind: 'outline', status: 'pending', attempt: 0, summary: '三章结构与共同路线' }} />);
 
     expect(screen.getByRole('group', { name: 'outline 节点，章节大纲，待运行，未尝试' })).toBeInTheDocument();
     expect(screen.getByText('章节大纲')).toBeInTheDocument();
     expect(screen.getByText('待运行')).toBeInTheDocument();
+    expect(screen.getByText('三章结构与共同路线')).toBeInTheDocument();
     expect(screen.getByLabelText('outline 输入连接点')).toHaveAttribute('data-position', 'top');
     expect(screen.getByLabelText('outline 输出连接点')).toHaveAttribute('data-position', 'bottom');
     expect(screen.getByLabelText('outline 步骤进度')).toHaveAttribute('aria-valuenow', '0');

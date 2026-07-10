@@ -37,6 +37,15 @@ vi.mock('reactflow', () => ({
         'aria-label': 'delete-first-edge',
         onClick: () => onEdgesDelete?.([edges[0]]),
       }) : null,
+      nodes[1] ? React.createElement('button', {
+        key: 'drop-node',
+        'aria-label': 'drop-second-on-first',
+        onClick: () => {
+          const moved = { ...nodes[1], position: nodes[0].position };
+          onNodesChange?.([{ id: moved.id, type: 'position', position: moved.position }]);
+          onNodeDragStop?.({}, moved);
+        },
+      }) : null,
     ),
   useNodesState: (initialNodes: any[]) => {
     const [nodes, setNodes] = React.useState(initialNodes);
@@ -58,6 +67,7 @@ const mockedInvoke = vi.mocked(invoke);
 const mockedListen = vi.mocked(listen);
 
 let lastListenHandler: ((event: { payload: PipelineEvent }) => void) | null = null;
+let listenHandlers: Array<(event: { payload: PipelineEvent }) => void> = [];
 
 function runState(status: RunState['status'] = 'running'): RunState {
   return {
@@ -93,6 +103,7 @@ function runState(status: RunState['status'] = 'running'): RunState {
 beforeEach(() => {
   localStorage.clear();
   lastListenHandler = null;
+  listenHandlers = [];
   mockedInvoke.mockReset();
   mockedListen.mockReset();
   mockedInvoke.mockImplementation((cmd: string) => {
@@ -104,6 +115,7 @@ beforeEach(() => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   mockedListen.mockImplementation((_channel: string, handler: any) => {
     lastListenHandler = handler as typeof lastListenHandler;
+    listenHandlers.push(handler as (event: { payload: PipelineEvent }) => void);
     return Promise.resolve((() => {}) as unknown as ReturnType<typeof listen>);
   });
 });
@@ -284,6 +296,29 @@ describe('FlowBoard', () => {
     });
   });
 
+  it('adds a dependency when a pending node is dropped onto another node', async () => {
+    const prepared = runState('paused');
+    prepared.steps[1].def.dependsOn = [];
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'pipeline_start') return Promise.resolve('run_1' as unknown);
+      if (cmd === 'pipeline_get_state') return Promise.resolve(prepared as unknown);
+      if (cmd === 'pipeline_list_runs') return Promise.resolve([] as unknown);
+      return Promise.resolve(undefined);
+    });
+    const user = userEvent.setup();
+    render(<FlowBoard projectPath="/tmp/proj" />);
+
+    await user.type(screen.getByLabelText('production brief'), 'x');
+    await user.click(screen.getByRole('button', { name: '创建流程' }));
+    await user.click(await screen.findByRole('button', { name: 'drop-second-on-first' }));
+
+    expect(mockedInvoke).toHaveBeenCalledWith('pipeline_update_dependencies', {
+      runId: 'run_1',
+      stepId: 'outline',
+      dependsOn: ['plan'],
+    });
+  });
+
   it('exposes stop and single-step execution as deterministic controls', async () => {
     mockedInvoke.mockImplementation((cmd: string) => {
       if (cmd === 'pipeline_start') return Promise.resolve('run_1' as unknown);
@@ -364,5 +399,40 @@ describe('FlowBoard', () => {
 
     expect(await screen.findByText('两位创作者在共同制作游戏时重新理解彼此。')).toBeInTheDocument();
     expect(screen.getByText('1 章 / 1 场景')).toBeInTheDocument();
+  });
+
+  it('ignores stale project loads and events after navigation', async () => {
+    let resolveOldRuns: (runs: RunState[]) => void = () => {};
+    const oldRuns = new Promise<RunState[]>((resolve) => { resolveOldRuns = resolve; });
+    const old = runState('paused');
+    old.runId = 'run_old';
+    old.projectPath = '/tmp/old';
+    old.prompt = 'old brief';
+    const current = runState('paused');
+    current.runId = 'run_current';
+    current.projectPath = '/tmp/current';
+    current.prompt = 'current brief';
+    mockedInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === 'pipeline_list_runs') {
+        return (args?.projectPath === '/tmp/old' ? oldRuns : Promise.resolve([current])) as Promise<never>;
+      }
+      if (cmd === 'pipeline_get_plan') return Promise.resolve(null as never);
+      return Promise.resolve(undefined);
+    });
+
+    const view = render(<FlowBoard projectPath="/tmp/old" />);
+    view.rerender(<FlowBoard projectPath="/tmp/current" />);
+    expect(await screen.findByDisplayValue('current brief')).toBeInTheDocument();
+    await vi.waitFor(() => expect(listenHandlers.length).toBe(1));
+
+    resolveOldRuns([old]);
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByDisplayValue('current brief')).toBeInTheDocument();
+    expect(screen.queryByText('old brief')).not.toBeInTheDocument();
+
+    act(() => {
+      listenHandlers[0]?.({ payload: { type: 'stepFailed', runId: 'run_old', stepId: 'plan', error: 'stale run error' } });
+    });
+    expect(screen.queryByText(/stale run error/)).not.toBeInTheDocument();
   });
 });

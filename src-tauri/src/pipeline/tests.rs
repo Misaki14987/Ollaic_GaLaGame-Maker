@@ -1055,6 +1055,64 @@ async fn step_once_runs_one_ready_step_then_pauses() {
 }
 
 #[tokio::test]
+async fn recovered_running_snapshot_can_execute_one_step() {
+    let project = fresh_project("recovered_step_once");
+    let sink = Arc::new(RecordingSink::new());
+    let clock = StepClock::new();
+    let pipeline = Arc::new(Pipeline::with_default_agents());
+    pipeline
+        .create_run(
+            &project,
+            "run_recovered_step_once",
+            "brief",
+            &default_recipe(),
+            &clock,
+            sink.as_ref(),
+        )
+        .unwrap();
+
+    let recovered = pipeline
+        .attach_run(&project, "run_recovered_step_once", &clock)
+        .unwrap();
+    assert_eq!(recovered.state().lock().await.status, RunStatus::Paused);
+    let task = {
+        let pipeline = pipeline.clone();
+        let project = project.clone();
+        let recovered = recovered.clone();
+        let sink = sink.clone();
+        tokio::spawn(async move {
+            pipeline.execute(&project, recovered, sink.as_ref(), &SystemClock).await;
+        })
+    };
+    recovered.step_once(&project, sink.as_ref(), &clock).await.unwrap();
+    wait_until(&sink, |events| {
+        events.iter().any(|event| matches!(event, PipelineEvent::StepSucceeded { step_id, .. } if step_id == "plan"))
+    })
+    .await;
+    assert_eq!(recovered.state().lock().await.status, RunStatus::Paused);
+    task.abort();
+}
+
+#[test]
+fn a_new_run_updates_the_story_plan_production_brief() {
+    let project = fresh_project("new_brief");
+    let sink = RecordingSink::new();
+    let clock = StepClock::new();
+    let pipeline = Pipeline::with_default_agents();
+    pipeline
+        .create_run(&project, "run_old", "old brief", &default_recipe(), &clock, &sink)
+        .unwrap();
+    pipeline
+        .create_run(&project, "run_new", "new brief", &default_recipe(), &clock, &sink)
+        .unwrap();
+
+    assert_eq!(
+        crate::story_plan::load_plan(&project).unwrap().unwrap().prompt,
+        "new brief"
+    );
+}
+
+#[tokio::test]
 async fn edited_step_prompt_is_used_by_retry() {
     let project = fresh_project("prompt_retry");
     let sink = RecordingSink::new();

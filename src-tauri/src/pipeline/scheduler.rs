@@ -109,9 +109,15 @@ impl Pipeline {
         recipe.validate().map_err(PipelineError::RecipeInvalid)?;
         // Validate or create the IR before writing any run state. An invalid
         // plan must not leave an orphan run that later bypasses validation.
-        if story_plan::load_plan(project_path).map_err(PipelineError::Plan)?.is_none() {
-            let plan = StoryPlan::new(prompt);
-            story_plan::save_plan(project_path, &plan).map_err(PipelineError::Plan)?;
+        match story_plan::load_plan(project_path).map_err(PipelineError::Plan)? {
+            Some(mut plan) => {
+                plan.prompt = prompt.to_string();
+                story_plan::save_plan(project_path, &plan).map_err(PipelineError::Plan)?;
+            }
+            None => {
+                let plan = StoryPlan::new(prompt);
+                story_plan::save_plan(project_path, &plan).map_err(PipelineError::Plan)?;
+            }
         }
         let mut state = RunState::new(run_id, project_path, prompt, recipe, clock.now_ms());
         state.status = RunStatus::Running;
@@ -181,13 +187,13 @@ impl Pipeline {
         }))
     }
 
-    /// Attach a persisted run without changing or driving it. Commands use
-    /// this after an app restart when the user wants to retry a completed or
-    /// failed step.
+    /// Attach a persisted run without driving it. Non-terminal snapshots are
+    /// normalized to a paused, resumable state because no live driver exists.
     pub fn attach_run(
         &self,
         project_path: &Path,
         run_id: &str,
+        clock: &dyn Clock,
     ) -> Result<Arc<RunHandle>, PipelineError> {
         if story_plan::load_plan(project_path)
             .map_err(PipelineError::Plan)?
@@ -195,9 +201,34 @@ impl Pipeline {
         {
             return Err(PipelineError::PlanMissing);
         }
-        let state = store::load_run_state(project_path, run_id)
+        let mut state = store::load_run_state(project_path, run_id)
             .map_err(PipelineError::Store)?
             .ok_or(PipelineError::RunNotFound(run_id.to_string()))?;
+        let mut changed = false;
+        if !state.status.is_terminal() {
+            let interrupted_at = clock.now_ms();
+            for step in &mut state.steps {
+                if step.status == StepStatus::Running {
+                    if let Some(attempt) = step.history.last_mut() {
+                        attempt.error = Some("interrupted before completion".to_string());
+                        attempt.finished_at = Some(interrupted_at);
+                        attempt.duration_ms = Some(interrupted_at.saturating_sub(attempt.started_at));
+                    }
+                    step.status = StepStatus::Pending;
+                    step.started_at = None;
+                    step.output = None;
+                    changed = true;
+                }
+            }
+            if state.status == RunStatus::Running {
+                state.status = RunStatus::Paused;
+                changed = true;
+            }
+            if changed {
+                state.updated_at = interrupted_at;
+                store::save_run_state(project_path, &state).map_err(PipelineError::Store)?;
+            }
+        }
         Ok(Arc::new(RunHandle {
             state: Arc::new(Mutex::new(state)),
             notify: Arc::new(Notify::new()),
@@ -293,7 +324,7 @@ impl Pipeline {
                     step.attempt += 1;
                     step.started_at = Some(started_at);
                     step.finished_at = None;
-                    step.history.push(StepRunHistory {
+                    step.record_attempt(StepRunHistory {
                         attempt: step.attempt,
                         input_snapshot: prompt.clone(),
                         output: None,
@@ -739,6 +770,8 @@ impl RunHandle {
         sink: &dyn EventSink,
         clock: &dyn Clock,
     ) -> Result<(), PipelineError> {
+        let resumed;
+        let run_id;
         {
             let mut state = self.state.lock().await;
             let target = state
@@ -771,13 +804,17 @@ impl RunHandle {
                     step.finished_at = None;
                 }
             }
-            if state.status.is_terminal() {
+            resumed = state.status != RunStatus::Running;
+            if resumed {
                 state.status = RunStatus::Running;
             }
             state.updated_at = clock.now_ms();
+            run_id = state.run_id.clone();
             store::save_run_state(project_path, &state).map_err(PipelineError::Store)?;
         }
-        let _ = sink;
+        if resumed {
+            sink.emit(PipelineEvent::RunResumed { run_id });
+        }
         self.notify.notify_one();
         Ok(())
     }

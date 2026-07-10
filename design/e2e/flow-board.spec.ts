@@ -100,6 +100,9 @@ test('FlowBoard supports real node dragging and desktop inspection', async ({ pa
   await page.mouse.down();
   await page.mouse.move((before?.x ?? 0) + 260, (before?.y ?? 0) + 150, { steps: 8 });
   await page.mouse.up();
+  const after = await planNode.boundingBox();
+  expect(after).not.toBeNull();
+  expect(Math.abs((after?.x ?? 0) - (before?.x ?? 0)) + Math.abs((after?.y ?? 0) - (before?.y ?? 0))).toBeGreaterThan(40);
 
   await expect.poll(async () => page.evaluate(() => {
     const raw = localStorage.getItem('ollaic:flow-layout:%2Ftmp%2Fflow-qa:run_qa');

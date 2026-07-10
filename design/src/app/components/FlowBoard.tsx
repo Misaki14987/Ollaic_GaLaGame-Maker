@@ -29,7 +29,7 @@ import { StepNode, type StepNodeData } from './StepNode';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Progress } from './ui/progress';
-import { initialFlowState, reduceFlowEvent } from '../lib/flow-state';
+import { initialFlowState, reduceFlowEvent, type FlowStepView } from '../lib/flow-state';
 import { layoutFlowSteps, loadFlowPositions, saveFlowPositions } from '../lib/flow-layout';
 import {
   listenPipelineEvents,
@@ -68,6 +68,23 @@ function formatElapsed(milliseconds: number) {
   const seconds = Math.max(0, Math.floor(milliseconds / 1000));
   const minutes = Math.floor(seconds / 60);
   return `${String(minutes).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+function summarizeStep(step: FlowStepView) {
+  if (!step.output) return step.prompt || undefined;
+  try {
+    const output = JSON.parse(step.output) as Record<string, unknown>;
+    if (typeof output.synopsis === 'string') return output.synopsis;
+    if (Array.isArray(output.chapters)) {
+      return output.chapters
+        .map((chapter) => chapter && typeof chapter === 'object' && 'title' in chapter ? String(chapter.title) : '')
+        .filter(Boolean)
+        .join(' / ');
+    }
+  } catch {
+    // Plain text is already suitable as a compact node summary.
+  }
+  return step.output;
 }
 
 function recordsFromSnapshot(snapshot: RunState): PipelineEventRecord[] {
@@ -130,19 +147,35 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
   const runIdRef = useRef<string | null>(null);
   const layoutKeyRef = useRef<string | null>(null);
   const flowInstanceRef = useRef<ReactFlowInstance<StepNodeData> | null>(null);
+  const loadRequestRef = useRef(0);
+  const subscriptionRef = useRef(0);
+  const workspaceRef = useRef<HTMLDivElement | null>(null);
+  const [wideInspector, setWideInspector] = useState(() => (
+    typeof window === 'undefined' || typeof window.matchMedia !== 'function'
+      ? true
+      : window.matchMedia('(min-width: 1280px)').matches
+  ));
 
   const refreshPlan = useCallback(async () => {
     setPlan(await pipelineGetPlan(projectPath));
   }, [projectPath]);
 
   const subscribe = useCallback(async (runId: string) => {
+    const subscription = ++subscriptionRef.current;
     unlistenRef.current?.();
-    unlistenRef.current = await listenPipelineEvents(runId, (event) => {
+    unlistenRef.current = null;
+    runIdRef.current = runId;
+    const unlisten = await listenPipelineEvents(runId, (event) => {
+      if (event.runId !== runId || runIdRef.current !== runId || subscriptionRef.current !== subscription) return;
       dispatch(event);
       setEvents((current) => [...current, { event, receivedAt: Date.now() }]);
       if (event.type === 'stepSucceeded' || event.type === 'runCompleted') void refreshPlan();
     });
-    runIdRef.current = runId;
+    if (subscriptionRef.current !== subscription || runIdRef.current !== runId) {
+      unlisten();
+      return;
+    }
+    unlistenRef.current = unlisten;
   }, [refreshPlan]);
 
   const refresh = useCallback(async (runId: string) => {
@@ -153,6 +186,7 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
   }, []);
 
   const loadLatest = useCallback(async () => {
+    const request = ++loadRequestRef.current;
     setLoading(true);
     setError(null);
     try {
@@ -160,6 +194,7 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
         pipelineListRuns(projectPath),
         pipelineGetPlan(projectPath),
       ]);
+      if (request !== loadRequestRef.current) return;
       setPlan(storyPlan);
       const latest = runs[0];
       if (!latest) {
@@ -176,19 +211,35 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
       setDetached(true);
       if (latest.status === 'running' || latest.status === 'paused') await subscribe(latest.runId);
     } catch (err) {
-      setError(String(err));
+      if (request === loadRequestRef.current) setError(String(err));
     } finally {
-      setLoading(false);
+      if (request === loadRequestRef.current) setLoading(false);
     }
   }, [projectPath, subscribe]);
 
   useEffect(() => {
     void loadLatest();
     return () => {
+      loadRequestRef.current += 1;
+      subscriptionRef.current += 1;
+      runIdRef.current = null;
       unlistenRef.current?.();
       unlistenRef.current = null;
     };
   }, [loadLatest]);
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const media = window.matchMedia('(min-width: 1280px)');
+    const update = () => setWideInspector(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+
+  useEffect(() => {
+    workspaceRef.current?.toggleAttribute('inert', Boolean(selectedStepId && !wideInspector));
+  }, [selectedStepId, wideInspector]);
 
   useEffect(() => {
     if (state.runStatus !== 'running') return;
@@ -215,6 +266,7 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
           cost: step.history.some((attempt) => attempt.cost != null)
             ? step.history.reduce((sum, attempt) => sum + (attempt.cost ?? 0), 0)
             : undefined,
+          summary: summarizeStep(step),
           selected: step.id === selectedStepId,
         },
       };
@@ -247,6 +299,10 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
     await runCommand(async () => {
       setSelectedStepId(null);
       setEvents([]);
+      runIdRef.current = null;
+      subscriptionRef.current += 1;
+      unlistenRef.current?.();
+      unlistenRef.current = null;
       dispatch({ type: 'reset' });
       const runId = await pipelineStart(projectPath, prompt.trim());
       await subscribe(runId);
@@ -363,7 +419,17 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
       node.id === dragged.id ? dragged.position : node.position,
     ]));
     saveFlowPositions(projectPath, state.runId, positions);
-  }, [nodes, projectPath, state.runId]);
+    const draggedStep = state.steps.find((step) => step.id === dragged.id);
+    if (state.runStatus !== 'paused' || detached || draggedStep?.status !== 'pending') return;
+    const dependency = nodes.find((node) => {
+      if (node.id === dragged.id) return false;
+      return Math.abs(node.position.x - dragged.position.x) < 118
+        && Math.abs(node.position.y - dragged.position.y) < 66;
+    });
+    if (dependency && !draggedStep.dependsOn.includes(dependency.id)) {
+      void updateDependencies(dragged.id, [...draggedStep.dependsOn, dependency.id]);
+    }
+  }, [detached, nodes, projectPath, state.runId, state.runStatus, state.steps, updateDependencies]);
 
   const edges = useMemo(() => state.steps.flatMap((step) => step.dependsOn.map((dependency) => ({
     id: `${dependency}-${step.id}`,
@@ -484,12 +550,12 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
       )}
 
       <div className="relative flex min-h-0 flex-1">
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div ref={workspaceRef} className="flex min-w-0 flex-1 flex-col">
           <section className="relative min-h-[260px] flex-1" aria-label="生产流程图">
             <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex min-h-9 items-center justify-between border-b border-border/70 bg-surface-container-lowest/85 px-3 backdrop-blur-sm">
               <div className="flex items-center gap-2 text-xs font-semibold"><GitBranch className="size-3.5 text-primary" />流程地图</div>
               <span className="text-[10px] text-muted-foreground">
-                {paused && !detached ? '可拖动节点、连接端点或删除连线来调整依赖' : '拖动节点可整理布局'}
+                {paused && !detached ? '拖到另一节点上可添加依赖，也可连接端点或删除连线' : '拖动节点可整理布局'}
               </span>
             </div>
             <div className="h-full pt-9 story-os-dot-grid" data-testid="flow-canvas">
@@ -501,6 +567,10 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
                 onNodesChange={onNodesChange}
                 onNodeDragStop={persistNodePositions}
                 onNodeClick={(_event, node: Node) => setSelectedStepId(node.id)}
+                onNodeContextMenu={(event, node) => {
+                  event.preventDefault();
+                  setSelectedStepId(node.id);
+                }}
                 onConnect={connect}
                 onEdgesDelete={deleteEdges}
                 nodesConnectable={paused && !detached}
@@ -541,7 +611,15 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
         </div>
 
         {selectedStep && (
-          <div className="absolute inset-y-0 right-0 z-30 w-full max-w-[420px] border-l border-border bg-surface-container-lowest shadow-[-10px_0_30px_var(--shadow-soft)] xl:static xl:w-[380px] xl:shrink-0 xl:shadow-none">
+          <div
+            role={wideInspector ? 'region' : 'dialog'}
+            aria-label="步骤检查器"
+            aria-modal={wideInspector ? undefined : true}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') setSelectedStepId(null);
+            }}
+            className="absolute inset-y-0 right-0 z-30 w-full max-w-[420px] border-l border-border bg-surface-container-lowest shadow-[-10px_0_30px_var(--shadow-soft)] xl:static xl:w-[380px] xl:shrink-0 xl:shadow-none"
+          >
             <FlowStepInspector
               selected={selectedStep}
               busy={busy}
@@ -550,6 +628,7 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
               onRetry={retryStep}
               onSkip={skipStep}
               onPromptRerun={updatePromptAndRetry}
+              events={events}
             />
           </div>
         )}

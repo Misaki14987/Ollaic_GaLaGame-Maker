@@ -157,7 +157,7 @@ async fn attach_run_if_needed(
     if !runs.contains_key(run_id) {
         let handle = orchestrator
             .pipeline
-            .attach_run(project_path, run_id)
+            .attach_run(project_path, run_id, &SystemClock)
             .map_err(|error| error.to_string())?;
         runs.insert(
             run_id.to_string(),
