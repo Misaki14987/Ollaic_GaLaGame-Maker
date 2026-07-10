@@ -67,18 +67,15 @@ impl Pipeline {
         sink: &dyn EventSink,
     ) -> Result<Arc<RunHandle>, PipelineError> {
         recipe.validate().map_err(PipelineError::RecipeInvalid)?;
-        let mut state = RunState::new(run_id, project_path, prompt, recipe, clock.now_ms());
-        state.status = RunStatus::Running;
-        store::save_run_state(project_path, &state).map_err(PipelineError::Store)?;
-
-        // Ensure a plan exists so execute can always load one.
-        if story_plan::load_plan(project_path)
-            .map_err(PipelineError::Plan)?
-            .is_none()
-        {
+        // Validate or create the IR before writing any run state. An invalid
+        // plan must not leave an orphan run that later bypasses validation.
+        if story_plan::load_plan(project_path).map_err(PipelineError::Plan)?.is_none() {
             let plan = StoryPlan::new(prompt);
             story_plan::save_plan(project_path, &plan).map_err(PipelineError::Plan)?;
         }
+        let mut state = RunState::new(run_id, project_path, prompt, recipe, clock.now_ms());
+        state.status = RunStatus::Running;
+        store::save_run_state(project_path, &state).map_err(PipelineError::Store)?;
 
         sink.emit(PipelineEvent::RunStarted {
             run_id: run_id.to_string(),
@@ -99,6 +96,12 @@ impl Pipeline {
         sink: &dyn EventSink,
         clock: &dyn Clock,
     ) -> Result<Arc<RunHandle>, PipelineError> {
+        if story_plan::load_plan(project_path)
+            .map_err(PipelineError::Plan)?
+            .is_none()
+        {
+            return Err(PipelineError::PlanMissing);
+        }
         let mut state = store::load_run_state(project_path, run_id)
             .map_err(PipelineError::Store)?
             .ok_or(PipelineError::RunNotFound(run_id.to_string()))?;
@@ -138,6 +141,12 @@ impl Pipeline {
         project_path: &Path,
         run_id: &str,
     ) -> Result<Arc<RunHandle>, PipelineError> {
+        if story_plan::load_plan(project_path)
+            .map_err(PipelineError::Plan)?
+            .is_none()
+        {
+            return Err(PipelineError::PlanMissing);
+        }
         let state = store::load_run_state(project_path, run_id)
             .map_err(PipelineError::Store)?
             .ok_or(PipelineError::RunNotFound(run_id.to_string()))?;
@@ -310,10 +319,64 @@ impl Pipeline {
         prompt: String,
     ) {
         // Load the plan to build the agent context.
-        let mut plan = story_plan::load_plan(project_path)
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| StoryPlan::new(&prompt));
+        let mut plan = match story_plan::load_plan(project_path) {
+            Ok(Some(plan)) => plan,
+            Ok(None) => {
+                self.fail_step(
+                    project_path,
+                    handle,
+                    sink,
+                    clock,
+                    id,
+                    "StoryPlan is missing".to_string(),
+                )
+                .await;
+                return;
+            }
+            Err(error) => {
+                self.fail_step(
+                    project_path,
+                    handle,
+                    sink,
+                    clock,
+                    id,
+                    format!("failed to load StoryPlan: {}", error),
+                )
+                .await;
+                return;
+            }
+        };
+
+        let input_snapshot = serde_json::json!({
+            "prompt": &prompt,
+            "synopsis": &plan.synopsis,
+            "chapters": &plan.chapters,
+            "worldbook": &plan.memory.worldbook,
+        })
+        .to_string();
+        let snapshot_result = {
+            let mut state = handle.state.lock().await;
+            if let Some(attempt) = state
+                .find_step_mut(&id)
+                .and_then(|step| step.history.last_mut())
+            {
+                attempt.input_snapshot = input_snapshot;
+            }
+            state.updated_at = clock.now_ms();
+            store::save_run_state(project_path, &state)
+        };
+        if let Err(error) = snapshot_result {
+            self.fail_step(
+                project_path,
+                handle,
+                sink,
+                clock,
+                id,
+                format!("failed to persist step input snapshot: {}", error),
+            )
+            .await;
+            return;
+        }
 
         let ctx = AgentContext {
             prompt: &prompt,
@@ -401,37 +464,48 @@ impl Pipeline {
                     output: output_ref,
                 });
             }
-            Err(err) => {
-                let mut state = handle.state.lock().await;
-                {
-                    let step = state.find_step_mut(&id).expect("step exists");
-                    let finished_at = clock.now_ms();
-                    step.status = StepStatus::Failed;
-                    step.error = Some(err.0.clone());
-                    step.finished_at = Some(finished_at);
-                    if let Some(attempt) = step.history.last_mut() {
-                        attempt.error = Some(err.0.clone());
-                        attempt.finished_at = Some(finished_at);
-                        attempt.duration_ms = Some(finished_at.saturating_sub(attempt.started_at));
-                    }
-                }
-                state.status = RunStatus::Failed;
-                state.updated_at = clock.now_ms();
-                let run_id = state.run_id.clone();
-                let _ = store::save_run_state(project_path, &state);
-                drop(state);
-                sink.emit(PipelineEvent::StepFailed {
-                    run_id: run_id.clone(),
-                    step_id: id,
-                    error: err.0.clone(),
-                });
-                sink.emit(PipelineEvent::RunFailed {
-                    run_id: run_id.clone(),
-                    error: err.0,
-                });
-                let _ = self.record_run_summary(project_path, &run_id, clock);
+            Err(err) => self
+                .fail_step(project_path, handle, sink, clock, id, err.0)
+                .await,
+        }
+    }
+
+    async fn fail_step(
+        &self,
+        project_path: &Path,
+        handle: &Arc<RunHandle>,
+        sink: &dyn EventSink,
+        clock: &dyn Clock,
+        step_id: String,
+        error: String,
+    ) {
+        let mut state = handle.state.lock().await;
+        let finished_at = clock.now_ms();
+        if let Some(step) = state.find_step_mut(&step_id) {
+            step.status = StepStatus::Failed;
+            step.error = Some(error.clone());
+            step.finished_at = Some(finished_at);
+            if let Some(attempt) = step.history.last_mut() {
+                attempt.error = Some(error.clone());
+                attempt.finished_at = Some(finished_at);
+                attempt.duration_ms = Some(finished_at.saturating_sub(attempt.started_at));
             }
         }
+        state.status = RunStatus::Failed;
+        state.updated_at = finished_at;
+        let run_id = state.run_id.clone();
+        let _ = store::save_run_state(project_path, &state);
+        drop(state);
+        sink.emit(PipelineEvent::StepFailed {
+            run_id: run_id.clone(),
+            step_id,
+            error: error.clone(),
+        });
+        sink.emit(PipelineEvent::RunFailed {
+            run_id: run_id.clone(),
+            error,
+        });
+        let _ = self.record_run_summary(project_path, &run_id, clock);
     }
 
     fn record_run_summary(
@@ -675,6 +749,7 @@ pub enum PipelineError {
     RecipeInvalid(crate::pipeline::dsl::RecipeError),
     Store(crate::pipeline::store::RunStoreError),
     Plan(crate::story_plan::PlanError),
+    PlanMissing,
     RunNotFound(String),
     StepNotFound(String),
     InvalidStepTransition(String, String),
@@ -686,6 +761,7 @@ impl std::fmt::Display for PipelineError {
             PipelineError::RecipeInvalid(e) => write!(f, "invalid recipe: {}", e),
             PipelineError::Store(e) => write!(f, "run store error: {}", e),
             PipelineError::Plan(e) => write!(f, "story plan error: {}", e),
+            PipelineError::PlanMissing => write!(f, "StoryPlan is missing"),
             PipelineError::RunNotFound(id) => write!(f, "run not found: {}", id),
             PipelineError::StepNotFound(id) => write!(f, "step not found: {}", id),
             PipelineError::InvalidStepTransition(id, reason) => {
