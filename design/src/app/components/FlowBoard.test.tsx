@@ -102,7 +102,7 @@ describe('FlowBoard', () => {
     render(<FlowBoard projectPath="/tmp/proj" />);
 
     await user.type(screen.getByLabelText('production brief'), '赛博朋克校园恋爱');
-    await user.click(screen.getByRole('button', { name: '运行' }));
+    await user.click(screen.getByRole('button', { name: '创建流程' }));
 
     // pipeline_start was invoked with the brief; an event subscription opened.
     await vi.waitFor(() => expect(mockedListen).toHaveBeenCalled());
@@ -134,20 +134,38 @@ describe('FlowBoard', () => {
 
   it('disables run while the brief is empty', () => {
     render(<FlowBoard projectPath="/tmp/proj" />);
-    expect(screen.getByRole('button', { name: '运行' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '创建流程' })).toBeDisabled();
+  });
+
+  it('prepares a paused flow before the user starts execution', async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'pipeline_start') return Promise.resolve('run_1' as unknown);
+      if (cmd === 'pipeline_get_state') return Promise.resolve(runState('paused') as unknown);
+      if (cmd === 'pipeline_list_runs') return Promise.resolve([] as unknown);
+      return Promise.resolve(undefined);
+    });
+    const user = userEvent.setup();
+    render(<FlowBoard projectPath="/tmp/proj" />);
+
+    await user.type(screen.getByLabelText('production brief'), 'x');
+    await user.click(screen.getByRole('button', { name: '创建流程' }));
+    await user.click(await screen.findByRole('button', { name: '运行' }));
+
+    expect(mockedInvoke).toHaveBeenCalledWith('pipeline_resume', { runId: 'run_1' });
   });
 
   it('switches to pause/resume controls while running and paused', async () => {
     const user = userEvent.setup();
     render(<FlowBoard projectPath="/tmp/proj" />);
     await user.type(screen.getByLabelText('production brief'), 'x');
-    await user.click(screen.getByRole('button', { name: '运行' }));
+    await user.click(screen.getByRole('button', { name: '创建流程' }));
     await vi.waitFor(() => expect(mockedListen).toHaveBeenCalled());
 
     emit({ type: 'runStarted', runId: 'run_1' });
     expect(screen.getByRole('button', { name: '暂停' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '运行' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '创建流程' })).not.toBeInTheDocument();
 
+    emit({ type: 'stepStarted', runId: 'run_1', stepId: 'plan', kind: 'plan' });
     emit({ type: 'runPaused', runId: 'run_1' });
     expect(screen.getByRole('button', { name: '续跑' })).toBeInTheDocument();
   });
@@ -163,7 +181,7 @@ describe('FlowBoard', () => {
     render(<FlowBoard projectPath="/tmp/proj" />);
 
     await user.type(screen.getByLabelText('production brief'), 'x');
-    await user.click(screen.getByRole('button', { name: '运行' }));
+    await user.click(screen.getByRole('button', { name: '创建流程' }));
 
     await vi.waitFor(() => expect(screen.getByTestId('flow-run-status')).toHaveTextContent('completed'));
     expect(stepStatus('plan')).toBe('succeeded');

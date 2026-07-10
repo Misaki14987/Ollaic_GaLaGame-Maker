@@ -119,6 +119,10 @@ pub async fn pipeline_start(
         .pipeline
         .create_run(&project_path, &run_id, &prompt, &recipe, &SystemClock, &sink)
         .map_err(|e| e.to_string())?;
+    handle
+        .pause(&project_path, &sink, &SystemClock)
+        .await
+        .map_err(|e| e.to_string())?;
     let driving = Arc::new(AtomicBool::new(false));
     orchestrator
         .runs
@@ -132,13 +136,6 @@ pub async fn pipeline_start(
                 driving: driving.clone(),
             },
         );
-    spawn_driver(
-        orchestrator.pipeline.clone(),
-        handle,
-        driving,
-        project_path,
-        app,
-    );
     Ok(run_id)
 }
 
@@ -176,14 +173,21 @@ pub async fn pipeline_resume(
     app: tauri::AppHandle,
     run_id: String,
 ) -> Result<(), String> {
-    let (handle, project_path) = with_run(&orchestrator, &run_id, |e| {
-        Ok((e.handle.clone(), e.project_path.clone()))
+    let (handle, project_path, driving) = with_run(&orchestrator, &run_id, |e| {
+        Ok((e.handle.clone(), e.project_path.clone(), e.driving.clone()))
     })
     .await?;
     handle
         .resume(&project_path, &make_sink(&app), &SystemClock)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    if driving
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+    {
+        spawn_driver(orchestrator.pipeline.clone(), handle, driving, project_path, app);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -260,6 +264,23 @@ pub async fn pipeline_skip_step(
         spawn_driver(orchestrator.pipeline.clone(), handle, driving, project_path, app);
     }
     Ok(())
+}
+
+#[tauri::command]
+pub async fn pipeline_update_dependencies(
+    orchestrator: tauri::State<'_, Orchestrator>,
+    run_id: String,
+    step_id: String,
+    depends_on: Vec<String>,
+) -> Result<(), String> {
+    let (handle, project_path) = with_run(&orchestrator, &run_id, |entry| {
+        Ok((entry.handle.clone(), entry.project_path.clone()))
+    })
+    .await?;
+    handle
+        .update_dependencies(&project_path, &step_id, depends_on, &SystemClock)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]

@@ -142,16 +142,13 @@ impl FlowRecipe {
     }
 }
 
-/// The default built-in recipe: `Plan` -> `Memory` -> `Outline` -> `Scene`
-/// (Plan: brief->synopsis; Memory/Worldbuilder: synopsis->worldbook;
-/// Outline/Plotter: worldbook->chapters; Scene/Dialogist: chapters->a WebGAL
-/// scene script written to game/scene/). This is the P1 content link.
+/// The P0 built-in recipe: `Plan` -> `Outline`. P1 agents may register
+/// additional step kinds, but they are not part of the default production
+/// flow until that slice is complete.
 pub fn default_recipe() -> FlowRecipe {
     FlowRecipe::new()
         .step(StepDef::new("plan", StepKind::Plan))
-        .step(StepDef::new("memory", StepKind::Memory).depends_on("plan"))
-        .step(StepDef::new("outline", StepKind::Outline).depends_on("memory"))
-        .step(StepDef::new("scene", StepKind::Scene).depends_on("outline"))
+        .step(StepDef::new("outline", StepKind::Outline).depends_on("plan"))
 }
 
 impl StepDef {

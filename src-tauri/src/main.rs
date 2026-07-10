@@ -4,6 +4,7 @@ mod agents;
 mod ai;
 mod assets;
 mod characters;
+mod json_store;
 mod matting;
 mod pipeline;
 mod story_plan;
@@ -230,6 +231,7 @@ fn main() {
             pipeline::commands::pipeline_resume_run,
             pipeline::commands::pipeline_retry_step,
             pipeline::commands::pipeline_skip_step,
+            pipeline::commands::pipeline_update_dependencies,
             pipeline::commands::pipeline_get_state,
             pipeline::commands::pipeline_get_plan,
             pipeline::commands::pipeline_list_runs,

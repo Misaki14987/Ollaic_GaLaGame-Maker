@@ -12,7 +12,7 @@ use tokio::sync::{Mutex, Notify};
 use crate::agents::{AgentContext, AgentError, AgentOutput, AgentRegistry, SceneScript};
 use crate::pipeline::dsl::{FlowRecipe, StepKind};
 use crate::pipeline::events::{EventSink, PipelineEvent};
-use crate::pipeline::state::{Clock, RunState, RunStatus, StepStatus};
+use crate::pipeline::state::{Clock, RunState, RunStatus, StepRunHistory, StepStatus};
 use crate::pipeline::store;
 use crate::story_plan::{self, StoryPlan};
 use crate::story_plan::types::PipelineRunSummary;
@@ -107,8 +107,13 @@ impl Pipeline {
         // are never re-run.
         for step in &mut state.steps {
             if step.status == StepStatus::Running {
+                let interrupted_at = clock.now_ms();
+                if let Some(attempt) = step.history.last_mut() {
+                    attempt.error = Some("interrupted before completion".to_string());
+                    attempt.finished_at = Some(interrupted_at);
+                    attempt.duration_ms = Some(interrupted_at.saturating_sub(attempt.started_at));
+                }
                 step.status = StepStatus::Pending;
-                step.attempt = step.attempt.saturating_sub(1);
                 step.started_at = None;
                 step.output = None;
             }
@@ -197,21 +202,54 @@ impl Pipeline {
                 // Capture run-scoped fields before the mutable step borrow.
                 let run_id = state.run_id.clone();
                 let run_prompt = state.prompt.clone();
-                let (kind, step_prompt) = {
+                let (kind, prompt) = {
                     let step = state.find_step_mut(&id).expect("ready step exists");
+                    let prompt = if step.def.prompt.trim().is_empty() {
+                        run_prompt
+                    } else {
+                        step.def.prompt.clone()
+                    };
+                    let started_at = clock.now_ms();
                     step.status = StepStatus::Running;
                     step.attempt += 1;
-                    step.started_at = Some(clock.now_ms());
-                    (step.def.kind, step.def.prompt.clone())
+                    step.started_at = Some(started_at);
+                    step.finished_at = None;
+                    step.history.push(StepRunHistory {
+                        attempt: step.attempt,
+                        input_snapshot: prompt.clone(),
+                        output: None,
+                        error: None,
+                        started_at,
+                        finished_at: None,
+                        duration_ms: None,
+                        diff: None,
+                        cost: None,
+                        warnings: Vec::new(),
+                        downgrade: None,
+                    });
+                    (step.def.kind, prompt)
                 };
                 state.updated_at = clock.now_ms();
                 if let Err(err) = store::save_run_state(project_path, &state) {
+                    let error = format!("failed to persist step transition: {}", err);
+                    if let Some(step) = state.find_step_mut(&id) {
+                        let finished_at = clock.now_ms();
+                        step.status = StepStatus::Failed;
+                        step.error = Some(error.clone());
+                        step.finished_at = Some(finished_at);
+                        if let Some(attempt) = step.history.last_mut() {
+                            attempt.error = Some(error.clone());
+                            attempt.finished_at = Some(finished_at);
+                            attempt.duration_ms =
+                                Some(finished_at.saturating_sub(attempt.started_at));
+                        }
+                    }
                     state.status = RunStatus::Failed;
                     let run_id = state.run_id.clone();
                     drop(state);
                     sink.emit(PipelineEvent::RunFailed {
                         run_id,
-                        error: format!("failed to persist step transition: {}", err),
+                        error,
                     });
                     return Action::Idle;
                 }
@@ -221,12 +259,6 @@ impl Pipeline {
                     step_id: id.clone(),
                     kind: kind.as_str().to_string(),
                 });
-                // Resolve prompt: step override, else the run's brief.
-                let prompt = if step_prompt.trim().is_empty() {
-                    run_prompt
-                } else {
-                    step_prompt
-                };
                 Action::Run { id, kind, prompt }
             }
             None => {
@@ -328,9 +360,16 @@ impl Pipeline {
                 let mut state = handle.state.lock().await;
                 {
                     let step = state.find_step_mut(&id).expect("step exists");
+                    let finished_at = clock.now_ms();
+                    let output = serialize_output(&out);
                     step.status = StepStatus::Succeeded;
-                    step.finished_at = Some(clock.now_ms());
-                    step.output = Some(serialize_output(&out));
+                    step.finished_at = Some(finished_at);
+                    step.output = Some(output.clone());
+                    if let Some(attempt) = step.history.last_mut() {
+                        attempt.output = Some(output);
+                        attempt.finished_at = Some(finished_at);
+                        attempt.duration_ms = Some(finished_at.saturating_sub(attempt.started_at));
+                    }
                 }
                 state.updated_at = clock.now_ms();
                 let run_id = state.run_id.clone();
@@ -340,6 +379,9 @@ impl Pipeline {
                     if let Some(step) = state.find_step_mut(&id) {
                         step.status = StepStatus::Failed;
                         step.error = Some(error.clone());
+                        if let Some(attempt) = step.history.last_mut() {
+                            attempt.error = Some(error.clone());
+                        }
                     }
                     state.status = RunStatus::Failed;
                     let run_id = state.run_id.clone();
@@ -363,9 +405,15 @@ impl Pipeline {
                 let mut state = handle.state.lock().await;
                 {
                     let step = state.find_step_mut(&id).expect("step exists");
+                    let finished_at = clock.now_ms();
                     step.status = StepStatus::Failed;
                     step.error = Some(err.0.clone());
-                    step.finished_at = Some(clock.now_ms());
+                    step.finished_at = Some(finished_at);
+                    if let Some(attempt) = step.history.last_mut() {
+                        attempt.error = Some(err.0.clone());
+                        attempt.finished_at = Some(finished_at);
+                        attempt.duration_ms = Some(finished_at.saturating_sub(attempt.started_at));
+                    }
                 }
                 state.status = RunStatus::Failed;
                 state.updated_at = clock.now_ms();
@@ -378,9 +426,10 @@ impl Pipeline {
                     error: err.0.clone(),
                 });
                 sink.emit(PipelineEvent::RunFailed {
-                    run_id,
+                    run_id: run_id.clone(),
                     error: err.0,
                 });
+                let _ = self.record_run_summary(project_path, &run_id, clock);
             }
         }
     }
@@ -582,6 +631,42 @@ impl RunHandle {
         });
         self.notify.notify_one();
         Ok(())
+    }
+
+    pub async fn update_dependencies(
+        &self,
+        project_path: &Path,
+        step_id: &str,
+        depends_on: Vec<String>,
+        clock: &dyn Clock,
+    ) -> Result<(), PipelineError> {
+        let mut state = self.state.lock().await;
+        let step = state
+            .find_step(step_id)
+            .ok_or_else(|| PipelineError::StepNotFound(step_id.to_string()))?;
+        if step.status != StepStatus::Pending {
+            return Err(PipelineError::InvalidStepTransition(
+                step_id.to_string(),
+                "only pending step dependencies can be edited".to_string(),
+            ));
+        }
+        let mut recipe = FlowRecipe {
+            steps: state.steps.iter().map(|step| step.def.clone()).collect(),
+        };
+        recipe
+            .steps
+            .iter_mut()
+            .find(|step| step.id == step_id)
+            .expect("step was checked above")
+            .depends_on = depends_on;
+        recipe.validate().map_err(PipelineError::RecipeInvalid)?;
+        state.find_step_mut(step_id).expect("step exists").def = recipe
+            .steps
+            .into_iter()
+            .find(|step| step.id == step_id)
+            .expect("validated recipe contains step");
+        state.updated_at = clock.now_ms();
+        store::save_run_state(project_path, &state).map_err(PipelineError::Store)
     }
 }
 
