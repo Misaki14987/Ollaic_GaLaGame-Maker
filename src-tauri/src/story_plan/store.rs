@@ -44,6 +44,17 @@ pub fn save_plan(project_path: &Path, plan: &StoryPlan) -> Result<(), PlanError>
     Ok(())
 }
 
+pub fn remove_plan(project_path: &Path) -> Result<(), PlanError> {
+    let path = plan_path(project_path);
+    for candidate in [path.clone(), crate::json_store::backup_path(&path)] {
+        if candidate.exists() {
+            std::fs::remove_file(&candidate)
+                .map_err(|e| PlanError::WriteFailed(candidate.display().to_string(), e.to_string()))?;
+        }
+    }
+    Ok(())
+}
+
 /// Structural validation of a StoryPlan. See ADR 0054.
 pub fn validate(plan: &StoryPlan) -> Result<(), PlanError> {
     if plan.version != 1 {

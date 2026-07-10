@@ -14,7 +14,8 @@ use tauri::Emitter;
 use crate::pipeline::dsl::default_recipe;
 use crate::pipeline::events::{EventSink, PipelineEvent};
 use crate::pipeline::scheduler::Pipeline;
-use crate::pipeline::state::{RunState, SystemClock};
+use crate::pipeline::state::{Clock, RunState, RunStatus, StepStatus, SystemClock};
+use crate::pipeline::store;
 use crate::story_plan::{self, StoryPlan};
 
 /// Emits pipeline events to the per-run Tauri channel `pipeline:{run_id}`.
@@ -364,11 +365,18 @@ pub async fn pipeline_set_run_pinned(
     project_path: String,
 ) -> Result<(), String> {
     let requested_path = PathBuf::from(project_path);
-    attach_run_if_needed(&orchestrator, &requested_path, &run_id).await?;
-    let (handle, project_path) = with_run(&orchestrator, &run_id, |entry| {
-        Ok((entry.handle.clone(), entry.project_path.clone()))
-    }).await?;
-    handle.set_pinned(&project_path, pinned, &SystemClock).await.map_err(|error| error.to_string())
+    if let Some((handle, project_path)) = {
+        let runs = orchestrator.runs.lock().await;
+        runs.get(&run_id).map(|entry| (entry.handle.clone(), entry.project_path.clone()))
+    } {
+        return handle.set_pinned(&project_path, pinned, &SystemClock).await.map_err(|error| error.to_string());
+    }
+    let mut state = store::load_run_state(&requested_path, &run_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("run not found: {}", run_id))?;
+    state.pinned = pinned;
+    state.updated_at = SystemClock.now_ms();
+    store::save_run_state(&requested_path, &state).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -378,11 +386,23 @@ pub async fn pipeline_clear_run_history(
     project_path: String,
 ) -> Result<(), String> {
     let requested_path = PathBuf::from(project_path);
-    attach_run_if_needed(&orchestrator, &requested_path, &run_id).await?;
-    let (handle, project_path) = with_run(&orchestrator, &run_id, |entry| {
-        Ok((entry.handle.clone(), entry.project_path.clone()))
-    }).await?;
-    handle.clear_history(&project_path, &SystemClock).await.map_err(|error| error.to_string())
+    if let Some((handle, project_path)) = {
+        let runs = orchestrator.runs.lock().await;
+        runs.get(&run_id).map(|entry| (entry.handle.clone(), entry.project_path.clone()))
+    } {
+        return handle.clear_history(&project_path, &SystemClock).await.map_err(|error| error.to_string());
+    }
+    let mut state = store::load_run_state(&requested_path, &run_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("run not found: {}", run_id))?;
+    if state.status == RunStatus::Running || state.steps.iter().any(|step| step.status == StepStatus::Running) {
+        return Err("pause and finish the active step before clearing history".to_string());
+    }
+    for step in &mut state.steps {
+        step.history.clear();
+    }
+    state.updated_at = SystemClock.now_ms();
+    store::save_run_state(&requested_path, &state).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -392,10 +412,17 @@ pub async fn pipeline_export_run_history(
     project_path: String,
 ) -> Result<String, String> {
     let requested_path = PathBuf::from(project_path);
-    attach_run_if_needed(&orchestrator, &requested_path, &run_id).await?;
-    let handle = with_run(&orchestrator, &run_id, |entry| Ok(entry.handle.clone())).await?;
-    let state = handle.state().lock().await;
-    serde_json::to_string_pretty(&*state).map_err(|error| error.to_string())
+    if let Some(handle) = {
+        let runs = orchestrator.runs.lock().await;
+        runs.get(&run_id).map(|entry| entry.handle.clone())
+    } {
+        let state = handle.state().lock().await;
+        return serde_json::to_string_pretty(&*state).map_err(|error| error.to_string());
+    }
+    let state = store::load_run_state(&requested_path, &run_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("run not found: {}", run_id))?;
+    serde_json::to_string_pretty(&state).map_err(|error| error.to_string())
 }
 
 #[tauri::command]

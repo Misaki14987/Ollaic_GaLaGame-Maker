@@ -125,6 +125,8 @@ impl Pipeline {
         if let Err(error) = store::save_run_state(project_path, &state) {
             if let Some(previous) = previous_plan {
                 story_plan::save_plan(project_path, &previous).map_err(PipelineError::Plan)?;
+            } else {
+                story_plan::remove_plan(project_path).map_err(PipelineError::Plan)?;
             }
             return Err(PipelineError::Store(error));
         }
@@ -953,7 +955,9 @@ impl RunHandle {
         clock: &dyn Clock,
     ) -> Result<(), PipelineError> {
         let mut state = self.state.lock().await;
-        if state.status == RunStatus::Running {
+        if state.status == RunStatus::Running
+            || state.steps.iter().any(|step| step.status == StepStatus::Running)
+        {
             return Err(PipelineError::InvalidRunTransition(
                 state.run_id.clone(),
                 "pause the run before clearing history".to_string(),

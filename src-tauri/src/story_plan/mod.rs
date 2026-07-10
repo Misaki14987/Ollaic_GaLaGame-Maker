@@ -8,7 +8,7 @@ pub mod store;
 pub mod types;
 
 #[allow(unused_imports)]
-pub use store::{load_plan, plan_path, save_plan, validate, PlanError};
+pub use store::{load_plan, plan_path, remove_plan, save_plan, validate, PlanError};
 #[allow(unused_imports)]
 pub use types::{ChapterPlan, PipelineRunSummary, StoryPlan};
 
