@@ -55,6 +55,32 @@ pub struct StepState {
     pub started_at: Option<u64>,
     #[serde(default)]
     pub finished_at: Option<u64>,
+    #[serde(default)]
+    pub history: Vec<StepRunHistory>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StepRunHistory {
+    pub attempt: u32,
+    pub input_snapshot: String,
+    #[serde(default)]
+    pub output: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+    pub started_at: u64,
+    #[serde(default)]
+    pub finished_at: Option<u64>,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+    #[serde(default)]
+    pub diff: Option<String>,
+    #[serde(default)]
+    pub cost: Option<f64>,
+    #[serde(default)]
+    pub warnings: Vec<String>,
+    #[serde(default)]
+    pub downgrade: Option<String>,
 }
 
 impl StepState {
@@ -67,6 +93,7 @@ impl StepState {
             error: None,
             started_at: None,
             finished_at: None,
+            history: Vec::new(),
         }
     }
 

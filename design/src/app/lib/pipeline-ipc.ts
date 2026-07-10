@@ -40,6 +40,14 @@ export async function pipelineSkipStep(runId: string, stepId: string): Promise<v
   return invoke<void>('pipeline_skip_step', { runId, stepId });
 }
 
+export async function pipelineUpdateDependencies(
+  runId: string,
+  stepId: string,
+  dependsOn: string[],
+): Promise<void> {
+  return invoke<void>('pipeline_update_dependencies', { runId, stepId, dependsOn });
+}
+
 /** Snapshot of a run's current state. */
 export async function pipelineGetState(runId: string): Promise<RunState | null> {
   return invoke<RunState | null>('pipeline_get_state', { runId });

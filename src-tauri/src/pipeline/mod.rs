@@ -18,7 +18,7 @@ pub use events::{EventSink, PipelineEvent};
 #[allow(unused_imports)]
 pub use scheduler::{Pipeline, PipelineError, RunHandle};
 #[allow(unused_imports)]
-pub use state::{Clock, RunState, RunStatus, StepState, StepStatus, SystemClock};
+pub use state::{Clock, RunState, RunStatus, StepRunHistory, StepState, StepStatus, SystemClock};
 #[allow(unused_imports)]
 pub use store::{list_run_states, load_run_state, run_state_path, save_run_state, RunStoreError};
 

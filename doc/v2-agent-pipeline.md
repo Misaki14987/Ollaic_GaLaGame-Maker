@@ -371,7 +371,7 @@ Release Candidate 可以被结构性叙事问题阻断，例如分支缺乏动�
 
 | 切片 | 内容 | 价值锚点 |
 |---|---|---|
-| **P0 — Flow Shell（已完成）** | Pipeline Orchestrator + StoryPlan IR + FlowBoard + 内置确定性 step | 项目以 FlowBoard 为入口，DAG 状态、干预和崩溃恢复已闭环 |
+| **P0 — Flow Shell（已完成）** | Pipeline Orchestrator + StoryPlan IR + FlowBoard + 2 个内置确定性 step（Plan + Outline） | 项目以 FlowBoard 为入口，DAG 状态、干预和崩溃恢复已闭环 |
 | **P1 — 内容链路** | 接 Plotter → Dialogist → AssetPlanner → SceneScript | 「提示词 → 可读剧本」闭环 |
 | **P2 — 资产闭环** | AssetTaskQueue + 自动绑定 + 并发限流 | 真正闭环 |
 | **P3 — 试玩 & 自审** | Quality Gate + One-Click Run & Play + Reviewer Agent | 端到端可玩 + 可信赖 |

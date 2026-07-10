@@ -11,15 +11,22 @@ pub fn plan_path(project_path: &Path) -> PathBuf {
 /// Load the project's StoryPlan. Returns `Ok(None)` when no plan exists yet.
 pub fn load_plan(project_path: &Path) -> Result<Option<StoryPlan>, PlanError> {
     let path = plan_path(project_path);
-    if !path.exists() {
+    let candidates = crate::json_store::read_candidates(&path)
+        .map_err(|e| PlanError::ReadFailed(path.display().to_string(), e.to_string()))?;
+    if candidates.is_empty() {
         return Ok(None);
     }
-    let text = std::fs::read_to_string(&path)
-        .map_err(|e| PlanError::ReadFailed(path.display().to_string(), e.to_string()))?;
-    let plan: StoryPlan = serde_json::from_str(&text)
-        .map_err(|e| PlanError::InvalidJson(e.to_string()))?;
-    validate(&plan)?;
-    Ok(Some(plan))
+    let mut last_error = String::new();
+    for text in candidates {
+        match serde_json::from_str(&text) {
+            Ok(plan) => {
+                validate(&plan)?;
+                return Ok(Some(plan));
+            }
+            Err(error) => last_error = error.to_string(),
+        }
+    }
+    Err(PlanError::InvalidJson(last_error))
 }
 
 /// Validate and persist the plan to `.ollaic/plan.json`.
@@ -32,7 +39,7 @@ pub fn save_plan(project_path: &Path, plan: &StoryPlan) -> Result<(), PlanError>
     }
     let text = serde_json::to_string_pretty(plan)
         .map_err(|e| PlanError::SerializeFailed(e.to_string()))?;
-    std::fs::write(&path, text)
+    crate::json_store::write_crash_safe(&path, text.as_bytes())
         .map_err(|e| PlanError::WriteFailed(path.display().to_string(), e.to_string()))?;
     Ok(())
 }

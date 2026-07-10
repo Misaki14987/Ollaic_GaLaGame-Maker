@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Loader2, Pause, Play, RotateCcw, SkipForward } from 'lucide-react';
-import ReactFlow, { Background, Controls, type Node } from 'reactflow';
+import ReactFlow, { Background, Controls, type Connection, type Edge, type Node } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -16,6 +16,7 @@ import {
   pipelineRetryStep,
   pipelineSkipStep,
   pipelineStart,
+  pipelineUpdateDependencies,
 } from '../lib/pipeline-ipc';
 import type { PipelineEvent } from '../lib/pipeline-types';
 
@@ -153,6 +154,37 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
     }
   }, [refresh]);
 
+  const updateDependencies = useCallback(async (stepId: string, dependsOn: string[]) => {
+    const runId = runIdRef.current;
+    if (!runId) return;
+    setError(null);
+    try {
+      await pipelineUpdateDependencies(runId, stepId, dependsOn);
+      await refresh(runId);
+    } catch (err) {
+      setError(String(err));
+    }
+  }, [refresh]);
+
+  const connect = useCallback((connection: Connection) => {
+    if (!connection.source || !connection.target) return;
+    const target = state.steps.find((step) => step.id === connection.target);
+    if (!target || target.status !== 'pending') return;
+    void updateDependencies(target.id, Array.from(new Set([...target.dependsOn, connection.source])));
+  }, [state.steps, updateDependencies]);
+
+  const deleteEdges = useCallback((deleted: Edge[]) => {
+    const targets = new Set(deleted.map((edge) => edge.target));
+    for (const targetId of targets) {
+      const target = state.steps.find((step) => step.id === targetId);
+      if (!target || target.status !== 'pending') continue;
+      const removedSources = new Set(
+        deleted.filter((edge) => edge.target === targetId).map((edge) => edge.source),
+      );
+      void updateDependencies(targetId, target.dependsOn.filter((dependency) => !removedSources.has(dependency)));
+    }
+  }, [state.steps, updateDependencies]);
+
   const nodes = useMemo(() => state.steps.map((step, index) => ({
     id: step.id,
     type: 'step',
@@ -190,7 +222,7 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
         {!running && !paused && (
           <Button onClick={start} disabled={busy || !prompt.trim()}>
             {busy ? <Loader2 className="animate-spin" /> : <Play />}
-            {state.runId ? '新建运行' : '运行'}
+            {state.runId ? '新建流程' : '创建流程'}
           </Button>
         )}
         {running && !recoverable && (
@@ -200,7 +232,8 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
         )}
         {(paused || recoverable) && (
           <Button onClick={resume} disabled={busy}>
-            {busy ? <Loader2 className="animate-spin" /> : <Play />} 续跑
+            {busy ? <Loader2 className="animate-spin" /> : <Play />}
+            {detached || state.steps.some((step) => step.attempt > 0) ? '续跑' : '运行'}
           </Button>
         )}
         <span className="ml-auto font-mono-family text-xs text-muted-foreground" data-testid="flow-run-status">
@@ -219,6 +252,11 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
             edges={edges}
             nodeTypes={NODE_TYPES}
             onNodeClick={(_event, node: Node) => setSelectedStepId(node.id)}
+            onConnect={connect}
+            onEdgesDelete={deleteEdges}
+            nodesConnectable={paused && !detached}
+            edgesReconnectable={false}
+            onlyRenderVisibleElements
             fitView
           >
             <Background />
@@ -242,6 +280,18 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
             )}
             {selectedStep.output && (
               <pre className="mb-3 max-h-64 overflow-auto whitespace-pre-wrap text-xs text-muted-foreground">{selectedStep.output}</pre>
+            )}
+            {selectedStep.history.length > 0 && (
+              <div className="mb-3 border-t border-border pt-3">
+                {selectedStep.history.map((attempt) => (
+                  <div key={attempt.attempt} className="mb-2 flex items-start justify-between gap-3 text-xs">
+                    <span>#{attempt.attempt}</span>
+                    <span className={attempt.error ? 'text-destructive' : 'text-muted-foreground'}>
+                      {attempt.error ?? `${attempt.durationMs ?? 0} ms`}
+                    </span>
+                  </div>
+                ))}
+              </div>
             )}
             <div className="flex flex-wrap gap-2 border-t border-border pt-3">
               {selectedStep.status !== 'running' && (

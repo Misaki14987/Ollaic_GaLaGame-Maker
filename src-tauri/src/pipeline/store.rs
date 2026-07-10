@@ -16,14 +16,19 @@ pub fn run_state_path(project_path: &Path, run_id: &str) -> PathBuf {
 
 pub fn load_run_state(project_path: &Path, run_id: &str) -> Result<Option<RunState>, RunStoreError> {
     let path = run_state_path(project_path, run_id);
-    if !path.exists() {
+    let candidates = crate::json_store::read_candidates(&path)
+        .map_err(|e| RunStoreError::ReadFailed(path.display().to_string(), e.to_string()))?;
+    if candidates.is_empty() {
         return Ok(None);
     }
-    let text = std::fs::read_to_string(&path)
-        .map_err(|e| RunStoreError::ReadFailed(path.display().to_string(), e.to_string()))?;
-    let state: RunState = serde_json::from_str(&text)
-        .map_err(|e| RunStoreError::InvalidJson(e.to_string()))?;
-    Ok(Some(state))
+    let mut last_error = String::new();
+    for text in candidates {
+        match serde_json::from_str(&text) {
+            Ok(state) => return Ok(Some(state)),
+            Err(error) => last_error = error.to_string(),
+        }
+    }
+    Err(RunStoreError::InvalidJson(last_error))
 }
 
 pub fn list_run_states(project_path: &Path) -> Result<Vec<RunState>, RunStoreError> {
@@ -33,19 +38,23 @@ pub fn list_run_states(project_path: &Path) -> Result<Vec<RunState>, RunStoreErr
     }
     let entries = std::fs::read_dir(&dir)
         .map_err(|e| RunStoreError::ReadFailed(dir.display().to_string(), e.to_string()))?;
-    let mut runs = Vec::new();
+    let mut run_ids = std::collections::HashSet::new();
     for entry in entries {
         let entry = entry
             .map_err(|e| RunStoreError::ReadFailed(dir.display().to_string(), e.to_string()))?;
-        let path = entry.path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
-            continue;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if let Some(run_id) = name.strip_suffix(".json") {
+            run_ids.insert(run_id.to_string());
+        } else if let Some(run_id) = name.strip_suffix(".json.bak") {
+            run_ids.insert(run_id.to_string());
         }
-        let text = std::fs::read_to_string(&path)
-            .map_err(|e| RunStoreError::ReadFailed(path.display().to_string(), e.to_string()))?;
-        let state = serde_json::from_str(&text)
-            .map_err(|e| RunStoreError::InvalidJson(e.to_string()))?;
-        runs.push(state);
+    }
+    let mut runs = Vec::with_capacity(run_ids.len());
+    for run_id in run_ids {
+        if let Some(state) = load_run_state(project_path, &run_id)? {
+            runs.push(state);
+        }
     }
     runs.sort_by_key(|run: &RunState| std::cmp::Reverse(run.updated_at));
     Ok(runs)
@@ -58,7 +67,7 @@ pub fn save_run_state(project_path: &Path, state: &RunState) -> Result<(), RunSt
     let path = run_state_path(project_path, &state.run_id);
     let text = serde_json::to_string_pretty(state)
         .map_err(|e| RunStoreError::SerializeFailed(e.to_string()))?;
-    std::fs::write(&path, text)
+    crate::json_store::write_crash_safe(&path, text.as_bytes())
         .map_err(|e| RunStoreError::WriteFailed(path.display().to_string(), e.to_string()))?;
     Ok(())
 }
@@ -159,5 +168,32 @@ mod tests {
             "run_new",
             "run_old",
         ]);
+    }
+
+    #[test]
+    fn recovers_from_backup_when_primary_json_is_truncated() {
+        let project = fresh_dir("backup_recovery");
+        let state = sample_state("run_backup");
+        save_run_state(&project, &state).unwrap();
+        let path = run_state_path(&project, "run_backup");
+        std::fs::copy(&path, crate::json_store::backup_path(&path)).unwrap();
+        std::fs::write(&path, "{").unwrap();
+
+        assert_eq!(load_run_state(&project, "run_backup").unwrap(), Some(state));
+        assert_eq!(list_run_states(&project).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn saving_after_backup_recovery_keeps_a_valid_copy() {
+        let project = fresh_dir("backup_resave");
+        let mut state = sample_state("run_backup_resave");
+        save_run_state(&project, &state).unwrap();
+        let path = run_state_path(&project, "run_backup_resave");
+        std::fs::rename(&path, crate::json_store::backup_path(&path)).unwrap();
+        state.updated_at = 500;
+
+        save_run_state(&project, &state).unwrap();
+
+        assert_eq!(load_run_state(&project, "run_backup_resave").unwrap(), Some(state));
     }
 }

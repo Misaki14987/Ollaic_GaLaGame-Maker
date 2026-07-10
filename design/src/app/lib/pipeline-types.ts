@@ -43,6 +43,21 @@ export interface StepState {
   error?: string | null;
   startedAt?: number | null;
   finishedAt?: number | null;
+  history?: StepRunHistory[];
+}
+
+export interface StepRunHistory {
+  attempt: number;
+  inputSnapshot: string;
+  output?: string | null;
+  error?: string | null;
+  startedAt: number;
+  finishedAt?: number | null;
+  durationMs?: number | null;
+  diff?: string | null;
+  cost?: number | null;
+  warnings: string[];
+  downgrade?: string | null;
 }
 
 export interface RunState {

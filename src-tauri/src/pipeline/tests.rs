@@ -289,12 +289,8 @@ async fn runs_two_step_recipe_in_order_and_updates_plan() {
             "run_started",
             "step_started:plan",
             "step_succeeded:plan",
-            "step_started:memory",
-            "step_succeeded:memory",
             "step_started:outline",
             "step_succeeded:outline",
-            "step_started:scene",
-            "step_succeeded:scene",
             "run_completed",
         ]
     );
@@ -302,20 +298,10 @@ async fn runs_two_step_recipe_in_order_and_updates_plan() {
     // The StoryPlan absorbed every step's output.
     let plan = crate::story_plan::load_plan(&project).unwrap().unwrap();
     assert!(plan.synopsis.contains("赛博朋克校园恋爱"));
-    // The Memory (Worldbuilder) step wrote a worldbook derived from the synopsis.
-    assert!(plan.memory.worldbook.contains("赛博朋克校园恋爱"));
     assert_eq!(plan.chapters.len(), 2);
     assert_eq!(plan.chapters[0].id, "ch1");
-    // The Plotter incorporated the worldbook into the first chapter.
     assert!(plan.chapters[0].summary.contains("赛博朋克校园恋爱"));
-
-    // P1 content link: a scene script was written to game/scene/.
-    assert_eq!(plan.scenes, vec!["scene_01.txt".to_string()]);
-    let scene_path = project.join("game").join("scene").join("scene_01.txt");
-    assert!(scene_path.is_file(), "scene file should be written");
-    let scene_text = std::fs::read_to_string(&scene_path).unwrap();
-    assert!(scene_text.contains("intro:自动生成的场景;"));
-    assert!(scene_text.contains("序章"));
+    assert!(plan.scenes.is_empty(), "P0 must not write P1 scene output");
 
     // Run history was recorded.
     assert_eq!(plan.pipeline_runs.len(), 1);
@@ -326,6 +312,9 @@ async fn runs_two_step_recipe_in_order_and_updates_plan() {
     let run_state = crate::pipeline::load_run_state(&project, "run_1").unwrap().unwrap();
     assert_eq!(run_state.status, RunStatus::Completed);
     assert!(run_state.all_steps_succeeded());
+    assert!(run_state.steps.iter().all(|step| step.history.len() == 1));
+    assert_eq!(run_state.find_step("plan").unwrap().history[0].input_snapshot, "赛博朋克校园恋爱");
+    assert!(run_state.find_step("outline").unwrap().history[0].duration_ms.is_some());
 }
 
 // ---------- scheduler: failure ----------
@@ -572,8 +561,12 @@ async fn skip_step_unblocks_downstream() {
     agents.register(StepKind::Scene, Box::new(crate::agents::SceneAgent));
     let pipeline = Pipeline::new(agents);
 
+    let recipe = FlowRecipe::new()
+        .step(StepDef::new("plan", StepKind::Plan))
+        .step(StepDef::new("outline", StepKind::Outline).depends_on("plan"))
+        .step(StepDef::new("scene", StepKind::Scene).depends_on("outline"));
     let handle = pipeline
-        .create_run(&project, "run_skip", "brief", &default_recipe(), &clock, sink.as_ref())
+        .create_run(&project, "run_skip", "brief", &recipe, &clock, sink.as_ref())
         .unwrap();
 
     let project_c = project.clone();
@@ -696,6 +689,10 @@ async fn retry_step_reruns_and_completes() {
 
     let run_state = crate::pipeline::load_run_state(&project, "run_retry").unwrap().unwrap();
     assert_eq!(run_state.status, RunStatus::Completed);
+    let plan_step = run_state.find_step("plan").unwrap();
+    assert_eq!(plan_step.history.len(), 2);
+    assert!(plan_step.history[0].error.is_some());
+    assert!(plan_step.history[1].output.is_some());
 }
 
 #[tokio::test]
@@ -721,15 +718,13 @@ async fn retrying_a_completed_step_resets_it_and_its_downstream() {
     assert_eq!(handle.state().lock().await.status, RunStatus::Completed);
 
     handle
-        .retry_step(&project, "outline", &sink, &clock)
+        .retry_step(&project, "plan", &sink, &clock)
         .await
         .unwrap();
     let state = handle.state().lock().await;
     assert_eq!(state.status, RunStatus::Running);
-    assert_eq!(state.find_step("plan").unwrap().status, StepStatus::Succeeded);
-    assert_eq!(state.find_step("memory").unwrap().status, StepStatus::Succeeded);
+    assert_eq!(state.find_step("plan").unwrap().status, StepStatus::Pending);
     assert_eq!(state.find_step("outline").unwrap().status, StepStatus::Pending);
-    assert_eq!(state.find_step("scene").unwrap().status, StepStatus::Pending);
 }
 
 #[tokio::test]
@@ -738,12 +733,16 @@ async fn scene_write_failure_fails_the_step_instead_of_claiming_success() {
     let sink = RecordingSink::new();
     let clock = StepClock::new();
     let pipeline = Pipeline::with_default_agents();
+    let recipe = FlowRecipe::new()
+        .step(StepDef::new("plan", StepKind::Plan))
+        .step(StepDef::new("outline", StepKind::Outline).depends_on("plan"))
+        .step(StepDef::new("scene", StepKind::Scene).depends_on("outline"));
     let handle = pipeline
         .create_run(
             &project,
             "run_scene_write_failure",
             "brief",
-            &default_recipe(),
+            &recipe,
             &clock,
             &sink,
         )
@@ -785,4 +784,36 @@ async fn transition_persistence_failure_stops_before_running_the_agent() {
     let events = labels(&sink.events());
     assert!(events.contains(&"run_failed".to_string()));
     assert!(!events.iter().any(|event| event.starts_with("step_started:")));
+}
+
+#[tokio::test]
+async fn pending_dependencies_are_editable_but_cycles_are_rejected() {
+    let project = fresh_project("dependency_edit");
+    let sink = RecordingSink::new();
+    let clock = StepClock::new();
+    let pipeline = Pipeline::with_default_agents();
+    let handle = pipeline
+        .create_run(
+            &project,
+            "run_dependency_edit",
+            "brief",
+            &default_recipe(),
+            &clock,
+            &sink,
+        )
+        .unwrap();
+
+    assert!(handle
+        .update_dependencies(&project, "plan", vec!["outline".to_string()], &clock)
+        .await
+        .is_err());
+    handle
+        .update_dependencies(&project, "outline", Vec::new(), &clock)
+        .await
+        .unwrap();
+
+    let persisted = crate::pipeline::load_run_state(&project, "run_dependency_edit")
+        .unwrap()
+        .unwrap();
+    assert!(persisted.find_step("outline").unwrap().def.depends_on.is_empty());
 }

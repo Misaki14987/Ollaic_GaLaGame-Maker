@@ -4,7 +4,7 @@
  * is presentation on top of this state.
  */
 
-import type { PipelineEvent, RunState, RunStatus, StepStatus } from './pipeline-types';
+import type { PipelineEvent, RunState, RunStatus, StepRunHistory, StepStatus } from './pipeline-types';
 
 export interface FlowStepView {
   id: string;
@@ -17,6 +17,7 @@ export interface FlowStepView {
   error: string | null;
   startedAt: number | null;
   finishedAt: number | null;
+  history: StepRunHistory[];
 }
 
 export interface FlowState {
@@ -25,12 +26,10 @@ export interface FlowState {
   steps: FlowStepView[];
 }
 
-/** The built-in recipe: Plan -> Memory -> Outline -> Scene. */
+/** The P0 built-in recipe: Plan -> Outline. */
 export const DEFAULT_RECIPE_STEPS: ReadonlyArray<{ id: string; kind: string; dependsOn: string[] }> = [
   { id: 'plan', kind: 'plan', dependsOn: [] },
-  { id: 'memory', kind: 'memory', dependsOn: ['plan'] },
-  { id: 'outline', kind: 'outline', dependsOn: ['memory'] },
-  { id: 'scene', kind: 'scene', dependsOn: ['outline'] },
+  { id: 'outline', kind: 'outline', dependsOn: ['plan'] },
 ];
 
 export function initialFlowState(): FlowState {
@@ -48,6 +47,7 @@ export function initialFlowState(): FlowState {
       error: null,
       startedAt: null,
       finishedAt: null,
+      history: [],
     })),
   };
 }
@@ -72,6 +72,7 @@ export function reduceFlowEvent(state: FlowState, event: FlowAction): FlowState 
         error: step.error ?? null,
         startedAt: step.startedAt ?? null,
         finishedAt: step.finishedAt ?? null,
+        history: step.history ?? [],
       })),
     };
   }
@@ -87,7 +88,10 @@ export function reduceFlowEvent(state: FlowState, event: FlowAction): FlowState 
       return {
         ...state,
         runStatus: 'running',
-        steps: setStep(state.steps, event.stepId, 'running'),
+        steps: setStep(state.steps, event.stepId, 'running', {
+          attempt: (state.steps.find((step) => step.id === event.stepId)?.attempt ?? 0) + 1,
+          error: null,
+        }),
       };
     case 'stepSucceeded':
       return {
