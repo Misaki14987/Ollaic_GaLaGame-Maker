@@ -10,8 +10,8 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { PipelineEvent, RunState, StoryPlan } from './pipeline-types';
 
 /** Start an Agent Flow for a project. Returns the new run id. */
-export async function pipelineStart(projectPath: string, prompt: string): Promise<string> {
-  return invoke<string>('pipeline_start', { projectPath, prompt });
+export async function pipelineStart(projectPath: string, prompt: string, allowLocalFallback: boolean): Promise<string> {
+  return invoke<string>('pipeline_start', { projectPath, prompt, allowLocalFallback });
 }
 
 /** Pause a live (in-memory) run before the next step. */

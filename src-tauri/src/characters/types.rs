@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// A single sprite/expression variation for a character.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CharacterSprite {
     /// Emotion label, e.g. "default", "happy", "sad", "angry", "surprised".
@@ -14,7 +14,7 @@ pub struct CharacterSprite {
 }
 
 /// A directional relation to another character.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CharacterRelation {
     /// Target character id.
@@ -27,7 +27,7 @@ pub struct CharacterRelation {
 }
 
 /// A character in the visual novel project.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Character {
     pub id: String,

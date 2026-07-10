@@ -10,7 +10,10 @@ pub mod types;
 #[allow(unused_imports)]
 pub use store::{load_plan, plan_path, remove_plan, save_plan, validate, PlanError};
 #[allow(unused_imports)]
-pub use types::{ChapterPlan, PipelineRunSummary, StoryPlan};
+pub use types::{
+    AssetTaskPlan, BranchEdge, BranchGraph, ChapterPlan, DialogueBeat, PipelineRunSummary,
+    SceneDraft, ScenePlan, StoryPlan,
+};
 
 #[cfg(test)]
 #[path = "tests.rs"]

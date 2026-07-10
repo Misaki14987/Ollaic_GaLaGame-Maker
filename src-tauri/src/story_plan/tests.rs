@@ -1,5 +1,9 @@
 use super::*;
-use crate::story_plan::types::{ChapterPlan, PipelineRunSummary, StoryMemory, StoryPlan};
+use crate::story_plan::types::{
+    AssetTaskPlan, BranchEdge, BranchGraph, ChapterPlan, DialogueBeat, PipelineRunSummary,
+    SceneDraft, ScenePlan, StoryMemory, StoryPlan,
+};
+use std::collections::BTreeMap;
 use std::fs;
 
 fn fresh_project_dir(name: &str) -> std::path::PathBuf {
@@ -30,8 +34,43 @@ fn plan_round_trips_through_disk() {
         ],
         memory: StoryMemory {
             worldbook: "霓虹学园的世界设定。".to_string(),
+            glossary: BTreeMap::from([("余像".to_string(), "被删除后仍会回响的记忆".to_string())]),
         },
-        scenes: vec!["scene_01.txt".to_string()],
+        characters: Vec::new(),
+        scene_plans: vec![ScenePlan {
+            id: "opening".to_string(),
+            file: "start.txt".to_string(),
+            chapter_id: "ch1".to_string(),
+            title: "异常信号".to_string(),
+            summary: "转学生第一次听见余像。".to_string(),
+            character_ids: Vec::new(),
+        }],
+        branches: BranchGraph {
+            entry_scene: "opening".to_string(),
+            edges: vec![BranchEdge {
+                from: "opening".to_string(),
+                to: "opening".to_string(),
+                choice: None,
+            }],
+        },
+        scene_drafts: vec![SceneDraft {
+            scene_id: "opening".to_string(),
+            title: "异常信号".to_string(),
+            beats: vec![DialogueBeat {
+                speaker: None,
+                text: "雨落在窗上。".to_string(),
+            }],
+        }],
+        asset_plan: vec![AssetTaskPlan {
+            id: "bg_opening".to_string(),
+            kind: "background".to_string(),
+            target_stem: "bg_opening".to_string(),
+            prompt: "雨夜教室".to_string(),
+            scene_ref: Some("opening".to_string()),
+            character_ref: None,
+            status: "pending".to_string(),
+        }],
+        scenes: vec!["start.txt".to_string()],
         pipeline_runs: vec![PipelineRunSummary {
             run_id: "run_1".to_string(),
             status: "completed".to_string(),
@@ -42,7 +81,9 @@ fn plan_round_trips_through_disk() {
 
     save_plan(&project, &plan).unwrap();
     // No plan exists before save is impossible here; load returns the saved one.
-    let loaded = load_plan(&project).unwrap().expect("plan should exist after save");
+    let loaded = load_plan(&project)
+        .unwrap()
+        .expect("plan should exist after save");
 
     assert_eq!(loaded, plan);
     // The plan lands exactly where the ADR says it should.
@@ -102,6 +143,11 @@ fn refuses_to_save_an_invalid_plan() {
         synopsis: String::new(),
         memory: StoryMemory::default(),
         chapters: Vec::new(),
+        characters: Vec::new(),
+        scene_plans: Vec::new(),
+        branches: BranchGraph::default(),
+        scene_drafts: Vec::new(),
+        asset_plan: Vec::new(),
         scenes: Vec::new(),
         pipeline_runs: Vec::new(),
     };
@@ -109,6 +155,28 @@ fn refuses_to_save_an_invalid_plan() {
     assert_eq!(err, PlanError::UnsupportedVersion(2));
     // Nothing should have been written for an invalid plan.
     assert!(!plan_path(&project).exists());
+}
+
+#[test]
+fn rejects_scene_plan_with_path_traversal() {
+    let mut plan = StoryPlan::new("brief");
+    plan.chapters.push(ChapterPlan {
+        id: "ch1".to_string(),
+        title: "序章".to_string(),
+        summary: "开场".to_string(),
+    });
+    plan.scene_plans.push(ScenePlan {
+        id: "opening".to_string(),
+        file: "../start.txt".to_string(),
+        chapter_id: "ch1".to_string(),
+        title: "开场".to_string(),
+        summary: "开场".to_string(),
+        character_ids: Vec::new(),
+    });
+    assert_eq!(
+        validate(&plan),
+        Err(PlanError::InvalidSceneFile("../start.txt".to_string()))
+    );
 }
 
 #[test]

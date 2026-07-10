@@ -13,7 +13,9 @@ use tauri::Emitter;
 
 use crate::pipeline::dsl::default_recipe;
 use crate::pipeline::events::{EventSink, PipelineEvent};
-use crate::pipeline::scheduler::Pipeline;
+use crate::pipeline::scheduler::{
+    cleanup_rollback_snapshots, queue_rollback_snapshot_cleanup, rollback_snapshot_ids, Pipeline,
+};
 use crate::pipeline::state::{Clock, RunState, RunStatus, StepStatus, SystemClock};
 use crate::pipeline::store;
 use crate::story_plan::{self, StoryPlan};
@@ -31,9 +33,7 @@ impl EventSink for TauriEventSink {
 }
 
 fn make_sink(app: &tauri::AppHandle) -> TauriEventSink {
-    TauriEventSink {
-        app: app.clone(),
-    }
+    TauriEventSink { app: app.clone() }
 }
 
 struct ManagedRun {
@@ -100,9 +100,7 @@ fn spawn_driver(
     app: tauri::AppHandle,
 ) {
     driving.store(true, Ordering::SeqCst);
-    tauri::async_runtime::spawn(drive(
-        pipeline, handle, driving, project_path, app,
-    ));
+    tauri::async_runtime::spawn(drive(pipeline, handle, driving, project_path, app));
 }
 
 #[tauri::command]
@@ -111,32 +109,40 @@ pub async fn pipeline_start(
     app: tauri::AppHandle,
     project_path: String,
     prompt: String,
+    allow_local_fallback: Option<bool>,
 ) -> Result<String, String> {
+    if !crate::ai::commands::has_agent_chat_config() && allow_local_fallback != Some(true) {
+        return Err("未配置可用的对话模型。请先配置 AI，或明确允许本地内容降级。".to_string());
+    }
     let project_path = PathBuf::from(project_path);
     let run_id = new_run_id();
     let recipe = default_recipe();
     let sink = make_sink(&app);
     let handle = orchestrator
         .pipeline
-        .create_run(&project_path, &run_id, &prompt, &recipe, &SystemClock, &sink)
+        .create_run_with_options(
+            &project_path,
+            &run_id,
+            &prompt,
+            &recipe,
+            allow_local_fallback == Some(true),
+            &SystemClock,
+            &sink,
+        )
         .map_err(|e| e.to_string())?;
     handle
         .pause(&project_path, &sink, &SystemClock)
         .await
         .map_err(|e| e.to_string())?;
     let driving = Arc::new(AtomicBool::new(false));
-    orchestrator
-        .runs
-        .lock()
-        .await
-        .insert(
-            run_id.clone(),
-            ManagedRun {
-                handle: handle.clone(),
-                project_path: project_path.clone(),
-                driving: driving.clone(),
-            },
-        );
+    orchestrator.runs.lock().await.insert(
+        run_id.clone(),
+        ManagedRun {
+            handle: handle.clone(),
+            project_path: project_path.clone(),
+            driving: driving.clone(),
+        },
+    );
     Ok(run_id)
 }
 
@@ -145,7 +151,9 @@ where
     F: FnOnce(&ManagedRun) -> Result<R, String>,
 {
     let guard = orchestrator.runs.lock().await;
-    let entry = guard.get(run_id).ok_or_else(|| format!("run not found: {}", run_id))?;
+    let entry = guard
+        .get(run_id)
+        .ok_or_else(|| format!("run not found: {}", run_id))?;
     f(entry)
 }
 
@@ -209,7 +217,13 @@ pub async fn pipeline_resume(
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_ok()
     {
-        spawn_driver(orchestrator.pipeline.clone(), handle, driving, project_path, app);
+        spawn_driver(
+            orchestrator.pipeline.clone(),
+            handle,
+            driving,
+            project_path,
+            app,
+        );
     }
     Ok(())
 }
@@ -244,7 +258,11 @@ pub async fn pipeline_step_once(
     let requested_path = PathBuf::from(project_path);
     attach_run_if_needed(&orchestrator, &requested_path, &run_id).await?;
     let (handle, project_path, driving) = with_run(&orchestrator, &run_id, |entry| {
-        Ok((entry.handle.clone(), entry.project_path.clone(), entry.driving.clone()))
+        Ok((
+            entry.handle.clone(),
+            entry.project_path.clone(),
+            entry.driving.clone(),
+        ))
     })
     .await?;
     handle
@@ -255,7 +273,13 @@ pub async fn pipeline_step_once(
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_ok()
     {
-        spawn_driver(orchestrator.pipeline.clone(), handle, driving, project_path, app);
+        spawn_driver(
+            orchestrator.pipeline.clone(),
+            handle,
+            driving,
+            project_path,
+            app,
+        );
     }
     Ok(())
 }
@@ -275,7 +299,11 @@ pub async fn pipeline_retry_step(
         let entry = guard
             .get(&run_id)
             .ok_or_else(|| format!("run not found: {}", run_id))?;
-        (entry.handle.clone(), entry.project_path.clone(), entry.driving.clone())
+        (
+            entry.handle.clone(),
+            entry.project_path.clone(),
+            entry.driving.clone(),
+        )
     };
     handle
         .retry_step(&project_path, &step_id, &make_sink(&app), &SystemClock)
@@ -288,7 +316,13 @@ pub async fn pipeline_retry_step(
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_ok()
     {
-        spawn_driver(orchestrator.pipeline.clone(), handle, driving, project_path, app);
+        spawn_driver(
+            orchestrator.pipeline.clone(),
+            handle,
+            driving,
+            project_path,
+            app,
+        );
     }
     Ok(())
 }
@@ -305,7 +339,11 @@ pub async fn pipeline_skip_step(
         let entry = guard
             .get(&run_id)
             .ok_or_else(|| format!("run not found: {}", run_id))?;
-        (entry.handle.clone(), entry.project_path.clone(), entry.driving.clone())
+        (
+            entry.handle.clone(),
+            entry.project_path.clone(),
+            entry.driving.clone(),
+        )
     };
     handle
         .skip_step(&project_path, &step_id, &make_sink(&app), &SystemClock)
@@ -315,7 +353,13 @@ pub async fn pipeline_skip_step(
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_ok()
     {
-        spawn_driver(orchestrator.pipeline.clone(), handle, driving, project_path, app);
+        spawn_driver(
+            orchestrator.pipeline.clone(),
+            handle,
+            driving,
+            project_path,
+            app,
+        );
     }
     Ok(())
 }
@@ -367,9 +411,13 @@ pub async fn pipeline_set_run_pinned(
     let requested_path = PathBuf::from(project_path);
     if let Some((handle, project_path)) = {
         let runs = orchestrator.runs.lock().await;
-        runs.get(&run_id).map(|entry| (entry.handle.clone(), entry.project_path.clone()))
+        runs.get(&run_id)
+            .map(|entry| (entry.handle.clone(), entry.project_path.clone()))
     } {
-        return handle.set_pinned(&project_path, pinned, &SystemClock).await.map_err(|error| error.to_string());
+        return handle
+            .set_pinned(&project_path, pinned, &SystemClock)
+            .await
+            .map_err(|error| error.to_string());
     }
     let mut state = store::load_run_state(&requested_path, &run_id)
         .map_err(|error| error.to_string())?
@@ -388,21 +436,33 @@ pub async fn pipeline_clear_run_history(
     let requested_path = PathBuf::from(project_path);
     if let Some((handle, project_path)) = {
         let runs = orchestrator.runs.lock().await;
-        runs.get(&run_id).map(|entry| (entry.handle.clone(), entry.project_path.clone()))
+        runs.get(&run_id)
+            .map(|entry| (entry.handle.clone(), entry.project_path.clone()))
     } {
-        return handle.clear_history(&project_path, &SystemClock).await.map_err(|error| error.to_string());
+        return handle
+            .clear_history(&project_path, &SystemClock)
+            .await
+            .map_err(|error| error.to_string());
     }
     let mut state = store::load_run_state(&requested_path, &run_id)
         .map_err(|error| error.to_string())?
         .ok_or_else(|| format!("run not found: {}", run_id))?;
-    if state.status == RunStatus::Running || state.steps.iter().any(|step| step.status == StepStatus::Running) {
+    if state.status == RunStatus::Running
+        || state
+            .steps
+            .iter()
+            .any(|step| step.status == StepStatus::Running)
+    {
         return Err("pause and finish the active step before clearing history".to_string());
     }
+    let snapshots = rollback_snapshot_ids(&state);
+    queue_rollback_snapshot_cleanup(&mut state, snapshots);
     for step in &mut state.steps {
         step.history.clear();
     }
     state.updated_at = SystemClock.now_ms();
-    store::save_run_state(&requested_path, &state).map_err(|error| error.to_string())
+    store::save_run_state(&requested_path, &state).map_err(|error| error.to_string())?;
+    cleanup_rollback_snapshots(&requested_path, &mut state).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -462,19 +522,21 @@ pub async fn pipeline_resume_run(
         .resume_run(&project_path, &run_id, &sink, &SystemClock)
         .map_err(|e| e.to_string())?;
     let driving = Arc::new(AtomicBool::new(false));
-    orchestrator
-        .runs
-        .lock()
-        .await
-        .insert(
-            run_id.clone(),
-            ManagedRun {
-                handle: handle.clone(),
-                project_path: project_path.clone(),
-                driving: driving.clone(),
-            },
-        );
-    spawn_driver(orchestrator.pipeline.clone(), handle, driving, project_path, app);
+    orchestrator.runs.lock().await.insert(
+        run_id.clone(),
+        ManagedRun {
+            handle: handle.clone(),
+            project_path: project_path.clone(),
+            driving: driving.clone(),
+        },
+    );
+    spawn_driver(
+        orchestrator.pipeline.clone(),
+        handle,
+        driving,
+        project_path,
+        app,
+    );
     Ok(())
 }
 
@@ -485,8 +547,7 @@ pub async fn pipeline_get_plan(project_path: String) -> Result<Option<StoryPlan>
 
 #[tauri::command]
 pub async fn pipeline_list_runs(project_path: String) -> Result<Vec<RunState>, String> {
-    crate::pipeline::store::list_run_states(&PathBuf::from(project_path))
-        .map_err(|e| e.to_string())
+    crate::pipeline::store::list_run_states(&PathBuf::from(project_path)).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

@@ -9,6 +9,7 @@ import {
   PencilLine,
   RotateCcw,
   SkipForward,
+  SquareArrowOutUpRight,
   Workflow,
   X,
 } from 'lucide-react';
@@ -38,6 +39,7 @@ export interface FlowStepInspectorProps {
   onRetry: (stepId: string) => void;
   onSkip: (stepId: string) => void;
   onPromptRerun: (stepId: string, prompt: string) => void;
+  onOpenArtifact?: (step: FlowStepView) => void;
   events?: readonly PipelineEventRecord[];
 }
 
@@ -85,6 +87,7 @@ export function FlowStepInspector({
   onRetry,
   onSkip,
   onPromptRerun,
+  onOpenArtifact,
   events = [],
 }: FlowStepInspectorProps) {
   const [promptDraft, setPromptDraft] = useState(selected?.prompt ?? '');
@@ -236,8 +239,16 @@ export function FlowStepInspector({
                           <dd className="mt-0.5 font-mono-family">{attempt.cost == null ? '未记录' : attempt.cost}</dd>
                         </div>
                         <div>
+                          <dt className="text-muted-foreground">Token</dt>
+                          <dd className="mt-0.5 font-mono-family">{(attempt.promptTokens ?? 0) + (attempt.completionTokens ?? 0)}</dd>
+                        </div>
+                        <div>
                           <dt className="text-muted-foreground">降级</dt>
                           <dd className="mt-0.5">{attempt.downgrade ?? '无'}</dd>
+                        </div>
+                        <div className="col-span-2">
+                          <dt className="text-muted-foreground">回滚快照</dt>
+                          <dd className="mt-0.5 break-all font-mono-family">{attempt.rollbackSnapshot ?? '无'}</dd>
                         </div>
                       </dl>
                       <section>
@@ -306,6 +317,12 @@ export function FlowStepInspector({
       </Tabs>
 
       <footer className="flex shrink-0 flex-wrap gap-2 border-t border-border bg-surface-container-low px-4 py-3">
+        {selected.status === 'succeeded' && onOpenArtifact && (['character', 'asset'].includes(selected.kind) || selected.id === 'scene') && (
+          <Button type="button" size="sm" onClick={() => onOpenArtifact(selected)}>
+            <SquareArrowOutUpRight />
+            {selected.kind === 'character' ? '打开角色' : selected.kind === 'asset' ? '打开资源库' : '打开场景'}
+          </Button>
+        )}
         {selected.status !== 'running' && (
           <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => onRetry(selected.id)}>
             <RotateCcw /> 从此步重跑

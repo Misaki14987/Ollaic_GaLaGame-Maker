@@ -14,8 +14,8 @@ use tokio::time::{sleep, timeout, Duration};
 use crate::agents::{Agent, AgentContext, AgentError, AgentOutput, AgentRegistry};
 use crate::pipeline::dsl::{default_recipe, FlowRecipe, RecipeError, StepDef, StepKind};
 use crate::pipeline::events::{PipelineEvent, RecordingSink};
-use crate::pipeline::scheduler::Pipeline;
-use crate::pipeline::state::{Clock, RunStatus, StepStatus, SystemClock};
+use crate::pipeline::scheduler::{cleanup_rollback_snapshots, Pipeline};
+use crate::pipeline::state::{Clock, RunStatus, StepRunHistory, StepStatus, SystemClock};
 use crate::story_plan::types::ChapterPlan;
 
 // ---------- test helpers ----------
@@ -121,16 +121,12 @@ impl Agent for CountingAgent {
 fn synopsis_output(text: &str) -> AgentOutput {
     AgentOutput {
         synopsis: Some(text.to_string()),
-        worldbook: None,
-        chapters: None,
-        scene: None,
+        ..AgentOutput::default()
     }
 }
 
 fn chapters_output() -> AgentOutput {
     AgentOutput {
-        synopsis: None,
-        worldbook: None,
         chapters: Some(vec![
             ChapterPlan {
                 id: "ch1".to_string(),
@@ -143,7 +139,7 @@ fn chapters_output() -> AgentOutput {
                 summary: "s2".to_string(),
             },
         ]),
-        scene: None,
+        ..AgentOutput::default()
     }
 }
 
@@ -237,13 +233,7 @@ fn ipc_contract_serializes_to_camel_case() {
 
     // RunState / StepState / StepDef / enums also camelCase.
     let recipe = default_recipe();
-    let state = crate::pipeline::state::RunState::new(
-        "run_1",
-        ".",
-        "brief",
-        &recipe,
-        100,
-    );
+    let state = crate::pipeline::state::RunState::new("run_1", ".", "brief", &recipe, 100);
     let v = serde_json::to_value(&state).unwrap();
     assert_eq!(v["runId"], "run_1");
     assert_eq!(v["projectPath"], ".");
@@ -276,20 +266,30 @@ fn recipe_rejects_unknown_dependency() {
 // ---------- scheduler: tracer bullet ----------
 
 #[tokio::test]
-async fn runs_two_step_recipe_in_order_and_updates_plan() {
+async fn runs_full_p1_recipe_in_order_and_writes_editable_story() {
     let project = fresh_project("happy");
     let sink = Arc::new(RecordingSink::new());
     let clock = StepClock::new();
     let pipeline = Pipeline::with_default_agents();
 
     let handle = pipeline
-        .create_run(&project, "run_1", "赛博朋克校园恋爱", &default_recipe(), &clock, sink.as_ref())
+        .create_run(
+            &project,
+            "run_1",
+            "赛博朋克校园恋爱",
+            &default_recipe(),
+            &clock,
+            sink.as_ref(),
+        )
         .unwrap();
 
     // Drive the run to completion.
-    timeout(Duration::from_secs(3), pipeline.execute(&project, handle.clone(), sink.as_ref(), &clock))
-        .await
-        .expect("run did not complete in time");
+    timeout(
+        Duration::from_secs(3),
+        pipeline.execute(&project, handle.clone(), sink.as_ref(), &clock),
+    )
+    .await
+    .expect("run did not complete in time");
 
     let seq = labels(&sink.events());
     assert_eq!(
@@ -298,8 +298,18 @@ async fn runs_two_step_recipe_in_order_and_updates_plan() {
             "run_started",
             "step_started:plan",
             "step_succeeded:plan",
+            "step_started:memory",
+            "step_succeeded:memory",
             "step_started:outline",
             "step_succeeded:outline",
+            "step_started:character",
+            "step_succeeded:character",
+            "step_started:dialogist",
+            "step_succeeded:dialogist",
+            "step_started:asset",
+            "step_succeeded:asset",
+            "step_started:scene",
+            "step_succeeded:scene",
             "run_completed",
         ]
     );
@@ -307,10 +317,24 @@ async fn runs_two_step_recipe_in_order_and_updates_plan() {
     // The StoryPlan absorbed every step's output.
     let plan = crate::story_plan::load_plan(&project).unwrap().unwrap();
     assert!(plan.synopsis.contains("赛博朋克校园恋爱"));
-    assert_eq!(plan.chapters.len(), 2);
+    assert_eq!(plan.chapters.len(), 3);
     assert_eq!(plan.chapters[0].id, "ch1");
     assert!(plan.chapters[0].summary.contains("赛博朋克校园恋爱"));
-    assert!(plan.scenes.is_empty(), "P0 must not write P1 scene output");
+    assert_eq!(plan.characters.len(), 3);
+    assert_eq!(plan.scene_plans.len(), 6);
+    assert_eq!(plan.scene_drafts.len(), 6);
+    assert!(plan.asset_plan.len() >= 10);
+    assert_eq!(plan.scenes.len(), 6);
+    assert!(project.join("game/scene/start.txt").is_file());
+    assert!(project.join("game/scene/ending_trust.txt").is_file());
+    let opening = std::fs::read_to_string(project.join("game/scene/start.txt")).unwrap();
+    assert!(opening.contains("林夏:"));
+    assert!(opening.contains("changeScene:chapter_01.txt;"));
+    let decision = std::fs::read_to_string(project.join("game/scene/decision.txt")).unwrap();
+    assert!(decision.contains(
+        "choose:握住她的手，一起承担:ending_trust.txt|遵守协议，回到日常:ending_depart.txt;"
+    ));
+    assert!(project.join("game/config/characters.json").is_file());
 
     // Run history was recorded.
     assert_eq!(plan.pipeline_runs.len(), 1);
@@ -318,24 +342,26 @@ async fn runs_two_step_recipe_in_order_and_updates_plan() {
     assert_eq!(plan.pipeline_runs[0].status, "completed");
 
     // Run state persisted as completed.
-    let run_state = crate::pipeline::load_run_state(&project, "run_1").unwrap().unwrap();
+    let run_state = crate::pipeline::load_run_state(&project, "run_1")
+        .unwrap()
+        .unwrap();
     assert_eq!(run_state.status, RunStatus::Completed);
     assert!(run_state.all_steps_succeeded());
     assert!(run_state.steps.iter().all(|step| step.history.len() == 1));
-    let plan_input: serde_json::Value = serde_json::from_str(
-        &run_state.find_step("plan").unwrap().history[0].input_snapshot,
-    )
-    .unwrap();
-    assert_eq!(plan_input["prompt"], "赛博朋克校园恋爱");
-    let outline_input: serde_json::Value = serde_json::from_str(
-        &run_state.find_step("outline").unwrap().history[0].input_snapshot,
-    )
-    .unwrap();
+    let plan_input: serde_json::Value =
+        serde_json::from_str(&run_state.find_step("plan").unwrap().history[0].input_snapshot)
+            .unwrap();
+    assert_eq!(plan_input["productionBrief"], "赛博朋克校园恋爱");
+    let outline_input: serde_json::Value =
+        serde_json::from_str(&run_state.find_step("outline").unwrap().history[0].input_snapshot)
+            .unwrap();
     assert!(outline_input["synopsis"]
         .as_str()
         .unwrap()
         .contains("赛博朋克校园恋爱"));
-    assert!(run_state.find_step("outline").unwrap().history[0].duration_ms.is_some());
+    assert!(run_state.find_step("outline").unwrap().history[0]
+        .duration_ms
+        .is_some());
 }
 
 #[test]
@@ -399,22 +425,35 @@ async fn failed_step_fails_run_and_skips_downstream() {
     let sink = Arc::new(RecordingSink::new());
     let clock = StepClock::new();
 
-    let mut agents = AgentRegistry::new();
-    agents.register(StepKind::Plan, Box::new(FailingAgent {
-        message: "model overload".to_string(),
-    }));
+    let mut agents = AgentRegistry::with_defaults();
+    agents.register(
+        StepKind::Plan,
+        Box::new(FailingAgent {
+            message: "model overload".to_string(),
+        }),
+    );
     agents.register(StepKind::Memory, Box::new(crate::agents::MemoryAgent));
     agents.register(StepKind::Outline, Box::new(crate::agents::OutlineAgent));
     agents.register(StepKind::Scene, Box::new(crate::agents::SceneAgent));
     let pipeline = Pipeline::new(agents);
 
     let handle = pipeline
-        .create_run(&project, "run_fail", "brief", &default_recipe(), &clock, sink.as_ref())
+        .create_run(
+            &project,
+            "run_fail",
+            "brief",
+            &default_recipe(),
+            &clock,
+            sink.as_ref(),
+        )
         .unwrap();
 
-    timeout(Duration::from_secs(3), pipeline.execute(&project, handle.clone(), sink.as_ref(), &clock))
-        .await
-        .expect("run did not finish");
+    timeout(
+        Duration::from_secs(3),
+        pipeline.execute(&project, handle.clone(), sink.as_ref(), &clock),
+    )
+    .await
+    .expect("run did not finish");
 
     let seq = labels(&sink.events());
     assert_eq!(
@@ -428,7 +467,9 @@ async fn failed_step_fails_run_and_skips_downstream() {
     );
 
     // Downstream outline never ran.
-    let run_state = crate::pipeline::load_run_state(&project, "run_fail").unwrap().unwrap();
+    let run_state = crate::pipeline::load_run_state(&project, "run_fail")
+        .unwrap()
+        .unwrap();
     assert_eq!(run_state.status, RunStatus::Failed);
     assert_eq!(
         run_state.find_step("plan").unwrap().status,
@@ -449,7 +490,7 @@ async fn pause_then_resume_completes_run() {
     let clock = StepClock::new();
 
     let plan_gate = Arc::new(Notify::new());
-    let mut agents = AgentRegistry::new();
+    let mut agents = AgentRegistry::with_defaults();
     agents.register(
         StepKind::Plan,
         Box::new(ControllableAgent {
@@ -463,7 +504,14 @@ async fn pause_then_resume_completes_run() {
     let pipeline = Pipeline::new(agents);
 
     let handle = pipeline
-        .create_run(&project, "run_pause", "brief", &default_recipe(), &clock, sink.as_ref())
+        .create_run(
+            &project,
+            "run_pause",
+            "brief",
+            &default_recipe(),
+            &clock,
+            sink.as_ref(),
+        )
         .unwrap();
 
     let project_cloned = project.clone();
@@ -471,25 +519,49 @@ async fn pause_then_resume_completes_run() {
     let sink_for_task = sink.clone();
     let task = tokio::spawn(async move {
         pipeline
-            .execute(&project_cloned, handle_for_task, sink_for_task.as_ref(), &SystemClock)
+            .execute(
+                &project_cloned,
+                handle_for_task,
+                sink_for_task.as_ref(),
+                &SystemClock,
+            )
             .await;
     });
     // Pause/resume/retry/skip all live on RunHandle, so no Pipeline is needed
     // for control calls after the task is spawned.
 
     // Let the Plan step start (agent now awaiting its gate).
-    wait_until(&sink, |e| e.iter().any(|ev| matches!(ev, PipelineEvent::StepStarted { step_id, .. } if step_id == "plan"))).await;
+    wait_until(&sink, |e| {
+        e.iter()
+            .any(|ev| matches!(ev, PipelineEvent::StepStarted { step_id, .. } if step_id == "plan"))
+    })
+    .await;
 
     // Pause while Plan is running.
-    handle.pause(&project, sink.as_ref(), &SystemClock).await.unwrap();
-    wait_until(&sink, |e| e.iter().any(|ev| matches!(ev, PipelineEvent::RunPaused { .. }))).await;
+    handle
+        .pause(&project, sink.as_ref(), &SystemClock)
+        .await
+        .unwrap();
+    wait_until(&sink, |e| {
+        e.iter()
+            .any(|ev| matches!(ev, PipelineEvent::RunPaused { .. }))
+    })
+    .await;
 
     // Let Plan finish; the loop then sees Paused and waits for resume.
     plan_gate.notify_one();
-    wait_until(&sink, |e| e.iter().any(|ev| matches!(ev, PipelineEvent::StepSucceeded { step_id, .. } if step_id == "plan"))).await;
+    wait_until(&sink, |e| {
+        e.iter().any(
+            |ev| matches!(ev, PipelineEvent::StepSucceeded { step_id, .. } if step_id == "plan"),
+        )
+    })
+    .await;
 
     // Resume: Outline should run and the run should complete.
-    handle.resume(&project, sink.as_ref(), &SystemClock).await.unwrap();
+    handle
+        .resume(&project, sink.as_ref(), &SystemClock)
+        .await
+        .unwrap();
 
     let _ = timeout(Duration::from_secs(3), task)
         .await
@@ -502,12 +574,20 @@ async fn pause_then_resume_completes_run() {
     let plan_succeeded_idx = seq.iter().position(|s| s == "step_succeeded:plan").unwrap();
     let paused_idx = seq.iter().position(|s| s == "run_paused").unwrap();
     let resumed_idx = seq.iter().position(|s| s == "run_resumed").unwrap();
-    let outline_started_idx = seq.iter().position(|s| s == "step_started:outline").unwrap();
+    let outline_started_idx = seq
+        .iter()
+        .position(|s| s == "step_started:outline")
+        .unwrap();
     assert!(plan_succeeded_idx < paused_idx || paused_idx < plan_succeeded_idx); // either order is fine
-    assert!(resumed_idx < outline_started_idx, "outline must start after resume");
+    assert!(
+        resumed_idx < outline_started_idx,
+        "outline must start after resume"
+    );
     assert!(seq.contains(&"run_completed".to_string()));
 
-    let run_state = crate::pipeline::load_run_state(&project, "run_pause").unwrap().unwrap();
+    let run_state = crate::pipeline::load_run_state(&project, "run_pause")
+        .unwrap()
+        .unwrap();
     assert_eq!(run_state.status, RunStatus::Completed);
 }
 
@@ -521,7 +601,7 @@ async fn crash_resume_does_not_redo_succeeded_steps() {
 
     let plan_calls = Arc::new(AtomicU32::new(0));
     let outline_gate = Arc::new(Notify::new());
-    let mut agents = AgentRegistry::new();
+    let mut agents = AgentRegistry::with_defaults();
     agents.register(
         StepKind::Plan,
         Box::new(CountingAgent {
@@ -540,8 +620,18 @@ async fn crash_resume_does_not_redo_succeeded_steps() {
     agents.register(StepKind::Scene, Box::new(crate::agents::SceneAgent));
     let pipeline = Arc::new(Pipeline::new(agents));
 
+    let recipe = FlowRecipe::new()
+        .step(StepDef::new("plan", StepKind::Plan))
+        .step(StepDef::new("outline", StepKind::Outline).depends_on("plan"));
     let handle = pipeline
-        .create_run(&project, "run_crash", "brief", &default_recipe(), &clock, sink.as_ref())
+        .create_run(
+            &project,
+            "run_crash",
+            "brief",
+            &recipe,
+            &clock,
+            sink.as_ref(),
+        )
         .unwrap();
 
     // First lifecycle: Plan completes (instant), Outline starts and blocks.
@@ -550,10 +640,14 @@ async fn crash_resume_does_not_redo_succeeded_steps() {
     let handle1 = handle.clone();
     let sink1 = sink.clone();
     let task = tokio::spawn(async move {
-        pipeline1.execute(&project1, handle1, sink1.as_ref(), &SystemClock).await;
+        pipeline1
+            .execute(&project1, handle1, sink1.as_ref(), &SystemClock)
+            .await;
     });
     wait_until(&sink, |e| {
-        e.iter().any(|ev| matches!(ev, PipelineEvent::StepStarted { step_id, .. } if step_id == "outline"))
+        e.iter().any(
+            |ev| matches!(ev, PipelineEvent::StepStarted { step_id, .. } if step_id == "outline"),
+        )
     })
     .await;
 
@@ -562,7 +656,9 @@ async fn crash_resume_does_not_redo_succeeded_steps() {
     let _ = task.await;
 
     // Persisted state: Plan succeeded, Outline was left Running.
-    let persisted = crate::pipeline::load_run_state(&project, "run_crash").unwrap().unwrap();
+    let persisted = crate::pipeline::load_run_state(&project, "run_crash")
+        .unwrap()
+        .unwrap();
     assert_eq!(
         persisted.find_step("plan").unwrap().status,
         StepStatus::Succeeded
@@ -582,11 +678,20 @@ async fn crash_resume_does_not_redo_succeeded_steps() {
     let resumed_sink2 = resumed_sink.clone();
     let pipeline2 = pipeline.clone();
     let resume_task = tokio::spawn(async move {
-        pipeline2.execute(&project2, resumed_handle2, resumed_sink2.as_ref(), &SystemClock).await;
+        pipeline2
+            .execute(
+                &project2,
+                resumed_handle2,
+                resumed_sink2.as_ref(),
+                &SystemClock,
+            )
+            .await;
     });
     // Outline is now Pending (reset by resume_run) and waiting on the gate.
     wait_until(&resumed_sink, |e| {
-        e.iter().any(|ev| matches!(ev, PipelineEvent::StepStarted { step_id, .. } if step_id == "outline"))
+        e.iter().any(
+            |ev| matches!(ev, PipelineEvent::StepStarted { step_id, .. } if step_id == "outline"),
+        )
     })
     .await;
     outline_gate.notify_one();
@@ -598,7 +703,11 @@ async fn crash_resume_does_not_redo_succeeded_steps() {
     assert_eq!(plan_calls.load(Ordering::SeqCst), 1);
 
     let seq = labels(&resumed_sink.events());
-    assert!(!seq.iter().any(|s| s.contains("plan")), "plan must not be re-run after resume: {:?}", seq);
+    assert!(
+        !seq.iter().any(|s| s.contains("plan")),
+        "plan must not be re-run after resume: {:?}",
+        seq
+    );
     assert_eq!(
         seq.iter().filter(|s| s == &"run_resumed").count(),
         1,
@@ -609,8 +718,82 @@ async fn crash_resume_does_not_redo_succeeded_steps() {
     assert!(seq.contains(&"step_succeeded:outline".to_string()));
     assert!(seq.contains(&"run_completed".to_string()));
 
-    let run_state = crate::pipeline::load_run_state(&project, "run_crash").unwrap().unwrap();
+    let run_state = crate::pipeline::load_run_state(&project, "run_crash")
+        .unwrap()
+        .unwrap();
     assert_eq!(run_state.status, RunStatus::Completed);
+}
+
+#[test]
+fn crash_resume_restores_persistent_rollback_snapshot_before_retry() {
+    let project = fresh_project("crash_file_rollback");
+    let scene_dir = project.join("game/scene");
+    std::fs::create_dir_all(&scene_dir).unwrap();
+    std::fs::write(scene_dir.join("start.txt"), ":original;").unwrap();
+    let pipeline = Pipeline::with_default_agents();
+    let sink = RecordingSink::new();
+    let clock = StepClock::new();
+    pipeline
+        .create_run(
+            &project,
+            "run_crash_file_rollback",
+            "brief",
+            &FlowRecipe::new().step(StepDef::new("plan", StepKind::Plan)),
+            &clock,
+            &sink,
+        )
+        .unwrap();
+    let snapshot = crate::webgal::project::create_project_snapshot(
+        project.to_string_lossy().to_string(),
+        Some("pipeline rollback test".to_string()),
+        Some("auto".to_string()),
+        None,
+    )
+    .unwrap();
+    std::fs::write(scene_dir.join("start.txt"), ":partial new output;").unwrap();
+
+    let mut state = crate::pipeline::load_run_state(&project, "run_crash_file_rollback")
+        .unwrap()
+        .unwrap();
+    state.find_step_mut("plan").unwrap().status = StepStatus::Running;
+    state
+        .find_step_mut("plan")
+        .unwrap()
+        .history
+        .push(StepRunHistory {
+            attempt: 1,
+            input_snapshot: "{}".to_string(),
+            output: None,
+            error: None,
+            started_at: 1,
+            finished_at: None,
+            duration_ms: None,
+            diff: None,
+            cost: None,
+            prompt_tokens: None,
+            completion_tokens: None,
+            warnings: Vec::new(),
+            downgrade: None,
+            rollback_snapshot: Some(snapshot.id),
+        });
+    crate::pipeline::store::save_run_state(&project, &state).unwrap();
+
+    let resumed = pipeline
+        .resume_run(&project, "run_crash_file_rollback", &sink, &clock)
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(scene_dir.join("start.txt")).unwrap(),
+        ":original;"
+    );
+    assert_eq!(
+        resumed
+            .state()
+            .blocking_lock()
+            .find_step("plan")
+            .unwrap()
+            .status,
+        StepStatus::Pending
+    );
 }
 
 // ---------- scheduler: skip ----------
@@ -622,7 +805,7 @@ async fn skip_step_unblocks_downstream() {
     let clock = StepClock::new();
 
     let plan_gate = Arc::new(Notify::new());
-    let mut agents = AgentRegistry::new();
+    let mut agents = AgentRegistry::with_defaults();
     agents.register(
         StepKind::Plan,
         Box::new(ControllableAgent {
@@ -640,25 +823,38 @@ async fn skip_step_unblocks_downstream() {
         .step(StepDef::new("outline", StepKind::Outline).depends_on("plan"))
         .step(StepDef::new("scene", StepKind::Scene).depends_on("outline"));
     let handle = pipeline
-        .create_run(&project, "run_skip", "brief", &recipe, &clock, sink.as_ref())
+        .create_run(
+            &project,
+            "run_skip",
+            "brief",
+            &recipe,
+            &clock,
+            sink.as_ref(),
+        )
         .unwrap();
 
     let project_c = project.clone();
     let handle_c = handle.clone();
     let sink_c = sink.clone();
     let task = tokio::spawn(async move {
-        pipeline.execute(&project_c, handle_c, sink_c.as_ref(), &SystemClock).await;
+        pipeline
+            .execute(&project_c, handle_c, sink_c.as_ref(), &SystemClock)
+            .await;
     });
 
     // Wait for Plan to start (blocked on gate).
     wait_until(&sink, |e| {
-        e.iter().any(|ev| matches!(ev, PipelineEvent::StepStarted { step_id, .. } if step_id == "plan"))
+        e.iter()
+            .any(|ev| matches!(ev, PipelineEvent::StepStarted { step_id, .. } if step_id == "plan"))
     })
     .await;
 
     // While Plan is running, skip the still-pending Scene step (the user opts
     // out of scene generation). Plan then Outline run; Scene is never started.
-    handle.skip_step(&project, "scene", sink.as_ref(), &SystemClock).await.unwrap();
+    handle
+        .skip_step(&project, "scene", sink.as_ref(), &SystemClock)
+        .await
+        .unwrap();
 
     // Let Plan finish; Outline runs, Scene is skipped, the run completes.
     plan_gate.notify_one();
@@ -675,11 +871,22 @@ async fn skip_step_unblocks_downstream() {
     );
     assert!(seq.contains(&"step_started:outline".to_string()));
     assert!(seq.contains(&"run_completed".to_string()));
-    let run_state = crate::pipeline::load_run_state(&project, "run_skip").unwrap().unwrap();
+    let run_state = crate::pipeline::load_run_state(&project, "run_skip")
+        .unwrap()
+        .unwrap();
     assert_eq!(run_state.status, RunStatus::Completed);
-    assert_eq!(run_state.find_step("plan").unwrap().status, StepStatus::Succeeded);
-    assert_eq!(run_state.find_step("outline").unwrap().status, StepStatus::Succeeded);
-    assert_eq!(run_state.find_step("scene").unwrap().status, StepStatus::Skipped);
+    assert_eq!(
+        run_state.find_step("plan").unwrap().status,
+        StepStatus::Succeeded
+    );
+    assert_eq!(
+        run_state.find_step("outline").unwrap().status,
+        StepStatus::Succeeded
+    );
+    assert_eq!(
+        run_state.find_step("scene").unwrap().status,
+        StepStatus::Skipped
+    );
 }
 
 // ---------- scheduler: retry ----------
@@ -691,7 +898,7 @@ async fn retry_step_reruns_and_completes() {
     let clock = StepClock::new();
 
     let fails_left = Arc::new(AsyncMutex::new(1u32));
-    let mut agents = AgentRegistry::new();
+    let mut agents = AgentRegistry::with_defaults();
     agents.register(
         StepKind::Plan,
         Box::new(OnceFailingAgent {
@@ -705,25 +912,38 @@ async fn retry_step_reruns_and_completes() {
     let pipeline = Pipeline::new(agents);
 
     let handle = pipeline
-        .create_run(&project, "run_retry", "brief", &default_recipe(), &clock, sink.as_ref())
+        .create_run(
+            &project,
+            "run_retry",
+            "brief",
+            &default_recipe(),
+            &clock,
+            sink.as_ref(),
+        )
         .unwrap();
 
     let project_c = project.clone();
     let handle_c = handle.clone();
     let sink_c = sink.clone();
     let task = tokio::spawn(async move {
-        pipeline.execute(&project_c, handle_c, sink_c.as_ref(), &SystemClock).await;
+        pipeline
+            .execute(&project_c, handle_c, sink_c.as_ref(), &SystemClock)
+            .await;
     });
 
     // Plan fails on the first attempt -> run fails (execute returns).
     wait_until(&sink, |e| {
-        e.iter().any(|ev| matches!(ev, PipelineEvent::RunFailed { .. }))
+        e.iter()
+            .any(|ev| matches!(ev, PipelineEvent::RunFailed { .. }))
     })
     .await;
     let _ = timeout(Duration::from_secs(1), task).await;
 
     // Retry Plan: it now succeeds (fails_left exhausted).
-    handle.retry_step(&project, "plan", sink.as_ref(), &SystemClock).await.unwrap();
+    handle
+        .retry_step(&project, "plan", sink.as_ref(), &SystemClock)
+        .await
+        .unwrap();
 
     // Re-drive execution. The handle's state now has Plan=Pending and
     // status=Running; spawn a fresh execute task to continue the run.
@@ -731,7 +951,7 @@ async fn retry_step_reruns_and_completes() {
     let project2 = project.clone();
     let sink2 = sink.clone();
     let pipeline_for_resume = Pipeline::new({
-        let mut a = AgentRegistry::new();
+        let mut a = AgentRegistry::with_defaults();
         a.register(StepKind::Plan, Box::new(crate::agents::PlanAgent));
         a.register(StepKind::Memory, Box::new(crate::agents::MemoryAgent));
         a.register(StepKind::Outline, Box::new(crate::agents::OutlineAgent));
@@ -739,7 +959,9 @@ async fn retry_step_reruns_and_completes() {
         a
     });
     let resume_task = tokio::spawn(async move {
-        pipeline_for_resume.execute(&project2, handle2, sink2.as_ref(), &SystemClock).await;
+        pipeline_for_resume
+            .execute(&project2, handle2, sink2.as_ref(), &SystemClock)
+            .await;
     });
     let _ = timeout(Duration::from_secs(3), resume_task)
         .await
@@ -761,7 +983,9 @@ async fn retry_step_reruns_and_completes() {
     );
     assert!(seq.contains(&"run_completed".to_string()));
 
-    let run_state = crate::pipeline::load_run_state(&project, "run_retry").unwrap().unwrap();
+    let run_state = crate::pipeline::load_run_state(&project, "run_retry")
+        .unwrap()
+        .unwrap();
     assert_eq!(run_state.status, RunStatus::Completed);
     let plan_step = run_state.find_step("plan").unwrap();
     assert_eq!(plan_step.history.len(), 2);
@@ -789,6 +1013,7 @@ async fn retrying_a_completed_step_resets_it_and_its_downstream() {
     pipeline
         .execute(&project, handle.clone(), &sink, &clock)
         .await;
+
     assert_eq!(handle.state().lock().await.status, RunStatus::Completed);
 
     handle
@@ -798,7 +1023,10 @@ async fn retrying_a_completed_step_resets_it_and_its_downstream() {
     let state = handle.state().lock().await;
     assert_eq!(state.status, RunStatus::Running);
     assert_eq!(state.find_step("plan").unwrap().status, StepStatus::Pending);
-    assert_eq!(state.find_step("outline").unwrap().status, StepStatus::Pending);
+    assert_eq!(
+        state.find_step("outline").unwrap().status,
+        StepStatus::Pending
+    );
 }
 
 #[tokio::test]
@@ -821,15 +1049,60 @@ async fn scene_write_failure_fails_the_step_instead_of_claiming_success() {
             &sink,
         )
         .unwrap();
-    std::fs::write(project.join("game"), "not a directory").unwrap();
+    std::fs::create_dir_all(project.join("game")).unwrap();
+    std::fs::write(project.join("game/scene"), "not a directory").unwrap();
 
-    pipeline.execute(&project, handle.clone(), &sink, &clock).await;
+    pipeline
+        .execute(&project, handle.clone(), &sink, &clock)
+        .await;
 
     let state = handle.state().lock().await;
     assert_eq!(state.status, RunStatus::Failed);
     assert_eq!(state.find_step("scene").unwrap().status, StepStatus::Failed);
-    assert!(state.find_step("scene").unwrap().error.as_deref().unwrap().contains("scene"));
+    assert!(state
+        .find_step("scene")
+        .unwrap()
+        .error
+        .as_deref()
+        .unwrap()
+        .contains("scene"));
     assert!(!labels(&sink.events()).contains(&"step_succeeded:scene".to_string()));
+}
+
+#[tokio::test]
+async fn multi_scene_write_failure_rolls_back_earlier_scene_files() {
+    let project = fresh_project("scene_write_rollback");
+    let scene_dir = project.join("game/scene");
+    std::fs::create_dir_all(&scene_dir).unwrap();
+    std::fs::write(scene_dir.join("start.txt"), ":original;").unwrap();
+    std::fs::create_dir(scene_dir.join("chapter_01.txt")).unwrap();
+    let sink = RecordingSink::new();
+    let clock = StepClock::new();
+    let pipeline = Pipeline::with_default_agents();
+    let handle = pipeline
+        .create_run(
+            &project,
+            "run_scene_write_rollback",
+            "brief",
+            &default_recipe(),
+            &clock,
+            &sink,
+        )
+        .unwrap();
+
+    pipeline
+        .execute(&project, handle.clone(), &sink, &clock)
+        .await;
+
+    let state = handle.state().lock().await;
+    assert_eq!(state.find_step("scene").unwrap().status, StepStatus::Failed);
+    assert_eq!(
+        std::fs::read_to_string(scene_dir.join("start.txt")).unwrap(),
+        ":original;"
+    );
+    drop(state);
+    let plan = crate::story_plan::load_plan(&project).unwrap().unwrap();
+    assert!(plan.scenes.is_empty());
 }
 
 #[tokio::test]
@@ -852,12 +1125,16 @@ async fn transition_persistence_failure_stops_before_running_the_agent() {
     std::fs::remove_dir_all(&run_dir).unwrap();
     std::fs::write(&run_dir, "not a directory").unwrap();
 
-    pipeline.execute(&project, handle.clone(), &sink, &clock).await;
+    pipeline
+        .execute(&project, handle.clone(), &sink, &clock)
+        .await;
 
     assert_eq!(handle.state().lock().await.status, RunStatus::Failed);
     let events = labels(&sink.events());
     assert!(events.contains(&"run_failed".to_string()));
-    assert!(!events.iter().any(|event| event.starts_with("step_started:")));
+    assert!(!events
+        .iter()
+        .any(|event| event.starts_with("step_started:")));
 }
 
 #[tokio::test]
@@ -889,7 +1166,12 @@ async fn pending_dependencies_are_editable_but_cycles_are_rejected() {
     let persisted = crate::pipeline::load_run_state(&project, "run_dependency_edit")
         .unwrap()
         .unwrap();
-    assert!(persisted.find_step("outline").unwrap().def.depends_on.is_empty());
+    assert!(persisted
+        .find_step("outline")
+        .unwrap()
+        .def
+        .depends_on
+        .is_empty());
 }
 
 #[tokio::test]
@@ -898,7 +1180,7 @@ async fn stop_discards_in_flight_output_and_persists_cancelled() {
     let sink = Arc::new(RecordingSink::new());
     let clock = StepClock::new();
     let gate = Arc::new(Notify::new());
-    let mut agents = AgentRegistry::new();
+    let mut agents = AgentRegistry::with_defaults();
     agents.register(
         StepKind::Plan,
         Box::new(ControllableAgent {
@@ -909,7 +1191,14 @@ async fn stop_discards_in_flight_output_and_persists_cancelled() {
     agents.register(StepKind::Outline, Box::new(crate::agents::OutlineAgent));
     let pipeline = Arc::new(Pipeline::new(agents));
     let handle = pipeline
-        .create_run(&project, "run_stop", "brief", &default_recipe(), &clock, sink.as_ref())
+        .create_run(
+            &project,
+            "run_stop",
+            "brief",
+            &default_recipe(),
+            &clock,
+            sink.as_ref(),
+        )
         .unwrap();
     let task = {
         let pipeline = pipeline.clone();
@@ -917,7 +1206,9 @@ async fn stop_discards_in_flight_output_and_persists_cancelled() {
         let handle = handle.clone();
         let sink = sink.clone();
         tokio::spawn(async move {
-            pipeline.execute(&project, handle, sink.as_ref(), &SystemClock).await;
+            pipeline
+                .execute(&project, handle, sink.as_ref(), &SystemClock)
+                .await;
         })
     };
     wait_until(&sink, |events| {
@@ -932,7 +1223,9 @@ async fn stop_discards_in_flight_output_and_persists_cancelled() {
         .expect("cancelled driver did not finish")
         .unwrap();
 
-    let persisted = crate::pipeline::load_run_state(&project, "run_stop").unwrap().unwrap();
+    let persisted = crate::pipeline::load_run_state(&project, "run_stop")
+        .unwrap()
+        .unwrap();
     assert_eq!(persisted.status, RunStatus::Cancelled);
     let plan_step = persisted.find_step("plan").unwrap();
     assert_eq!(plan_step.status, StepStatus::Pending);
@@ -954,7 +1247,7 @@ async fn retry_after_stop_ignores_the_cancelled_attempt_result() {
     let sink = Arc::new(RecordingSink::new());
     let clock = StepClock::new();
     let gate = Arc::new(Notify::new());
-    let mut agents = AgentRegistry::new();
+    let mut agents = AgentRegistry::with_defaults();
     agents.register(
         StepKind::Plan,
         Box::new(ControllableAgent {
@@ -965,7 +1258,14 @@ async fn retry_after_stop_ignores_the_cancelled_attempt_result() {
     agents.register(StepKind::Outline, Box::new(crate::agents::OutlineAgent));
     let pipeline = Arc::new(Pipeline::new(agents));
     let handle = pipeline
-        .create_run(&project, "run_stop_retry", "brief", &default_recipe(), &clock, sink.as_ref())
+        .create_run(
+            &project,
+            "run_stop_retry",
+            "brief",
+            &default_recipe(),
+            &clock,
+            sink.as_ref(),
+        )
         .unwrap();
     let task = {
         let pipeline = pipeline.clone();
@@ -973,7 +1273,9 @@ async fn retry_after_stop_ignores_the_cancelled_attempt_result() {
         let handle = handle.clone();
         let sink = sink.clone();
         tokio::spawn(async move {
-            pipeline.execute(&project, handle, sink.as_ref(), &SystemClock).await;
+            pipeline
+                .execute(&project, handle, sink.as_ref(), &SystemClock)
+                .await;
         })
     };
     wait_until(&sink, |events| {
@@ -982,7 +1284,10 @@ async fn retry_after_stop_ignores_the_cancelled_attempt_result() {
     .await;
 
     handle.stop(&project, sink.as_ref(), &clock).await.unwrap();
-    handle.retry_step(&project, "plan", sink.as_ref(), &clock).await.unwrap();
+    handle
+        .retry_step(&project, "plan", sink.as_ref(), &clock)
+        .await
+        .unwrap();
     gate.notify_one();
     wait_until(&sink, |events| {
         events.iter().filter(|event| matches!(event, PipelineEvent::StepStarted { step_id, .. } if step_id == "plan")).count() == 2
@@ -998,7 +1303,10 @@ async fn retry_after_stop_ignores_the_cancelled_attempt_result() {
     assert_eq!(state.status, RunStatus::Completed);
     let history = &state.find_step("plan").unwrap().history;
     assert_eq!(history.len(), 2);
-    assert_eq!(history[0].error.as_deref(), Some("cancelled before completion"));
+    assert_eq!(
+        history[0].error.as_deref(),
+        Some("cancelled before completion")
+    );
     assert!(history[0].output.is_none());
     assert!(history[1].output.is_some());
 }
@@ -1009,12 +1317,15 @@ async fn step_once_runs_one_ready_step_then_pauses() {
     let sink = Arc::new(RecordingSink::new());
     let clock = StepClock::new();
     let pipeline = Arc::new(Pipeline::with_default_agents());
+    let recipe = FlowRecipe::new()
+        .step(StepDef::new("plan", StepKind::Plan))
+        .step(StepDef::new("memory", StepKind::Memory).depends_on("plan"));
     let handle = pipeline
         .create_run(
             &project,
             "run_step_once",
             "brief",
-            &default_recipe(),
+            &recipe,
             &clock,
             sink.as_ref(),
         )
@@ -1026,11 +1337,16 @@ async fn step_once_runs_one_ready_step_then_pauses() {
         let handle = handle.clone();
         let sink = sink.clone();
         tokio::spawn(async move {
-            pipeline.execute(&project, handle, sink.as_ref(), &SystemClock).await;
+            pipeline
+                .execute(&project, handle, sink.as_ref(), &SystemClock)
+                .await;
         })
     };
 
-    handle.step_once(&project, sink.as_ref(), &clock).await.unwrap();
+    handle
+        .step_once(&project, sink.as_ref(), &clock)
+        .await
+        .unwrap();
     wait_until(&sink, |events| {
         events
             .iter()
@@ -1042,11 +1358,20 @@ async fn step_once_runs_one_ready_step_then_pauses() {
     {
         let state = handle.state().lock().await;
         assert_eq!(state.status, RunStatus::Paused);
-        assert_eq!(state.find_step("plan").unwrap().status, StepStatus::Succeeded);
-        assert_eq!(state.find_step("outline").unwrap().status, StepStatus::Pending);
+        assert_eq!(
+            state.find_step("plan").unwrap().status,
+            StepStatus::Succeeded
+        );
+        assert_eq!(
+            state.find_step("memory").unwrap().status,
+            StepStatus::Pending
+        );
     }
 
-    handle.step_once(&project, sink.as_ref(), &clock).await.unwrap();
+    handle
+        .step_once(&project, sink.as_ref(), &clock)
+        .await
+        .unwrap();
     timeout(Duration::from_secs(3), task)
         .await
         .expect("second single-step did not complete the run")
@@ -1081,10 +1406,15 @@ async fn recovered_running_snapshot_can_execute_one_step() {
         let recovered = recovered.clone();
         let sink = sink.clone();
         tokio::spawn(async move {
-            pipeline.execute(&project, recovered, sink.as_ref(), &SystemClock).await;
+            pipeline
+                .execute(&project, recovered, sink.as_ref(), &SystemClock)
+                .await;
         })
     };
-    recovered.step_once(&project, sink.as_ref(), &clock).await.unwrap();
+    recovered
+        .step_once(&project, sink.as_ref(), &clock)
+        .await
+        .unwrap();
     wait_until(&sink, |events| {
         events.iter().any(|event| matches!(event, PipelineEvent::StepSucceeded { step_id, .. } if step_id == "plan"))
     })
@@ -1100,14 +1430,31 @@ fn a_new_run_updates_the_story_plan_production_brief() {
     let clock = StepClock::new();
     let pipeline = Pipeline::with_default_agents();
     pipeline
-        .create_run(&project, "run_old", "old brief", &default_recipe(), &clock, &sink)
+        .create_run(
+            &project,
+            "run_old",
+            "old brief",
+            &default_recipe(),
+            &clock,
+            &sink,
+        )
         .unwrap();
     pipeline
-        .create_run(&project, "run_new", "new brief", &default_recipe(), &clock, &sink)
+        .create_run(
+            &project,
+            "run_new",
+            "new brief",
+            &default_recipe(),
+            &clock,
+            &sink,
+        )
         .unwrap();
 
     assert_eq!(
-        crate::story_plan::load_plan(&project).unwrap().unwrap().prompt,
+        crate::story_plan::load_plan(&project)
+            .unwrap()
+            .unwrap()
+            .prompt,
         "new brief"
     );
 }
@@ -1118,22 +1465,55 @@ fn failed_run_creation_restores_the_previous_production_brief() {
     let sink = RecordingSink::new();
     let clock = StepClock::new();
     let pipeline = Pipeline::with_default_agents();
-    pipeline.create_run(&project, "run_old", "old brief", &default_recipe(), &clock, &sink).unwrap();
+    pipeline
+        .create_run(
+            &project,
+            "run_old",
+            "old brief",
+            &default_recipe(),
+            &clock,
+            &sink,
+        )
+        .unwrap();
     let pipeline_dir = project.join(".ollaic").join("pipeline");
     std::fs::remove_dir_all(&pipeline_dir).unwrap();
     std::fs::write(&pipeline_dir, "blocks run persistence").unwrap();
 
-    assert!(pipeline.create_run(&project, "run_new", "new brief", &default_recipe(), &clock, &sink).is_err());
-    assert_eq!(crate::story_plan::load_plan(&project).unwrap().unwrap().prompt, "old brief");
+    assert!(pipeline
+        .create_run(
+            &project,
+            "run_new",
+            "new brief",
+            &default_recipe(),
+            &clock,
+            &sink
+        )
+        .is_err());
+    assert_eq!(
+        crate::story_plan::load_plan(&project)
+            .unwrap()
+            .unwrap()
+            .prompt,
+        "old brief"
+    );
 
     let first_project = fresh_project("first_brief_rollback");
     let first_pipeline_dir = first_project.join(".ollaic").join("pipeline");
     std::fs::create_dir_all(first_pipeline_dir.parent().unwrap()).unwrap();
     std::fs::write(&first_pipeline_dir, "blocks run persistence").unwrap();
-    assert!(pipeline.create_run(
-        &first_project, "run_first", "first brief", &default_recipe(), &clock, &sink,
-    ).is_err());
-    assert!(crate::story_plan::load_plan(&first_project).unwrap().is_none());
+    assert!(pipeline
+        .create_run(
+            &first_project,
+            "run_first",
+            "first brief",
+            &default_recipe(),
+            &clock,
+            &sink,
+        )
+        .is_err());
+    assert!(crate::story_plan::load_plan(&first_project)
+        .unwrap()
+        .is_none());
 }
 
 #[tokio::test]
@@ -1142,22 +1522,116 @@ async fn run_history_can_be_pinned_and_cleared_when_not_running() {
     let sink = RecordingSink::new();
     let clock = StepClock::new();
     let pipeline = Pipeline::with_default_agents();
-    let handle = pipeline.create_run(
-        &project, "run_history_controls", "brief", &default_recipe(), &clock, &sink,
-    ).unwrap();
-    pipeline.execute(&project, handle.clone(), &sink, &clock).await;
+    let handle = pipeline
+        .create_run(
+            &project,
+            "run_history_controls",
+            "brief",
+            &default_recipe(),
+            &clock,
+            &sink,
+        )
+        .unwrap();
+    pipeline
+        .execute(&project, handle.clone(), &sink, &clock)
+        .await;
+
+    assert!(
+        !crate::webgal::project::list_project_snapshots(project.to_string_lossy().to_string())
+            .unwrap()
+            .is_empty()
+    );
 
     handle.set_pinned(&project, true, &clock).await.unwrap();
     assert!(handle.state().lock().await.pinned);
-    assert!(handle.state().lock().await.steps.iter().any(|step| !step.history.is_empty()));
+    assert!(handle
+        .state()
+        .lock()
+        .await
+        .steps
+        .iter()
+        .any(|step| !step.history.is_empty()));
     handle.clear_history(&project, &clock).await.unwrap();
-    assert!(handle.state().lock().await.steps.iter().all(|step| step.history.is_empty()));
+    assert!(handle
+        .state()
+        .lock()
+        .await
+        .steps
+        .iter()
+        .all(|step| step.history.is_empty()));
+    assert!(
+        crate::webgal::project::list_project_snapshots(project.to_string_lossy().to_string())
+            .unwrap()
+            .is_empty()
+    );
+    assert!(handle
+        .state()
+        .lock()
+        .await
+        .pending_snapshot_cleanup
+        .is_empty());
     {
         let mut state = handle.state().lock().await;
         state.status = RunStatus::Paused;
         state.find_step_mut("plan").unwrap().status = StepStatus::Running;
     }
     assert!(handle.clear_history(&project, &clock).await.is_err());
+}
+
+#[test]
+fn run_creation_persists_local_fallback_authorization_atomically() {
+    let project = fresh_project("fallback_authorization");
+    let sink = RecordingSink::new();
+    let clock = StepClock::new();
+    Pipeline::with_default_agents()
+        .create_run_with_options(
+            &project,
+            "run_fallback_authorization",
+            "brief",
+            &default_recipe(),
+            true,
+            &clock,
+            &sink,
+        )
+        .unwrap();
+
+    assert!(
+        crate::pipeline::store::load_run_state(&project, "run_fallback_authorization")
+            .unwrap()
+            .unwrap()
+            .allow_local_fallback
+    );
+}
+
+#[tokio::test]
+async fn failed_snapshot_cleanup_remains_persisted_for_retry() {
+    let project = fresh_project("snapshot_cleanup_retry");
+    let sink = RecordingSink::new();
+    let clock = StepClock::new();
+    let handle = Pipeline::with_default_agents()
+        .create_run(
+            &project,
+            "run_snapshot_cleanup_retry",
+            "brief",
+            &default_recipe(),
+            &clock,
+            &sink,
+        )
+        .unwrap();
+
+    let mut state = handle.state().lock().await;
+    state.pending_snapshot_cleanup = vec!["../invalid".to_string()];
+    crate::pipeline::store::save_run_state(&project, &state).unwrap();
+    assert!(cleanup_rollback_snapshots(&project, &mut state).is_err());
+    drop(state);
+
+    assert_eq!(
+        crate::pipeline::store::load_run_state(&project, "run_snapshot_cleanup_retry")
+            .unwrap()
+            .unwrap()
+            .pending_snapshot_cleanup,
+        vec!["../invalid"]
+    );
 }
 
 #[tokio::test]
@@ -1176,7 +1650,9 @@ async fn edited_step_prompt_is_used_by_retry() {
             &sink,
         )
         .unwrap();
-    pipeline.execute(&project, handle.clone(), &sink, &clock).await;
+    pipeline
+        .execute(&project, handle.clone(), &sink, &clock)
+        .await;
 
     handle
         .update_step_prompt(&project, "plan", "revised direction".to_string(), &clock)
@@ -1186,11 +1662,13 @@ async fn edited_step_prompt_is_used_by_retry() {
         .retry_step(&project, "plan", &sink, &clock)
         .await
         .unwrap();
-    pipeline.execute(&project, handle.clone(), &sink, &clock).await;
+    pipeline
+        .execute(&project, handle.clone(), &sink, &clock)
+        .await;
 
     let state = handle.state().lock().await;
     let history = &state.find_step("plan").unwrap().history;
     assert_eq!(history.len(), 2);
     let input: serde_json::Value = serde_json::from_str(&history[1].input_snapshot).unwrap();
-    assert_eq!(input["prompt"], "revised direction");
+    assert_eq!(input["stepInstruction"], "revised direction");
 }

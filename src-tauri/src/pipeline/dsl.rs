@@ -6,8 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 /// The kind of work a Flow Step performs. Mirrors the V2 node-type table.
-/// P0 wires only `Plan` and `Outline` to agents; the rest are reserved for
-/// later slices so the kind set is stable up front.
+/// The kind set spans the current P1 content flow and later production gates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum StepKind {
@@ -66,6 +65,11 @@ impl StepDef {
             prompt: String::new(),
         }
     }
+
+    pub fn agent(mut self, key: impl Into<String>) -> Self {
+        self.agent = Some(key.into());
+        self
+    }
 }
 
 /// A declarative Flow Recipe: an ordered list of steps with dependencies.
@@ -96,10 +100,7 @@ impl FlowRecipe {
         for step in &self.steps {
             for dep in &step.depends_on {
                 if !ids.contains(dep.as_str()) {
-                    return Err(RecipeError::UnknownDependency(
-                        step.id.clone(),
-                        dep.clone(),
-                    ));
+                    return Err(RecipeError::UnknownDependency(step.id.clone(), dep.clone()));
                 }
             }
         }
@@ -142,13 +143,28 @@ impl FlowRecipe {
     }
 }
 
-/// The P0 built-in recipe: `Plan` -> `Outline`. P1 agents may register
-/// additional step kinds, but they are not part of the default production
-/// flow until that slice is complete.
+/// The P1 prompt-to-editable-WebGAL production recipe.
 pub fn default_recipe() -> FlowRecipe {
     FlowRecipe::new()
         .step(StepDef::new("plan", StepKind::Plan))
-        .step(StepDef::new("outline", StepKind::Outline).depends_on("plan"))
+        .step(StepDef::new("memory", StepKind::Memory).depends_on("plan"))
+        .step(StepDef::new("outline", StepKind::Outline).depends_on("memory"))
+        .step(StepDef::new("character", StepKind::Character).depends_on("outline"))
+        .step(
+            StepDef::new("dialogist", StepKind::Scene)
+                .agent("dialogist")
+                .depends_on("character"),
+        )
+        .step(
+            StepDef::new("asset", StepKind::Asset)
+                .agent("assetPlanner")
+                .depends_on("dialogist"),
+        )
+        .step(
+            StepDef::new("scene", StepKind::Scene)
+                .agent("sceneScript")
+                .depends_on("asset"),
+        )
 }
 
 impl StepDef {

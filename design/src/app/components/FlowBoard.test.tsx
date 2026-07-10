@@ -78,6 +78,7 @@ function runState(status: RunState['status'] = 'running'): RunState {
     startedAt: 1,
     updatedAt: 2,
     pinned: false,
+    allowLocalFallback: false,
     steps: [
       {
         def: { id: 'plan', kind: 'plan', dependsOn: [], agent: null, prompt: '' },
@@ -146,6 +147,7 @@ describe('FlowBoard', () => {
     expect(mockedInvoke).toHaveBeenCalledWith('pipeline_start', {
       projectPath: '/tmp/proj',
       prompt: '赛博朋克校园恋爱',
+      allowLocalFallback: false,
     });
     expect(mockedListen).toHaveBeenCalledWith('pipeline:run_1', expect.any(Function));
 
@@ -172,6 +174,19 @@ describe('FlowBoard', () => {
   it('disables run while the brief is empty', () => {
     render(<FlowBoard projectPath="/tmp/proj" />);
     expect(screen.getByRole('button', { name: '创建流程' })).toBeDisabled();
+  });
+
+  it('requires an explicit user choice before allowing local fallback', async () => {
+    const user = userEvent.setup();
+    render(<FlowBoard projectPath="/tmp/proj" />);
+    await user.type(screen.getByLabelText('production brief'), '校园悬疑');
+    await user.click(screen.getByLabelText('允许本地内容降级'));
+    await user.click(screen.getByRole('button', { name: '创建流程' }));
+    expect(mockedInvoke).toHaveBeenCalledWith('pipeline_start', {
+      projectPath: '/tmp/proj',
+      prompt: '校园悬疑',
+      allowLocalFallback: true,
+    });
   });
 
   it('prepares a paused flow before the user starts execution', async () => {
@@ -414,7 +429,7 @@ describe('FlowBoard', () => {
     await user.click(screen.getByRole('button', { name: '重试加载' }));
 
     expect(await screen.findByText('两位创作者在共同制作游戏时重新理解彼此。')).toBeInTheDocument();
-    expect(screen.getByText('1 章 / 1 场景')).toBeInTheDocument();
+    expect(screen.getByText('0 角色 / 1 场景 / 0 资产需求')).toBeInTheDocument();
   });
 
   it('pins, exports, and manually clears retained run history', async () => {

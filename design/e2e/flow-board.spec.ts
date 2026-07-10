@@ -12,6 +12,7 @@ async function openFlowBoard(page: Page, viewport: { width: number; height: numb
       startedAt: now - 32_000,
       updatedAt: now - 2_000,
       pinned: false,
+      allowLocalFallback: false,
       steps: [
         {
           def: { id: 'plan', kind: 'plan', dependsOn: [], agent: null, prompt: '提炼故事冲突' },
@@ -36,7 +37,30 @@ async function openFlowBoard(page: Page, viewport: { width: number; height: numb
           }],
         },
         {
-          def: { id: 'outline', kind: 'outline', dependsOn: ['plan'], agent: null, prompt: '生成三章结构' },
+          def: { id: 'memory', kind: 'memory', dependsOn: ['plan'], agent: null, prompt: '' },
+          status: 'succeeded', attempt: 1, output: '{"worldbook":"创作者使用记忆编辑终端完成视觉小说"}', error: null,
+          startedAt: now - 22_000, finishedAt: now - 19_000, history: [],
+        },
+        {
+          def: { id: 'outline', kind: 'outline', dependsOn: ['memory'], agent: null, prompt: '生成三章结构' },
+          status: 'succeeded', attempt: 1, output: '{"chapters":[{"title":"重逢"},{"title":"共写"},{"title":"首映"}]}', error: null,
+          startedAt: now - 19_000, finishedAt: now - 15_000, history: [],
+        },
+        {
+          def: { id: 'character', kind: 'character', dependsOn: ['outline'], agent: null, prompt: '' },
+          status: 'succeeded', attempt: 1, output: '{"characters":[{"name":"陆川"},{"name":"林夏"}]}', error: null,
+          startedAt: now - 15_000, finishedAt: now - 12_000, history: [],
+        },
+        {
+          def: { id: 'dialogist', kind: 'scene', dependsOn: ['character'], agent: 'dialogist', prompt: '' },
+          status: 'pending', attempt: 0, output: null, error: null, startedAt: null, finishedAt: null, history: [],
+        },
+        {
+          def: { id: 'asset', kind: 'asset', dependsOn: ['dialogist'], agent: 'assetPlanner', prompt: '' },
+          status: 'pending', attempt: 0, output: null, error: null, startedAt: null, finishedAt: null, history: [],
+        },
+        {
+          def: { id: 'scene', kind: 'scene', dependsOn: ['asset'], agent: 'sceneScript', prompt: '' },
           status: 'pending',
           attempt: 0,
           output: null,
@@ -48,12 +72,17 @@ async function openFlowBoard(page: Page, viewport: { width: number; height: numb
       ],
     };
     const plan = {
-      version: 2,
+      version: 1,
       prompt: run.prompt,
       synopsis: '共同创作让两位主角重新理解彼此。',
-      memory: { worldbook: '' },
+      memory: { worldbook: '创作者使用记忆编辑终端完成视觉小说', glossary: {} },
       chapters: [{ id: 'chapter-1', title: '重逢', summary: '制作开始' }],
-      scenes: [],
+      characters: [{ id: 'hero', name: '陆川' }, { id: 'heroine', name: '林夏' }],
+      scenePlans: [{ id: 'opening', file: 'start.txt', chapterId: 'chapter-1', title: '重逢', summary: '制作开始', characterIds: ['hero', 'heroine'] }],
+      branches: { entryScene: 'opening', edges: [] },
+      sceneDrafts: [],
+      assetPlan: [{ id: 'bg_opening', kind: 'background', targetStem: 'bg_opening', prompt: '工作室', sceneRef: 'opening', status: 'pending' }],
+      scenes: ['start.txt'],
       pipelineRuns: [],
     };
 
@@ -93,6 +122,7 @@ test('FlowBoard supports real node dragging and desktop inspection', async ({ pa
   await openFlowBoard(page, { width: 1440, height: 900 });
 
   await expect(page.getByText('共同创作让两位主角重新理解彼此。')).toBeVisible();
+  await expect(page.getByText('2 角色 / 1 场景 / 1 资产需求')).toBeVisible();
   await expect(page.getByText('run_qa')).toBeVisible();
   const planNode = page.locator('[data-step-id="plan"]');
   const before = await planNode.boundingBox();
@@ -114,6 +144,9 @@ test('FlowBoard supports real node dragging and desktop inspection', async ({ pa
   await expect(page.getByRole('complementary', { name: 'plan 步骤检查器' })).toBeVisible();
   await expect(page.getByRole('region', { name: '生产事件账本' })).toBeVisible();
   expect(await page.evaluate(() => window.scrollY)).toBe(0);
+
+  await page.locator('[data-step-id="character"]').dblclick();
+  await expect(page).toHaveURL(/\/editor\/alpha\/assets\?tab=character$/);
 });
 
 test('FlowBoard inspector remains contained on a narrow viewport', async ({ page }) => {

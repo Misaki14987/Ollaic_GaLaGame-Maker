@@ -56,8 +56,11 @@ export interface StepRunHistory {
   durationMs?: number | null;
   diff?: string | null;
   cost?: number | null;
+  promptTokens?: number | null;
+  completionTokens?: number | null;
   warnings: string[];
   downgrade?: string | null;
+  rollbackSnapshot?: string | null;
 }
 
 export interface RunState {
@@ -69,6 +72,7 @@ export interface RunState {
   startedAt: number;
   updatedAt: number;
   pinned: boolean;
+  allowLocalFallback: boolean;
 }
 
 export interface ChapterPlan {
@@ -79,6 +83,61 @@ export interface ChapterPlan {
 
 export interface StoryMemory {
   worldbook: string;
+  glossary: Record<string, string>;
+}
+
+export interface StoryCharacter {
+  id: string;
+  name: string;
+  aliases: string[];
+  description: string;
+  personality: string;
+  stance: string;
+  keywords: string[];
+  dialogueStyle: string;
+  gender: string;
+  age: string;
+}
+
+export interface ScenePlan {
+  id: string;
+  file: string;
+  chapterId: string;
+  title: string;
+  summary: string;
+  characterIds: string[];
+}
+
+export interface BranchEdge {
+  from: string;
+  to: string;
+  choice?: string | null;
+}
+
+export interface BranchGraph {
+  entryScene: string;
+  edges: BranchEdge[];
+}
+
+export interface DialogueBeat {
+  speaker?: string | null;
+  text: string;
+}
+
+export interface SceneDraft {
+  sceneId: string;
+  title: string;
+  beats: DialogueBeat[];
+}
+
+export interface AssetTaskPlan {
+  id: string;
+  kind: string;
+  targetStem: string;
+  prompt: string;
+  sceneRef?: string | null;
+  characterRef?: string | null;
+  status: string;
 }
 
 export interface PipelineRunSummary {
@@ -94,6 +153,11 @@ export interface StoryPlan {
   synopsis: string;
   memory: StoryMemory;
   chapters: ChapterPlan[];
+  characters: StoryCharacter[];
+  scenePlans: ScenePlan[];
+  branches: BranchGraph;
+  sceneDrafts: SceneDraft[];
+  assetPlan: AssetTaskPlan[];
   scenes: string[];
   pipelineRuns: PipelineRunSummary[];
 }

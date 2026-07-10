@@ -842,6 +842,60 @@ pub async fn ai_chat_turn(
     }
 }
 
+/// Pipeline Agent entry point. `None` means no usable chat model is configured,
+/// so the caller may use an explicit local fallback. Provider failures remain
+/// errors and must not be silently downgraded.
+pub(crate) async fn complete_agent_text(
+    system_prompt: &str,
+    user_prompt: &str,
+) -> Result<Option<(String, String, Option<u32>, Option<u32>)>, String> {
+    let cfg = config::load_config();
+    if validate_config_basics(&cfg).is_err() {
+        return Ok(None);
+    }
+    let request = ChatRequest::new(vec![
+        ChatMessage::system(system_prompt),
+        ChatMessage::user(user_prompt),
+    ]);
+    let endpoint = effective_endpoint(&cfg);
+    let options = chat_debug_options();
+    match build_client(&cfg)
+        .exec_chat(&cfg.model, request, Some(&options))
+        .await
+    {
+        Ok(response) => {
+            let text = response
+                .first_text()
+                .map(str::to_string)
+                .ok_or_else(|| "Agent model returned no text".to_string())?;
+            log_ai_event(
+                "pipeline_agent",
+                &cfg,
+                &endpoint,
+                true,
+                "agent turn completed",
+            );
+            Ok(Some((
+                text,
+                cfg.model,
+                response
+                    .usage
+                    .prompt_tokens
+                    .and_then(|value| u32::try_from(value).ok()),
+                response
+                    .usage
+                    .completion_tokens
+                    .and_then(|value| u32::try_from(value).ok()),
+            )))
+        }
+        Err(error) => {
+            let message = error.to_string();
+            log_ai_event("pipeline_agent", &cfg, &endpoint, false, &message);
+            Err(message)
+        }
+    }
+}
+
 fn build_client(cfg: &AiConfig) -> Client {
     let api_key = cfg.api_key.clone();
     let base_url = cfg.base_url.clone();
@@ -919,6 +973,10 @@ fn validate_config_basics(cfg: &AiConfig) -> Result<(), String> {
         return Err("尚未配置 API Key，请先在 AI 设置中填写".into());
     }
     Ok(())
+}
+
+pub(crate) fn has_agent_chat_config() -> bool {
+    validate_config_basics(&config::load_config()).is_ok()
 }
 
 /// Default API endpoint for a chat provider. `None` means there is no built-in

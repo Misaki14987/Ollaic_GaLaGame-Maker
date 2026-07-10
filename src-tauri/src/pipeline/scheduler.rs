@@ -10,13 +10,13 @@ use std::sync::Arc;
 
 use tokio::sync::{Mutex, Notify};
 
-use crate::agents::{AgentContext, AgentError, AgentOutput, AgentRegistry, SceneScript};
+use crate::agents::{AgentContext, AgentError, AgentOutput, AgentRegistry};
 use crate::pipeline::dsl::{FlowRecipe, StepKind};
 use crate::pipeline::events::{EventSink, PipelineEvent};
 use crate::pipeline::state::{Clock, RunState, RunStatus, StepRunHistory, StepStatus};
 use crate::pipeline::store;
-use crate::story_plan::{self, StoryPlan};
 use crate::story_plan::types::PipelineRunSummary;
+use crate::story_plan::{self, StoryPlan};
 
 /// Shared, lockable handle to a running (or paused) run. The scheduler and
 /// the pause/resume/retry/skip commands all reach the run through this.
@@ -106,14 +106,28 @@ impl Pipeline {
         clock: &dyn Clock,
         sink: &dyn EventSink,
     ) -> Result<Arc<RunHandle>, PipelineError> {
+        self.create_run_with_options(project_path, run_id, prompt, recipe, false, clock, sink)
+    }
+
+    pub fn create_run_with_options(
+        &self,
+        project_path: &Path,
+        run_id: &str,
+        prompt: &str,
+        recipe: &FlowRecipe,
+        allow_local_fallback: bool,
+        clock: &dyn Clock,
+        sink: &dyn EventSink,
+    ) -> Result<Arc<RunHandle>, PipelineError> {
         recipe.validate().map_err(PipelineError::RecipeInvalid)?;
         // Validate or create the IR before writing any run state. An invalid
         // plan must not leave an orphan run that later bypasses validation.
         let previous_plan = story_plan::load_plan(project_path).map_err(PipelineError::Plan)?;
         match previous_plan.clone() {
-            Some(mut plan) => {
-                plan.prompt = prompt.to_string();
-                story_plan::save_plan(project_path, &plan).map_err(PipelineError::Plan)?;
+            Some(plan) => {
+                let mut next = StoryPlan::new(prompt);
+                next.pipeline_runs = plan.pipeline_runs;
+                story_plan::save_plan(project_path, &next).map_err(PipelineError::Plan)?;
             }
             None => {
                 let plan = StoryPlan::new(prompt);
@@ -122,6 +136,7 @@ impl Pipeline {
         }
         let mut state = RunState::new(run_id, project_path, prompt, recipe, clock.now_ms());
         state.status = RunStatus::Running;
+        state.allow_local_fallback = allow_local_fallback;
         if let Err(error) = store::save_run_state(project_path, &state) {
             if let Some(previous) = previous_plan {
                 story_plan::save_plan(project_path, &previous).map_err(PipelineError::Plan)?;
@@ -166,6 +181,7 @@ impl Pipeline {
                 "terminal runs cannot be resumed".to_string(),
             ));
         }
+        restore_interrupted_outputs(project_path, &state)?;
         // Crash recovery: a step left `Running` when the process died did not
         // complete, so reset it to `Pending` to be re-run. `Succeeded` steps
         // are never re-run.
@@ -214,13 +230,15 @@ impl Pipeline {
             .ok_or(PipelineError::RunNotFound(run_id.to_string()))?;
         let mut changed = false;
         if !state.status.is_terminal() {
+            restore_interrupted_outputs(project_path, &state)?;
             let interrupted_at = clock.now_ms();
             for step in &mut state.steps {
                 if step.status == StepStatus::Running {
                     if let Some(attempt) = step.history.last_mut() {
                         attempt.error = Some("interrupted before completion".to_string());
                         attempt.finished_at = Some(interrupted_at);
-                        attempt.duration_ms = Some(interrupted_at.saturating_sub(attempt.started_at));
+                        attempt.duration_ms =
+                            Some(interrupted_at.saturating_sub(attempt.started_at));
                     }
                     step.status = StepStatus::Pending;
                     step.started_at = None;
@@ -293,7 +311,10 @@ impl Pipeline {
                                 drop(state);
                                 sink.emit(PipelineEvent::RunFailed {
                                     run_id,
-                                    error: format!("failed to persist single-step pause: {}", error),
+                                    error: format!(
+                                        "failed to persist single-step pause: {}",
+                                        error
+                                    ),
                                 });
                                 return;
                             }
@@ -317,37 +338,38 @@ impl Pipeline {
         }
         match state.next_ready_step_id() {
             Some(id) => {
-                // Capture run-scoped fields before the mutable step borrow.
                 let run_id = state.run_id.clone();
-                let run_prompt = state.prompt.clone();
                 let retain_all_history = state.pinned;
-                let (kind, prompt) = {
+                let (kind, prompt, removed_snapshots) = {
                     let step = state.find_step_mut(&id).expect("ready step exists");
-                    let prompt = if step.def.prompt.trim().is_empty() {
-                        run_prompt
-                    } else {
-                        step.def.prompt.clone()
-                    };
+                    let prompt = step.def.prompt.clone();
                     let started_at = clock.now_ms();
                     step.status = StepStatus::Running;
                     step.attempt += 1;
                     step.started_at = Some(started_at);
                     step.finished_at = None;
-                    step.record_attempt(StepRunHistory {
-                        attempt: step.attempt,
-                        input_snapshot: prompt.clone(),
-                        output: None,
-                        error: None,
-                        started_at,
-                        finished_at: None,
-                        duration_ms: None,
-                        diff: None,
-                        cost: None,
-                        warnings: Vec::new(),
-                        downgrade: None,
-                    }, retain_all_history);
-                    (step.def.kind, prompt)
+                    let removed_snapshots = step.record_attempt(
+                        StepRunHistory {
+                            attempt: step.attempt,
+                            input_snapshot: prompt.clone(),
+                            output: None,
+                            error: None,
+                            started_at,
+                            finished_at: None,
+                            duration_ms: None,
+                            diff: None,
+                            cost: None,
+                            prompt_tokens: None,
+                            completion_tokens: None,
+                            warnings: Vec::new(),
+                            downgrade: None,
+                            rollback_snapshot: None,
+                        },
+                        retain_all_history,
+                    );
+                    (step.def.kind, prompt, removed_snapshots)
                 };
+                queue_rollback_snapshot_cleanup(&mut state, removed_snapshots);
                 state.updated_at = clock.now_ms();
                 if let Err(err) = store::save_run_state(project_path, &state) {
                     let error = format!("failed to persist step transition: {}", err);
@@ -366,11 +388,17 @@ impl Pipeline {
                     state.status = RunStatus::Failed;
                     let run_id = state.run_id.clone();
                     drop(state);
-                    sink.emit(PipelineEvent::RunFailed {
-                        run_id,
-                        error,
-                    });
+                    sink.emit(PipelineEvent::RunFailed { run_id, error });
                     return Action::Idle;
+                }
+                if let Err(error) = cleanup_rollback_snapshots(project_path, &mut state) {
+                    if let Some(attempt) = state
+                        .find_step_mut(&id)
+                        .and_then(|step| step.history.last_mut())
+                    {
+                        attempt.warnings.push(error.to_string());
+                    }
+                    let _ = store::save_run_state(project_path, &state);
                 }
                 drop(state);
                 sink.emit(PipelineEvent::StepStarted {
@@ -456,12 +484,55 @@ impl Pipeline {
                 return;
             }
         };
+        let characters_path = project_path.join("game/config/characters.json");
+        if characters_path.is_file() {
+            match crate::characters::commands::list_characters(
+                project_path.to_string_lossy().to_string(),
+            ) {
+                Ok(characters) => {
+                    let ids: HashSet<String> = characters
+                        .iter()
+                        .map(|character| character.id.clone())
+                        .collect();
+                    plan.characters = characters;
+                    for scene in &mut plan.scene_plans {
+                        scene.character_ids.retain(|id| ids.contains(id.as_str()));
+                    }
+                }
+                Err(error) => {
+                    self.fail_step(
+                        project_path,
+                        handle,
+                        sink,
+                        clock,
+                        id,
+                        format!("failed to load canonical characters: {}", error),
+                    )
+                    .await;
+                    return;
+                }
+            }
+        }
 
+        let (production_brief, allow_local_fallback) = {
+            let state = handle.state.lock().await;
+            (
+                state.prompt.clone(),
+                state.allow_local_fallback || cfg!(test),
+            )
+        };
         let input_snapshot = serde_json::json!({
-            "prompt": &prompt,
+            "productionBrief": &production_brief,
+            "stepInstruction": &prompt,
             "synopsis": &plan.synopsis,
-            "chapters": &plan.chapters,
-            "worldbook": &plan.memory.worldbook,
+            "storyPlanRef": ".ollaic/plan.json",
+            "worldbookChars": plan.memory.worldbook.chars().count(),
+            "glossaryTerms": plan.memory.glossary.keys().collect::<Vec<_>>(),
+            "chapters": plan.chapters.iter().map(|chapter| &chapter.id).collect::<Vec<_>>(),
+            "characters": plan.characters.iter().map(|character| &character.id).collect::<Vec<_>>(),
+            "scenePlans": plan.scene_plans.iter().map(|scene| &scene.id).collect::<Vec<_>>(),
+            "sceneDraftCount": plan.scene_drafts.len(),
+            "assetTaskCount": plan.asset_plan.len(),
         })
         .to_string();
         let snapshot_result = {
@@ -489,12 +560,24 @@ impl Pipeline {
         }
 
         let ctx = AgentContext {
-            prompt: &prompt,
+            prompt: &production_brief,
+            instruction: &prompt,
             synopsis: &plan.synopsis,
             chapters: &plan.chapters,
             worldbook: &plan.memory.worldbook,
+            glossary: &plan.memory.glossary,
+            characters: &plan.characters,
+            scene_plans: &plan.scene_plans,
+            branches: &plan.branches,
+            scene_drafts: &plan.scene_drafts,
+            asset_plan: &plan.asset_plan,
+            allow_local_fallback,
         };
-        let result = match self.agents.get(kind) {
+        let agent_key = {
+            let state = handle.state.lock().await;
+            state.find_step(&id).and_then(|step| step.def.agent.clone())
+        };
+        let result = match self.agents.get(kind, agent_key.as_deref()) {
             Some(agent) => agent.run(&ctx).await,
             None => Err(AgentError(format!(
                 "no agent registered for step kind '{}'",
@@ -506,9 +589,9 @@ impl Pipeline {
                 // Crash-safety order: apply output to the plan and persist it
                 // BEFORE marking the step Succeeded. If the process dies between
                 // these two writes, the step is left Running and reset to Pending
-                // on resume, then re-run. P0 stub agents are deterministic, so
-                // re-applying is idempotent. P1 LLM agents need reconciliation
-                // (e.g. output versioning) to avoid double-applying - see ADR 0054.
+                // on resume, then re-run. Every output replaces its owned IR
+                // partition, so replaying an LLM attempt is idempotent at the
+                // project boundary.
                 let mut state = handle.state.lock().await;
                 if state.status == RunStatus::Cancelled
                     || state.find_step(&id).map(|step| step.status) != Some(StepStatus::Running)
@@ -517,22 +600,82 @@ impl Pipeline {
                 }
                 // Keep stop() outside the two durable writes: cancellation
                 // takes effect either before output or after a full commit.
-                apply_output(&mut plan, kind, &out);
-                let persist_result = if let Some(scene) = out.scene.as_ref() {
-                    write_scene_file(project_path, scene).map_err(|e| {
-                        AgentError(format!("failed to write scene '{}': {}", scene.name, e))
-                    })
-                } else {
-                    Ok(())
-                }
-                .and_then(|_| {
-                    story_plan::save_plan(project_path, &plan)
-                        .map_err(|e| AgentError(format!("failed to save StoryPlan: {}", e)))
-                });
-                if let Err(error) = persist_result {
+                let previous_plan = plan.clone();
+                apply_output(&mut plan, &out);
+                if let Err(error) = story_plan::validate(&plan) {
                     drop(state);
-                    self.fail_step(project_path, handle, sink, clock, id, error.0)
+                    self.fail_step(
+                        project_path,
+                        handle,
+                        sink,
+                        clock,
+                        id,
+                        format!("Agent output produced an invalid StoryPlan: {}", error),
+                    )
+                    .await;
+                    return;
+                }
+                if let Some(snapshot_id) =
+                    match create_rollback_snapshot(project_path, &state.run_id, &id, &out) {
+                        Ok(snapshot) => snapshot,
+                        Err(error) => {
+                            drop(state);
+                            self.fail_step(project_path, handle, sink, clock, id, error.0)
+                                .await;
+                            return;
+                        }
+                    }
+                {
+                    if let Some(attempt) = state
+                        .find_step_mut(&id)
+                        .and_then(|step| step.history.last_mut())
+                    {
+                        attempt.rollback_snapshot = Some(snapshot_id.clone());
+                    }
+                    state.updated_at = clock.now_ms();
+                    if let Err(error) = store::save_run_state(project_path, &state) {
+                        let _ = crate::webgal::project::delete_project_snapshot(
+                            project_path.to_string_lossy().to_string(),
+                            snapshot_id,
+                        );
+                        drop(state);
+                        self.fail_step(
+                            project_path,
+                            handle,
+                            sink,
+                            clock,
+                            id,
+                            format!("failed to persist rollback snapshot: {}", error),
+                        )
                         .await;
+                        return;
+                    }
+                }
+                let mut output_transaction = match OutputTransaction::apply(project_path, &out) {
+                    Ok(transaction) => transaction,
+                    Err(error) => {
+                        drop(state);
+                        self.fail_step(project_path, handle, sink, clock, id, error.0)
+                            .await;
+                        return;
+                    }
+                };
+                if let Err(error) = story_plan::save_plan(project_path, &plan) {
+                    let rollback = output_transaction.rollback();
+                    drop(state);
+                    self.fail_step(
+                        project_path,
+                        handle,
+                        sink,
+                        clock,
+                        id,
+                        format!(
+                            "failed to save StoryPlan: {}{}",
+                            error,
+                            rollback_suffix(rollback)
+                        ),
+                    )
+                    .await;
                     return;
                 }
                 {
@@ -546,13 +689,26 @@ impl Pipeline {
                         attempt.output = Some(output);
                         attempt.finished_at = Some(finished_at);
                         attempt.duration_ms = Some(finished_at.saturating_sub(attempt.started_at));
+                        attempt.diff = Some(describe_output(&out));
+                        attempt.prompt_tokens = out.prompt_tokens;
+                        attempt.completion_tokens = out.completion_tokens;
+                        attempt.warnings = out.warnings.clone();
+                        attempt.downgrade = out.downgrade.clone();
                     }
                 }
                 state.updated_at = clock.now_ms();
                 let run_id = state.run_id.clone();
                 let output_ref = state.find_step(&id).expect("step exists").output.clone();
                 if let Err(err) = store::save_run_state(project_path, &state) {
-                    let error = format!("failed to persist step success: {}", err);
+                    let rollback = output_transaction.rollback();
+                    let plan_rollback = story_plan::save_plan(project_path, &previous_plan)
+                        .map_err(|error| error.to_string());
+                    let error = format!(
+                        "failed to persist step success: {}{}{}",
+                        err,
+                        rollback_suffix(rollback),
+                        rollback_suffix(plan_rollback)
+                    );
                     if let Some(step) = state.find_step_mut(&id) {
                         step.status = StepStatus::Failed;
                         step.error = Some(error.clone());
@@ -571,6 +727,7 @@ impl Pipeline {
                     sink.emit(PipelineEvent::RunFailed { run_id, error });
                     return;
                 }
+                output_transaction.commit();
                 drop(state);
                 sink.emit(PipelineEvent::StepSucceeded {
                     run_id,
@@ -578,9 +735,10 @@ impl Pipeline {
                     output: output_ref,
                 });
             }
-            Err(err) => self
-                .fail_step(project_path, handle, sink, clock, id, err.0)
-                .await,
+            Err(err) => {
+                self.fail_step(project_path, handle, sink, clock, id, err.0)
+                    .await
+            }
         }
     }
 
@@ -652,45 +810,258 @@ impl Pipeline {
 }
 
 /// Apply an agent's output to the in-memory StoryPlan.
-fn apply_output(plan: &mut StoryPlan, kind: StepKind, out: &AgentOutput) {
-    match kind {
-        StepKind::Plan => {
-            if let Some(synopsis) = &out.synopsis {
-                plan.synopsis = synopsis.clone();
-            }
-        }
-        StepKind::Memory => {
-            if let Some(worldbook) = &out.worldbook {
-                plan.memory.worldbook = worldbook.clone();
-            }
-        }
-        StepKind::Outline => {
-            if let Some(chapters) = &out.chapters {
-                plan.chapters = chapters.clone();
-            }
-        }
-        StepKind::Scene => {
-            if let Some(scene) = &out.scene {
-                if !plan.scenes.contains(&scene.name) {
-                    plan.scenes.push(scene.name.clone());
-                }
-            }
-        }
-        _ => {
-            // Future slices produce memory/characters/assets/etc.
-        }
+fn apply_output(plan: &mut StoryPlan, out: &AgentOutput) {
+    if let Some(synopsis) = &out.synopsis {
+        plan.synopsis = synopsis.clone();
+        plan.memory = Default::default();
+        clear_after_memory(plan);
+    }
+    if let Some(worldbook) = &out.worldbook {
+        plan.memory.worldbook = worldbook.clone();
+        plan.memory.glossary = out.glossary.clone().unwrap_or_default();
+        clear_after_memory(plan);
+    } else if let Some(glossary) = &out.glossary {
+        plan.memory.glossary = glossary.clone();
+    }
+    if let Some(chapters) = &out.chapters {
+        plan.chapters = chapters.clone();
+        plan.scene_plans = out.scene_plans.clone().unwrap_or_default();
+        plan.branches = out.branches.clone().unwrap_or_default();
+        plan.characters.clear();
+        plan.scene_drafts.clear();
+        plan.asset_plan.clear();
+        plan.scenes.clear();
+    }
+    if let Some(characters) = &out.characters {
+        plan.characters = characters.clone();
+        plan.scene_drafts.clear();
+        plan.asset_plan.clear();
+        plan.scenes.clear();
+    }
+    if let Some(drafts) = &out.scene_drafts {
+        plan.scene_drafts = drafts.clone();
+        plan.asset_plan.clear();
+        plan.scenes.clear();
+    }
+    if let Some(asset_plan) = &out.asset_plan {
+        plan.asset_plan = asset_plan.clone();
+        plan.scenes.clear();
+    }
+    if let Some(scenes) = &out.scenes {
+        plan.scenes = scenes.iter().map(|scene| scene.name.clone()).collect();
     }
 }
 
-/// Write a generated scene script to `<project>/game/scene/<name>`.
-fn write_scene_file(project_path: &Path, scene: &SceneScript) -> std::io::Result<()> {
-    let dir = project_path.join("game").join("scene");
-    std::fs::create_dir_all(&dir)?;
-    std::fs::write(dir.join(&scene.name), &scene.content)
+fn clear_after_memory(plan: &mut StoryPlan) {
+    plan.chapters.clear();
+    plan.characters.clear();
+    plan.scene_plans.clear();
+    plan.branches = Default::default();
+    plan.scene_drafts.clear();
+    plan.asset_plan.clear();
+    plan.scenes.clear();
+}
+
+struct OutputTransaction {
+    backups: Vec<(std::path::PathBuf, Option<Vec<u8>>)>,
+}
+
+impl OutputTransaction {
+    fn apply(project_path: &Path, out: &AgentOutput) -> Result<Self, AgentError> {
+        let mut writes: Vec<(std::path::PathBuf, Vec<u8>)> = Vec::new();
+        if let Some(characters) = &out.characters {
+            let document = crate::characters::types::CharactersDocument {
+                version: 1,
+                characters: characters.clone(),
+            };
+            let bytes = serde_json::to_vec_pretty(&document)
+                .map_err(|error| AgentError(format!("failed to serialize characters: {error}")))?;
+            writes.push((project_path.join("game/config/characters.json"), bytes));
+        }
+        if let Some(scenes) = &out.scenes {
+            writes.extend(scenes.iter().map(|scene| {
+                (
+                    project_path.join("game/scene").join(&scene.name),
+                    scene.content.as_bytes().to_vec(),
+                )
+            }));
+        }
+
+        let mut transaction = Self {
+            backups: Vec::new(),
+        };
+        for (path, bytes) in writes {
+            let previous = match std::fs::read(&path) {
+                Ok(content) => Some(content),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => {
+                    let rollback = transaction.rollback();
+                    return Err(AgentError(format!(
+                        "failed to snapshot output '{}': {}{}",
+                        path.display(),
+                        error,
+                        rollback_suffix(rollback)
+                    )));
+                }
+            };
+            transaction.backups.push((path.clone(), previous));
+            if let Some(parent) = path.parent() {
+                if let Err(error) = std::fs::create_dir_all(parent) {
+                    let rollback = transaction.rollback();
+                    return Err(AgentError(format!(
+                        "failed to create output directory '{}': {}{}",
+                        parent.display(),
+                        error,
+                        rollback_suffix(rollback)
+                    )));
+                }
+            }
+            if let Err(error) = crate::json_store::write_crash_safe(&path, &bytes) {
+                let rollback = transaction.rollback();
+                return Err(AgentError(format!(
+                    "failed to write output '{}': {}{}",
+                    path.display(),
+                    error,
+                    rollback_suffix(rollback)
+                )));
+            }
+        }
+        Ok(transaction)
+    }
+
+    fn rollback(&mut self) -> Result<(), String> {
+        let mut errors = Vec::new();
+        for (path, previous) in self.backups.iter().rev() {
+            let result = match previous {
+                Some(content) => crate::json_store::write_crash_safe(path, content)
+                    .map_err(|error| error.to_string()),
+                None if path.exists() => {
+                    std::fs::remove_file(path).map_err(|error| error.to_string())
+                }
+                None => Ok(()),
+            };
+            if let Err(error) = result {
+                errors.push(format!("{}: {}", path.display(), error));
+            }
+        }
+        self.backups.clear();
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join(", "))
+        }
+    }
+
+    fn commit(mut self) {
+        self.backups.clear();
+    }
+}
+
+fn rollback_suffix(result: Result<(), String>) -> String {
+    result
+        .err()
+        .map(|error| format!("; rollback failed: {error}"))
+        .unwrap_or_default()
+}
+
+fn create_rollback_snapshot(
+    project_path: &Path,
+    run_id: &str,
+    step_id: &str,
+    out: &AgentOutput,
+) -> Result<Option<String>, AgentError> {
+    if out.characters.is_none() && out.scenes.is_none() {
+        return Ok(None);
+    }
+    std::fs::create_dir_all(project_path.join("game"))
+        .map_err(|error| AgentError(format!("failed to prepare project snapshot: {error}")))?;
+    crate::webgal::project::create_project_snapshot(
+        project_path.to_string_lossy().to_string(),
+        Some(format!("Agent {} {}", run_id, step_id)),
+        Some("auto".to_string()),
+        Some("Automatic rollback point before an Agent Flow writes playable files".to_string()),
+    )
+    .map(|snapshot| Some(snapshot.id))
+    .map_err(|error| AgentError(format!("failed to create rollback snapshot: {error}")))
+}
+
+fn restore_interrupted_outputs(project_path: &Path, state: &RunState) -> Result<(), PipelineError> {
+    for snapshot_id in state
+        .steps
+        .iter()
+        .filter(|step| step.status == StepStatus::Running)
+        .filter_map(|step| step.history.last()?.rollback_snapshot.as_deref())
+    {
+        crate::webgal::project::restore_project_snapshot(
+            project_path.to_string_lossy().to_string(),
+            snapshot_id.to_string(),
+        )
+        .map_err(|error| {
+            PipelineError::Recovery(format!(
+                "failed to restore rollback snapshot {}: {}",
+                snapshot_id, error
+            ))
+        })?;
+    }
+    Ok(())
 }
 
 fn serialize_output(out: &AgentOutput) -> String {
-    serde_json::to_string(out).unwrap_or_else(|_| "{}".to_string())
+    let value = serde_json::json!({
+        "synopsis": out.synopsis,
+        "worldbook": out.worldbook.as_deref().map(|text| text.chars().take(500).collect::<String>()),
+        "glossary": out.glossary,
+        "chapters": out.chapters,
+        "characters": out.characters.as_ref().map(|characters| characters.iter().map(|character| serde_json::json!({
+            "id": character.id,
+            "name": character.name,
+        })).collect::<Vec<_>>()),
+        "scenePlans": out.scene_plans,
+        "branches": out.branches,
+        "sceneDrafts": out.scene_drafts.as_ref().map(|drafts| drafts.iter().map(|draft| serde_json::json!({
+            "sceneId": draft.scene_id,
+            "title": draft.title,
+            "beatCount": draft.beats.len(),
+            "excerpt": draft.beats.first().map(|beat| &beat.text),
+        })).collect::<Vec<_>>()),
+        "assetPlan": out.asset_plan,
+        "scenes": out.scenes.as_ref().map(|scenes| scenes.iter().map(|scene| serde_json::json!({
+            "name": scene.name,
+            "contentRef": format!("game/scene/{}", scene.name),
+        })).collect::<Vec<_>>()),
+        "model": out.model,
+        "promptTokens": out.prompt_tokens,
+        "completionTokens": out.completion_tokens,
+        "warnings": out.warnings,
+        "downgrade": out.downgrade,
+    });
+    serde_json::to_string(&value).unwrap_or_else(|_| "{}".to_string())
+}
+
+fn describe_output(out: &AgentOutput) -> String {
+    let mut changed = Vec::new();
+    if out.synopsis.is_some() {
+        changed.push("synopsis".to_string());
+    }
+    if out.worldbook.is_some() {
+        changed.push("memory".to_string());
+    }
+    if let Some(chapters) = &out.chapters {
+        changed.push(format!("chapters:{}", chapters.len()));
+    }
+    if let Some(characters) = &out.characters {
+        changed.push(format!("characters:{}", characters.len()));
+    }
+    if let Some(drafts) = &out.scene_drafts {
+        changed.push(format!("sceneDrafts:{}", drafts.len()));
+    }
+    if let Some(assets) = &out.asset_plan {
+        changed.push(format!("assetPlan:{}", assets.len()));
+    }
+    if let Some(scenes) = &out.scenes {
+        changed.push(format!("sceneFiles:{}", scenes.len()));
+    }
+    format!("StoryPlan updated: {}", changed.join(", "))
 }
 
 impl RunHandle {
@@ -925,7 +1296,11 @@ impl RunHandle {
         let previous_updated_at = state.updated_at;
         state.updated_at = clock.now_ms();
         if let Err(error) = store::save_run_state(project_path, &state) {
-            state.find_step_mut(step_id).expect("step exists").def.prompt = previous_prompt;
+            state
+                .find_step_mut(step_id)
+                .expect("step exists")
+                .def
+                .prompt = previous_prompt;
             state.updated_at = previous_updated_at;
             return Err(PipelineError::Store(error));
         }
@@ -956,7 +1331,10 @@ impl RunHandle {
     ) -> Result<(), PipelineError> {
         let mut state = self.state.lock().await;
         if state.status == RunStatus::Running
-            || state.steps.iter().any(|step| step.status == StepStatus::Running)
+            || state
+                .steps
+                .iter()
+                .any(|step| step.status == StepStatus::Running)
         {
             return Err(PipelineError::InvalidRunTransition(
                 state.run_id.clone(),
@@ -964,6 +1342,8 @@ impl RunHandle {
             ));
         }
         let previous = state.clone();
+        let snapshots = rollback_snapshot_ids(&state);
+        queue_rollback_snapshot_cleanup(&mut state, snapshots);
         for step in &mut state.steps {
             step.history.clear();
         }
@@ -972,7 +1352,60 @@ impl RunHandle {
             *state = previous;
             return Err(PipelineError::Store(error));
         }
+        cleanup_rollback_snapshots(project_path, &mut state)
+    }
+}
+
+pub(crate) fn rollback_snapshot_ids(state: &RunState) -> Vec<String> {
+    state
+        .steps
+        .iter()
+        .flat_map(|step| &step.history)
+        .filter_map(|attempt| attempt.rollback_snapshot.clone())
+        .collect()
+}
+
+pub(crate) fn queue_rollback_snapshot_cleanup(
+    state: &mut RunState,
+    snapshot_ids: impl IntoIterator<Item = String>,
+) {
+    for snapshot_id in snapshot_ids {
+        if !state.pending_snapshot_cleanup.contains(&snapshot_id) {
+            state.pending_snapshot_cleanup.push(snapshot_id);
+        }
+    }
+}
+
+pub(crate) fn cleanup_rollback_snapshots(
+    project_path: &Path,
+    state: &mut RunState,
+) -> Result<(), PipelineError> {
+    let pending = state.pending_snapshot_cleanup.clone();
+    let project_path = project_path.to_string_lossy().to_string();
+    let mut failed = Vec::new();
+    let mut errors = Vec::new();
+    for snapshot_id in &pending {
+        if let Err(error) = crate::webgal::project::delete_project_snapshot(
+            project_path.clone(),
+            snapshot_id.clone(),
+        ) {
+            if !error.starts_with("Snapshot not found:") {
+                failed.push(snapshot_id.clone());
+                errors.push(format!("{}: {}", snapshot_id, error));
+            }
+        }
+    }
+    state.pending_snapshot_cleanup = failed;
+    if state.pending_snapshot_cleanup != pending {
+        if let Err(error) = store::save_run_state(Path::new(&project_path), state) {
+            state.pending_snapshot_cleanup = pending;
+            return Err(PipelineError::Store(error));
+        }
+    }
+    if errors.is_empty() {
         Ok(())
+    } else {
+        Err(PipelineError::Cleanup(errors.join(", ")))
     }
 }
 
@@ -986,6 +1419,8 @@ pub enum PipelineError {
     StepNotFound(String),
     InvalidStepTransition(String, String),
     InvalidRunTransition(String, String),
+    Recovery(String),
+    Cleanup(String),
 }
 
 impl std::fmt::Display for PipelineError {
@@ -1003,6 +1438,8 @@ impl std::fmt::Display for PipelineError {
             PipelineError::InvalidRunTransition(id, reason) => {
                 write!(f, "invalid transition for run '{}': {}", id, reason)
             }
+            PipelineError::Recovery(error) => write!(f, "pipeline recovery error: {}", error),
+            PipelineError::Cleanup(error) => write!(f, "snapshot cleanup deferred: {}", error),
         }
     }
 }

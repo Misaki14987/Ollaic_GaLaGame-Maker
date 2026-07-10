@@ -91,4 +91,24 @@ describe('FlowStepInspector', () => {
     expect(screen.getByRole('button', { name: '从此步重跑' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '跳过' })).not.toBeInTheDocument();
   });
+
+  it('opens a completed business artifact in its editor', async () => {
+    const user = userEvent.setup();
+    const onOpenArtifact = vi.fn();
+    const character = { ...step, id: 'character', kind: 'character', status: 'succeeded' as const };
+    render(
+      <FlowStepInspector
+        selected={character}
+        busy={false}
+        detached={false}
+        onClose={vi.fn()}
+        onRetry={vi.fn()}
+        onSkip={vi.fn()}
+        onPromptRerun={vi.fn()}
+        onOpenArtifact={onOpenArtifact}
+      />,
+    );
+    await user.click(screen.getByRole('button', { name: '打开角色' }));
+    expect(onOpenArtifact).toHaveBeenCalledWith(character);
+  });
 });

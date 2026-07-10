@@ -18,7 +18,7 @@ const KIND_LABEL: Record<string, string> = {
   outline: '章节大纲',
   character: '角色设计',
   scene: '场景编排',
-  asset: '素材生成',
+  asset: '资产规划',
   lint: '一致性检查',
   review: '质量审阅',
   export: '作品导出',
@@ -93,6 +93,7 @@ export interface StepNodeData {
   progress?: number;
   cost?: number;
   summary?: string;
+  downgraded?: boolean;
   selected?: boolean;
 }
 
@@ -109,7 +110,9 @@ function defaultProgress(status: StepStatus): number | undefined {
 }
 
 function StepNodeComponent({ data, selected = false, isConnectable = true }: StepNodeProps) {
-  const state = STATUS[data.status];
+  const state = data.status === 'succeeded' && data.downgraded
+    ? { ...STATUS.awaitingInput, label: '已降级', icon: CircleAlert }
+    : STATUS[data.status];
   const StatusIcon = state.icon;
   const isSelected = selected || data.selected;
   const attempt = Math.max(0, Math.floor(data.attempt ?? 0));
@@ -130,6 +133,7 @@ function StepNodeComponent({ data, selected = false, isConnectable = true }: Ste
       )}
       data-step-id={data.id}
       data-step-status={data.status}
+      data-downgraded={data.downgraded || undefined}
       data-selected={isSelected || undefined}
       role="group"
       aria-label={`${data.id} 节点，${kindLabel}，${state.label}，${attempt ? `尝试 ${attempt}` : '未尝试'}`}
