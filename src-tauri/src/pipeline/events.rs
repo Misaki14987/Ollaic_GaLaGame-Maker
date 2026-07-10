@@ -31,6 +31,7 @@ pub enum PipelineEvent {
     RunResumed { run_id: String },
     RunCompleted { run_id: String },
     RunFailed { run_id: String, error: String },
+    RunStopped { run_id: String },
 }
 
 impl PipelineEvent {
@@ -40,6 +41,7 @@ impl PipelineEvent {
             | PipelineEvent::RunPaused { run_id }
             | PipelineEvent::RunResumed { run_id }
             | PipelineEvent::RunCompleted { run_id }
+            | PipelineEvent::RunStopped { run_id }
             | PipelineEvent::RunFailed { run_id, .. } => run_id,
             PipelineEvent::StepStarted { run_id, .. }
             | PipelineEvent::StepSucceeded { run_id, .. }

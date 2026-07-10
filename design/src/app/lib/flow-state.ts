@@ -113,6 +113,8 @@ export function reduceFlowEvent(state: FlowState, event: FlowAction): FlowState 
       return { ...state, runStatus: 'completed' };
     case 'runFailed':
       return { ...state, runStatus: 'failed' };
+    case 'runStopped':
+      return { ...state, runStatus: 'cancelled' };
     default:
       return state;
   }

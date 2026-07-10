@@ -25,7 +25,7 @@ export type StepStatus =
   | 'awaitingInput'
   | 'skipped';
 
-export type RunStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed';
+export type RunStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
 
 export interface StepDef {
   id: string;
@@ -107,4 +107,5 @@ export type PipelineEvent =
   | { type: 'runPaused'; runId: string }
   | { type: 'runResumed'; runId: string }
   | { type: 'runCompleted'; runId: string }
-  | { type: 'runFailed'; runId: string; error: string };
+  | { type: 'runFailed'; runId: string; error: string }
+  | { type: 'runStopped'; runId: string };

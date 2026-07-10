@@ -24,6 +24,16 @@ export async function pipelineResume(runId: string): Promise<void> {
   return invoke<void>('pipeline_resume', { runId });
 }
 
+/** Cancel a live run. Any in-flight agent output is discarded. */
+export async function pipelineStop(runId: string): Promise<void> {
+  return invoke<void>('pipeline_stop', { runId });
+}
+
+/** Execute exactly one ready step, then return the run to paused state. */
+export async function pipelineStepOnce(runId: string, projectPath: string): Promise<void> {
+  return invoke<void>('pipeline_step_once', { runId, projectPath });
+}
+
 /** Crash-recovery: reload a persisted run from disk and drive it. Use this on
  * app start for any non-terminal `.ollaic/pipeline/*.json`, not `pipelineResume`. */
 export async function pipelineResumeRun(projectPath: string, runId: string): Promise<void> {
@@ -46,6 +56,15 @@ export async function pipelineUpdateDependencies(
   dependsOn: string[],
 ): Promise<void> {
   return invoke<void>('pipeline_update_dependencies', { runId, stepId, dependsOn });
+}
+
+export async function pipelineUpdateStepPrompt(
+  runId: string,
+  stepId: string,
+  prompt: string,
+  projectPath: string,
+): Promise<void> {
+  return invoke<void>('pipeline_update_step_prompt', { runId, stepId, prompt, projectPath });
 }
 
 /** Snapshot of a run's current state. */
