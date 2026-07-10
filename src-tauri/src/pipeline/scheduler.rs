@@ -470,7 +470,9 @@ impl Pipeline {
                 // re-applying is idempotent. P1 LLM agents need reconciliation
                 // (e.g. output versioning) to avoid double-applying - see ADR 0054.
                 let mut state = handle.state.lock().await;
-                if state.status == RunStatus::Cancelled {
+                if state.status == RunStatus::Cancelled
+                    || state.find_step(&id).map(|step| step.status) != Some(StepStatus::Running)
+                {
                     return;
                 }
                 // Keep stop() outside the two durable writes: cancellation
@@ -552,7 +554,9 @@ impl Pipeline {
         error: String,
     ) {
         let mut state = handle.state.lock().await;
-        if state.status == RunStatus::Cancelled {
+        if state.status == RunStatus::Cancelled
+            || state.find_step(&step_id).map(|step| step.status) != Some(StepStatus::Running)
+        {
             return;
         }
         let finished_at = clock.now_ms();
