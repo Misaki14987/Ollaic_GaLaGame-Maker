@@ -267,8 +267,12 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
   }, []);
 
   useEffect(() => {
-    headerRef.current?.toggleAttribute('inert', Boolean(selectedStepId && !wideInspector));
-    workspaceRef.current?.toggleAttribute('inert', Boolean(selectedStepId && !wideInspector));
+    const modal = Boolean(selectedStepId && !wideInspector);
+    const chrome = document.querySelectorAll<HTMLElement>('.story-os-topbar, .story-os-sidenav');
+    headerRef.current?.toggleAttribute('inert', modal);
+    workspaceRef.current?.toggleAttribute('inert', modal);
+    chrome.forEach((element) => element.toggleAttribute('inert', modal));
+    return () => chrome.forEach((element) => element.removeAttribute('inert'));
   }, [selectedStepId, wideInspector]);
 
   useEffect(() => {
@@ -523,6 +527,7 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
   const elapsedUntil = running ? now : (state.updatedAt ?? now);
   const elapsed = state.startedAt == null ? 0 : elapsedUntil - state.startedAt;
   const canCreate = !running && !paused;
+  const historyClearBlocked = running || state.steps.some((step) => step.status === 'running');
 
   return (
     <div
@@ -587,7 +592,7 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
                   <Button type="button" size="icon" variant="ghost" className="size-6" onClick={exportHistory} disabled={busy} aria-label="导出运行记录" title="导出运行记录">
                     <Download />
                   </Button>
-                  <Button type="button" size="icon" variant="ghost" className="size-6 text-destructive" onClick={clearHistory} disabled={busy || running} aria-label="清除运行记录" title={running ? '暂停后才能清理记录' : '清除步骤尝试记录'}>
+                  <Button type="button" size="icon" variant="ghost" className="size-6 text-destructive" onClick={clearHistory} disabled={busy || historyClearBlocked} aria-label="清除运行记录" title={historyClearBlocked ? '暂停并等待当前步骤结束后才能清理' : '清除步骤尝试记录'}>
                     <Trash2 />
                   </Button>
                 </>

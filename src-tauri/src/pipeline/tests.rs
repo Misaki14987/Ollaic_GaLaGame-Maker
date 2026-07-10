@@ -1125,6 +1125,15 @@ fn failed_run_creation_restores_the_previous_production_brief() {
 
     assert!(pipeline.create_run(&project, "run_new", "new brief", &default_recipe(), &clock, &sink).is_err());
     assert_eq!(crate::story_plan::load_plan(&project).unwrap().unwrap().prompt, "old brief");
+
+    let first_project = fresh_project("first_brief_rollback");
+    let first_pipeline_dir = first_project.join(".ollaic").join("pipeline");
+    std::fs::create_dir_all(first_pipeline_dir.parent().unwrap()).unwrap();
+    std::fs::write(&first_pipeline_dir, "blocks run persistence").unwrap();
+    assert!(pipeline.create_run(
+        &first_project, "run_first", "first brief", &default_recipe(), &clock, &sink,
+    ).is_err());
+    assert!(crate::story_plan::load_plan(&first_project).unwrap().is_none());
 }
 
 #[tokio::test]
@@ -1143,6 +1152,12 @@ async fn run_history_can_be_pinned_and_cleared_when_not_running() {
     assert!(handle.state().lock().await.steps.iter().any(|step| !step.history.is_empty()));
     handle.clear_history(&project, &clock).await.unwrap();
     assert!(handle.state().lock().await.steps.iter().all(|step| step.history.is_empty()));
+    {
+        let mut state = handle.state().lock().await;
+        state.status = RunStatus::Paused;
+        state.find_step_mut("plan").unwrap().status = StepStatus::Running;
+    }
+    assert!(handle.clear_history(&project, &clock).await.is_err());
 }
 
 #[tokio::test]
