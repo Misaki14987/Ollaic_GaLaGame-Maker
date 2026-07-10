@@ -313,8 +313,73 @@ async fn runs_two_step_recipe_in_order_and_updates_plan() {
     assert_eq!(run_state.status, RunStatus::Completed);
     assert!(run_state.all_steps_succeeded());
     assert!(run_state.steps.iter().all(|step| step.history.len() == 1));
-    assert_eq!(run_state.find_step("plan").unwrap().history[0].input_snapshot, "赛博朋克校园恋爱");
+    let plan_input: serde_json::Value = serde_json::from_str(
+        &run_state.find_step("plan").unwrap().history[0].input_snapshot,
+    )
+    .unwrap();
+    assert_eq!(plan_input["prompt"], "赛博朋克校园恋爱");
+    let outline_input: serde_json::Value = serde_json::from_str(
+        &run_state.find_step("outline").unwrap().history[0].input_snapshot,
+    )
+    .unwrap();
+    assert!(outline_input["synopsis"]
+        .as_str()
+        .unwrap()
+        .contains("赛博朋克校园恋爱"));
     assert!(run_state.find_step("outline").unwrap().history[0].duration_ms.is_some());
+}
+
+#[test]
+fn invalid_story_plan_is_rejected_before_run_state_is_created() {
+    let project = fresh_project("invalid_plan_start");
+    let plan_path = crate::story_plan::plan_path(&project);
+    std::fs::create_dir_all(plan_path.parent().unwrap()).unwrap();
+    std::fs::write(&plan_path, r#"{"version":99,"prompt":"x"}"#).unwrap();
+    let pipeline = Pipeline::with_default_agents();
+    let sink = RecordingSink::new();
+    let clock = StepClock::new();
+
+    assert!(pipeline
+        .create_run(
+            &project,
+            "run_invalid_plan",
+            "brief",
+            &default_recipe(),
+            &clock,
+            &sink,
+        )
+        .is_err());
+    assert!(!crate::pipeline::run_state_path(&project, "run_invalid_plan").exists());
+}
+
+#[test]
+fn crash_resume_rejects_an_invalid_story_plan_without_mutating_the_run() {
+    let project = fresh_project("invalid_plan_resume");
+    let pipeline = Pipeline::with_default_agents();
+    let sink = RecordingSink::new();
+    let clock = StepClock::new();
+    pipeline
+        .create_run(
+            &project,
+            "run_invalid_resume",
+            "brief",
+            &default_recipe(),
+            &clock,
+            &sink,
+        )
+        .unwrap();
+    let before = crate::pipeline::load_run_state(&project, "run_invalid_resume")
+        .unwrap()
+        .unwrap();
+    std::fs::write(crate::story_plan::plan_path(&project), "{").unwrap();
+
+    assert!(pipeline
+        .resume_run(&project, "run_invalid_resume", &sink, &clock)
+        .is_err());
+    let after = crate::pipeline::load_run_state(&project, "run_invalid_resume")
+        .unwrap()
+        .unwrap();
+    assert_eq!(after, before);
 }
 
 // ---------- scheduler: failure ----------
