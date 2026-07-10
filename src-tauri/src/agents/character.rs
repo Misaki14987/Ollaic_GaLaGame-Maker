@@ -37,7 +37,11 @@ impl Agent for CharacterAgent {
             });
             if let Some(routed) = generate_structured::<CharacterResponse>(
                 "Character / 角色设计",
-                "根据剧情结构创建一致、可演出的角色卡。JSON 格式：{\"characters\":[Character]}，Character 字段使用 camelCase。",
+                concat!(
+                    "根据剧情结构创建一致、可演出的角色卡。严格使用 JSON：",
+                    r#"{"characters":[{"id":"protagonist","name":"...","aliases":[],"description":"...","personality":"...","stance":"...","keywords":["..."],"dialogueStyle":"...","gender":"...","age":"...","sprites":[],"relations":[],"notes":""}]}"#,
+                    "。id 和 name 必填，字段使用 camelCase。"
+                ),
                 &input,
                 ctx.allow_local_fallback,
             ).await? {
