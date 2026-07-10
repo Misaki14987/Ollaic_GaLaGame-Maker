@@ -85,6 +85,7 @@ describe('flow-state reducer', () => {
       status: 'completed',
       startedAt: 10,
       updatedAt: 20,
+      pinned: true,
       steps: [
         {
           def: { id: 'brief', kind: 'plan', dependsOn: [], agent: null, prompt: '' },
@@ -110,6 +111,7 @@ describe('flow-state reducer', () => {
     const s = reduceFlowEvent(initialFlowState(), { type: 'stateHydrated', state: run });
     expect(s.runId).toBe('run_finished');
     expect(s.runStatus).toBe('completed');
+    expect(s.pinned).toBe(true);
     expect(s.steps.map((step) => step.id)).toEqual(['brief', 'plot']);
     expect(s.steps[1].dependsOn).toEqual(['brief']);
     expect(s.steps[0].output).toBe('{"synopsis":"done"}');

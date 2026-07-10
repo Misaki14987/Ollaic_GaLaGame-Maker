@@ -357,6 +357,48 @@ pub async fn pipeline_update_step_prompt(
 }
 
 #[tauri::command]
+pub async fn pipeline_set_run_pinned(
+    orchestrator: tauri::State<'_, Orchestrator>,
+    run_id: String,
+    pinned: bool,
+    project_path: String,
+) -> Result<(), String> {
+    let requested_path = PathBuf::from(project_path);
+    attach_run_if_needed(&orchestrator, &requested_path, &run_id).await?;
+    let (handle, project_path) = with_run(&orchestrator, &run_id, |entry| {
+        Ok((entry.handle.clone(), entry.project_path.clone()))
+    }).await?;
+    handle.set_pinned(&project_path, pinned, &SystemClock).await.map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn pipeline_clear_run_history(
+    orchestrator: tauri::State<'_, Orchestrator>,
+    run_id: String,
+    project_path: String,
+) -> Result<(), String> {
+    let requested_path = PathBuf::from(project_path);
+    attach_run_if_needed(&orchestrator, &requested_path, &run_id).await?;
+    let (handle, project_path) = with_run(&orchestrator, &run_id, |entry| {
+        Ok((entry.handle.clone(), entry.project_path.clone()))
+    }).await?;
+    handle.clear_history(&project_path, &SystemClock).await.map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn pipeline_export_run_history(
+    orchestrator: tauri::State<'_, Orchestrator>,
+    run_id: String,
+    project_path: String,
+) -> Result<String, String> {
+    let requested_path = PathBuf::from(project_path);
+    attach_run_if_needed(&orchestrator, &requested_path, &run_id).await?;
+    let handle = with_run(&orchestrator, &run_id, |entry| Ok(entry.handle.clone())).await?;
+    let state = handle.state().lock().await;
+    serde_json::to_string_pretty(&*state).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub async fn pipeline_get_state(
     orchestrator: tauri::State<'_, Orchestrator>,
     run_id: String,

@@ -25,6 +25,7 @@ export interface FlowState {
   runStatus: RunStatus;
   startedAt: number | null;
   updatedAt: number | null;
+  pinned: boolean;
   steps: FlowStepView[];
 }
 
@@ -40,6 +41,7 @@ export function initialFlowState(): FlowState {
     runStatus: 'idle',
     startedAt: null,
     updatedAt: null,
+    pinned: false,
     steps: DEFAULT_RECIPE_STEPS.map((s) => ({
       id: s.id,
       kind: s.kind,
@@ -67,6 +69,7 @@ export function reduceFlowEvent(state: FlowState, event: FlowAction): FlowState 
       runStatus: event.state.status,
       startedAt: event.state.startedAt,
       updatedAt: event.state.updatedAt,
+      pinned: event.state.pinned ?? false,
       steps: event.state.steps.map((step) => ({
         id: step.def.id,
         kind: step.def.kind,

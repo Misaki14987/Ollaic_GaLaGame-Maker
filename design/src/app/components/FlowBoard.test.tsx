@@ -77,6 +77,7 @@ function runState(status: RunState['status'] = 'running'): RunState {
     status,
     startedAt: 1,
     updatedAt: 2,
+    pinned: false,
     steps: [
       {
         def: { id: 'plan', kind: 'plan', dependsOn: [], agent: null, prompt: '' },
@@ -242,6 +243,21 @@ describe('FlowBoard', () => {
     expect(mockedInvoke).not.toHaveBeenCalledWith('pipeline_resume', { runId: 'run_1' });
   });
 
+  it('recognizes a run that is still live in the current process', async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'pipeline_list_runs') return Promise.resolve([runState('paused')] as unknown);
+      if (cmd === 'pipeline_get_state') return Promise.resolve(runState('paused') as unknown);
+      return Promise.resolve(undefined);
+    });
+    const user = userEvent.setup();
+    render(<FlowBoard projectPath="/tmp/proj" />);
+
+    await user.click(await screen.findByRole('button', { name: '运行' }));
+
+    expect(mockedInvoke).toHaveBeenCalledWith('pipeline_resume', { runId: 'run_1' });
+    expect(mockedInvoke).not.toHaveBeenCalledWith('pipeline_resume_run', expect.anything());
+  });
+
   it('retries a selected failed step with enough context to attach a persisted run', async () => {
     const failed = runState('failed');
     failed.steps[0].status = 'failed';
@@ -399,6 +415,27 @@ describe('FlowBoard', () => {
 
     expect(await screen.findByText('两位创作者在共同制作游戏时重新理解彼此。')).toBeInTheDocument();
     expect(screen.getByText('1 章 / 1 场景')).toBeInTheDocument();
+  });
+
+  it('pins, exports, and manually clears retained run history', async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'pipeline_list_runs') return Promise.resolve([runState('completed')] as unknown);
+      if (cmd === 'pipeline_get_state') return Promise.resolve(runState('completed') as unknown);
+      return Promise.resolve(undefined);
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const user = userEvent.setup();
+    render(<FlowBoard projectPath="/tmp/proj" />);
+
+    await user.click(await screen.findByRole('button', { name: '固定运行记录' }));
+    expect(mockedInvoke).toHaveBeenCalledWith('pipeline_set_run_pinned', {
+      runId: 'run_1', pinned: true, projectPath: '/tmp/proj',
+    });
+    expect(screen.getByRole('button', { name: '导出运行记录' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '清除运行记录' }));
+    expect(mockedInvoke).toHaveBeenCalledWith('pipeline_clear_run_history', {
+      runId: 'run_1', projectPath: '/tmp/proj',
+    });
   });
 
   it('ignores stale project loads and events after navigation', async () => {

@@ -11,6 +11,7 @@ async function openFlowBoard(page: Page, viewport: { width: number; height: numb
       status: 'paused',
       startedAt: now - 32_000,
       updatedAt: now - 2_000,
+      pinned: false,
       steps: [
         {
           def: { id: 'plan', kind: 'plan', dependsOn: [], agent: null, prompt: '提炼故事冲突' },

@@ -109,7 +109,8 @@ impl Pipeline {
         recipe.validate().map_err(PipelineError::RecipeInvalid)?;
         // Validate or create the IR before writing any run state. An invalid
         // plan must not leave an orphan run that later bypasses validation.
-        match story_plan::load_plan(project_path).map_err(PipelineError::Plan)? {
+        let previous_plan = story_plan::load_plan(project_path).map_err(PipelineError::Plan)?;
+        match previous_plan.clone() {
             Some(mut plan) => {
                 plan.prompt = prompt.to_string();
                 story_plan::save_plan(project_path, &plan).map_err(PipelineError::Plan)?;
@@ -121,7 +122,12 @@ impl Pipeline {
         }
         let mut state = RunState::new(run_id, project_path, prompt, recipe, clock.now_ms());
         state.status = RunStatus::Running;
-        store::save_run_state(project_path, &state).map_err(PipelineError::Store)?;
+        if let Err(error) = store::save_run_state(project_path, &state) {
+            if let Some(previous) = previous_plan {
+                story_plan::save_plan(project_path, &previous).map_err(PipelineError::Plan)?;
+            }
+            return Err(PipelineError::Store(error));
+        }
 
         sink.emit(PipelineEvent::RunStarted {
             run_id: run_id.to_string(),
@@ -312,6 +318,7 @@ impl Pipeline {
                 // Capture run-scoped fields before the mutable step borrow.
                 let run_id = state.run_id.clone();
                 let run_prompt = state.prompt.clone();
+                let retain_all_history = state.pinned;
                 let (kind, prompt) = {
                     let step = state.find_step_mut(&id).expect("ready step exists");
                     let prompt = if step.def.prompt.trim().is_empty() {
@@ -336,7 +343,7 @@ impl Pipeline {
                         cost: None,
                         warnings: Vec::new(),
                         downgrade: None,
-                    });
+                    }, retain_all_history);
                     (step.def.kind, prompt)
                 };
                 state.updated_at = clock.now_ms();
@@ -918,6 +925,47 @@ impl RunHandle {
         if let Err(error) = store::save_run_state(project_path, &state) {
             state.find_step_mut(step_id).expect("step exists").def.prompt = previous_prompt;
             state.updated_at = previous_updated_at;
+            return Err(PipelineError::Store(error));
+        }
+        Ok(())
+    }
+
+    pub async fn set_pinned(
+        &self,
+        project_path: &Path,
+        pinned: bool,
+        clock: &dyn Clock,
+    ) -> Result<(), PipelineError> {
+        let mut state = self.state.lock().await;
+        let previous = state.clone();
+        state.pinned = pinned;
+        state.updated_at = clock.now_ms();
+        if let Err(error) = store::save_run_state(project_path, &state) {
+            *state = previous;
+            return Err(PipelineError::Store(error));
+        }
+        Ok(())
+    }
+
+    pub async fn clear_history(
+        &self,
+        project_path: &Path,
+        clock: &dyn Clock,
+    ) -> Result<(), PipelineError> {
+        let mut state = self.state.lock().await;
+        if state.status == RunStatus::Running {
+            return Err(PipelineError::InvalidRunTransition(
+                state.run_id.clone(),
+                "pause the run before clearing history".to_string(),
+            ));
+        }
+        let previous = state.clone();
+        for step in &mut state.steps {
+            step.history.clear();
+        }
+        state.updated_at = clock.now_ms();
+        if let Err(error) = store::save_run_state(project_path, &state) {
+            *state = previous;
             return Err(PipelineError::Store(error));
         }
         Ok(())

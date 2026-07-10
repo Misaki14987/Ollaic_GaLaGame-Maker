@@ -67,6 +67,22 @@ export async function pipelineUpdateStepPrompt(
   return invoke<void>('pipeline_update_step_prompt', { runId, stepId, prompt, projectPath });
 }
 
+export async function pipelineSetRunPinned(
+  runId: string,
+  pinned: boolean,
+  projectPath: string,
+): Promise<void> {
+  return invoke<void>('pipeline_set_run_pinned', { runId, pinned, projectPath });
+}
+
+export async function pipelineClearRunHistory(runId: string, projectPath: string): Promise<void> {
+  return invoke<void>('pipeline_clear_run_history', { runId, projectPath });
+}
+
+export async function pipelineExportRunHistory(runId: string, projectPath: string): Promise<string> {
+  return invoke<string>('pipeline_export_run_history', { runId, projectPath });
+}
+
 /** Snapshot of a run's current state. */
 export async function pipelineGetState(runId: string): Promise<RunState | null> {
   return invoke<RunState | null>('pipeline_get_state', { runId });

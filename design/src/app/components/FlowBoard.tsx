@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import {
   AlertCircle,
+  Bookmark,
+  BookmarkCheck,
   Clock3,
+  Download,
   FileText,
   GitBranch,
   Hash,
@@ -11,6 +14,7 @@ import {
   RotateCcw,
   Square,
   StepForward,
+  Trash2,
 } from 'lucide-react';
 import ReactFlow, {
   Background,
@@ -33,6 +37,8 @@ import { initialFlowState, reduceFlowEvent, type FlowStepView } from '../lib/flo
 import { layoutFlowSteps, loadFlowPositions, saveFlowPositions } from '../lib/flow-layout';
 import {
   listenPipelineEvents,
+  pipelineClearRunHistory,
+  pipelineExportRunHistory,
   pipelineGetPlan,
   pipelineGetState,
   pipelineListRuns,
@@ -41,6 +47,7 @@ import {
   pipelineResumeRun,
   pipelineRetryStep,
   pipelineSkipStep,
+  pipelineSetRunPinned,
   pipelineStart,
   pipelineStepOnce,
   pipelineStop,
@@ -148,8 +155,12 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
   const layoutKeyRef = useRef<string | null>(null);
   const flowInstanceRef = useRef<ReactFlowInstance<StepNodeData> | null>(null);
   const loadRequestRef = useRef(0);
+  const planRequestRef = useRef(0);
   const subscriptionRef = useRef(0);
+  const headerRef = useRef<HTMLElement | null>(null);
   const workspaceRef = useRef<HTMLDivElement | null>(null);
+  const inspectorRef = useRef<HTMLDivElement | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
   const [wideInspector, setWideInspector] = useState(() => (
     typeof window === 'undefined' || typeof window.matchMedia !== 'function'
       ? true
@@ -157,7 +168,9 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
   ));
 
   const refreshPlan = useCallback(async () => {
-    setPlan(await pipelineGetPlan(projectPath));
+    const request = ++planRequestRef.current;
+    const storyPlan = await pipelineGetPlan(projectPath);
+    if (request === planRequestRef.current) setPlan(storyPlan);
   }, [projectPath]);
 
   const subscribe = useCallback(async (runId: string) => {
@@ -204,12 +217,27 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
         runIdRef.current = null;
         return;
       }
-      dispatch({ type: 'stateHydrated', state: latest });
-      setPrompt(latest.prompt);
-      setEvents(recordsFromSnapshot(latest));
-      runIdRef.current = latest.runId;
-      setDetached(true);
-      if (latest.status === 'running' || latest.status === 'paused') await subscribe(latest.runId);
+      let snapshot = latest;
+      let live = false;
+      if (latest.status === 'running' || latest.status === 'paused') {
+        try {
+          const current = await pipelineGetState(latest.runId);
+          if (request !== loadRequestRef.current) return;
+          if (current) {
+            snapshot = current;
+            live = true;
+          }
+        } catch {
+          // Missing in-memory state means this is a true restart recovery.
+        }
+        if (request !== loadRequestRef.current) return;
+      }
+      dispatch({ type: 'stateHydrated', state: snapshot });
+      setPrompt(snapshot.prompt);
+      setEvents(recordsFromSnapshot(snapshot));
+      runIdRef.current = snapshot.runId;
+      setDetached(!live);
+      if (snapshot.status === 'running' || snapshot.status === 'paused') await subscribe(snapshot.runId);
     } catch (err) {
       if (request === loadRequestRef.current) setError(String(err));
     } finally {
@@ -221,6 +249,7 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
     void loadLatest();
     return () => {
       loadRequestRef.current += 1;
+      planRequestRef.current += 1;
       subscriptionRef.current += 1;
       runIdRef.current = null;
       unlistenRef.current?.();
@@ -238,6 +267,7 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
   }, []);
 
   useEffect(() => {
+    headerRef.current?.toggleAttribute('inert', Boolean(selectedStepId && !wideInspector));
     workspaceRef.current?.toggleAttribute('inert', Boolean(selectedStepId && !wideInspector));
   }, [selectedStepId, wideInspector]);
 
@@ -294,11 +324,22 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
     }
   }, [busy]);
 
+  const openInspector = useCallback((stepId: string) => {
+    if (!selectedStepId) previousFocusRef.current = document.activeElement as HTMLElement | null;
+    setSelectedStepId(stepId);
+  }, [selectedStepId]);
+
+  const closeInspector = useCallback(() => {
+    setSelectedStepId(null);
+    window.setTimeout(() => previousFocusRef.current?.focus(), 0);
+  }, []);
+
   const start = useCallback(async () => {
     if (!prompt.trim()) return;
     await runCommand(async () => {
       setSelectedStepId(null);
       setEvents([]);
+      planRequestRef.current += 1;
       runIdRef.current = null;
       subscriptionRef.current += 1;
       unlistenRef.current?.();
@@ -354,6 +395,38 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
       await refresh(runId);
     });
   }, [refresh, runCommand]);
+
+  const togglePinned = useCallback(async () => {
+    const runId = runIdRef.current;
+    if (!runId) return;
+    await runCommand(async () => {
+      await pipelineSetRunPinned(runId, !state.pinned, projectPath);
+      await refresh(runId);
+    });
+  }, [projectPath, refresh, runCommand, state.pinned]);
+
+  const clearHistory = useCallback(async () => {
+    const runId = runIdRef.current;
+    if (!runId || !window.confirm('清除这个 run 的全部步骤尝试记录？当前输出不会删除。')) return;
+    await runCommand(async () => {
+      await pipelineClearRunHistory(runId, projectPath);
+      await refresh(runId);
+    });
+  }, [projectPath, refresh, runCommand]);
+
+  const exportHistory = useCallback(async () => {
+    const runId = runIdRef.current;
+    if (!runId) return;
+    await runCommand(async () => {
+      const content = await pipelineExportRunHistory(runId, projectPath);
+      const url = URL.createObjectURL(new Blob([content], { type: 'application/json' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${runId}-history.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+    });
+  }, [projectPath, runCommand]);
 
   const retryStep = useCallback(async (stepId: string) => {
     const runId = runIdRef.current;
@@ -452,8 +525,13 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
   const canCreate = !running && !paused;
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-surface-container-lowest">
-      <header className="shrink-0 border-b border-border bg-surface-container-lowest">
+    <div
+      className="flex h-full min-h-0 flex-col overflow-hidden bg-surface-container-lowest"
+      onKeyDownCapture={(event) => {
+        if (event.key === 'Escape' && selectedStepId && !wideInspector) closeInspector();
+      }}
+    >
+      <header ref={headerRef} className="shrink-0 border-b border-border bg-surface-container-lowest">
         <div className="flex flex-col gap-2 px-3 py-3 lg:flex-row lg:items-center">
           <label className="min-w-0 flex-1">
             <span className="mb-1 block font-mono-family text-[10px] font-semibold text-muted-foreground">PRODUCTION BRIEF</span>
@@ -499,7 +577,22 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
         <div className="grid grid-cols-2 divide-x divide-y divide-border border-t border-border sm:grid-cols-4 sm:divide-y-0">
           <div className="min-w-0 px-3 py-2">
             <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground"><Hash className="size-3" />运行编号</div>
-            <div className="mt-1 truncate font-mono-family text-xs" title={state.runId ?? undefined}>{state.runId ?? '尚未创建'}</div>
+            <div className="mt-0.5 flex min-w-0 items-center gap-1">
+              <span className="min-w-0 flex-1 truncate font-mono-family text-xs" title={state.runId ?? undefined}>{state.runId ?? '尚未创建'}</span>
+              {state.runId && (
+                <>
+                  <Button type="button" size="icon" variant="ghost" className="size-6" onClick={togglePinned} disabled={busy} aria-label={state.pinned ? '取消固定运行记录' : '固定运行记录'} title={state.pinned ? '取消固定' : '固定记录，保留全部尝试'}>
+                    {state.pinned ? <BookmarkCheck /> : <Bookmark />}
+                  </Button>
+                  <Button type="button" size="icon" variant="ghost" className="size-6" onClick={exportHistory} disabled={busy} aria-label="导出运行记录" title="导出运行记录">
+                    <Download />
+                  </Button>
+                  <Button type="button" size="icon" variant="ghost" className="size-6 text-destructive" onClick={clearHistory} disabled={busy || running} aria-label="清除运行记录" title={running ? '暂停后才能清理记录' : '清除步骤尝试记录'}>
+                    <Trash2 />
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
           <div className="px-3 py-2">
             <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground"><GitBranch className="size-3" />运行状态</div>
@@ -566,10 +659,10 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
                 onInit={(instance) => { flowInstanceRef.current = instance; }}
                 onNodesChange={onNodesChange}
                 onNodeDragStop={persistNodePositions}
-                onNodeClick={(_event, node: Node) => setSelectedStepId(node.id)}
+                onNodeClick={(_event, node: Node) => openInspector(node.id)}
                 onNodeContextMenu={(event, node) => {
                   event.preventDefault();
-                  setSelectedStepId(node.id);
+                  openInspector(node.id);
                 }}
                 onConnect={connect}
                 onEdgesDelete={deleteEdges}
@@ -612,11 +705,26 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
 
         {selectedStep && (
           <div
+            ref={inspectorRef}
             role={wideInspector ? 'region' : 'dialog'}
             aria-label="步骤检查器"
             aria-modal={wideInspector ? undefined : true}
             onKeyDown={(event) => {
-              if (event.key === 'Escape') setSelectedStepId(null);
+              if (event.key === 'Escape') closeInspector();
+              if (event.key !== 'Tab' || wideInspector) return;
+              const focusable = inspectorRef.current?.querySelectorAll<HTMLElement>(
+                'button:not([disabled]), textarea:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+              );
+              if (!focusable?.length) return;
+              const first = focusable[0];
+              const last = focusable[focusable.length - 1];
+              if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+              } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+              }
             }}
             className="absolute inset-y-0 right-0 z-30 w-full max-w-[420px] border-l border-border bg-surface-container-lowest shadow-[-10px_0_30px_var(--shadow-soft)] xl:static xl:w-[380px] xl:shrink-0 xl:shadow-none"
           >
@@ -624,7 +732,7 @@ export function FlowBoard({ projectPath }: FlowBoardProps) {
               selected={selectedStep}
               busy={busy}
               detached={detached}
-              onClose={() => setSelectedStepId(null)}
+              onClose={closeInspector}
               onRetry={retryStep}
               onSkip={skipStep}
               onPromptRerun={updatePromptAndRetry}

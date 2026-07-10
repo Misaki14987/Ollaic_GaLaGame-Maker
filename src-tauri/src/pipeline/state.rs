@@ -107,8 +107,8 @@ impl StepState {
         )
     }
 
-    pub fn record_attempt(&mut self, history: StepRunHistory) {
-        if self.history.len() >= MAX_STEP_HISTORY {
+    pub fn record_attempt(&mut self, history: StepRunHistory, retain_all: bool) {
+        if !retain_all && self.history.len() >= MAX_STEP_HISTORY {
             let remove = self.history.len() + 1 - MAX_STEP_HISTORY;
             self.history.drain(..remove);
         }
@@ -128,6 +128,8 @@ pub struct RunState {
     pub steps: Vec<StepState>,
     pub started_at: u64,
     pub updated_at: u64,
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 impl RunState {
@@ -150,6 +152,7 @@ impl RunState {
                 .collect(),
             started_at: now_ms,
             updated_at: now_ms,
+            pinned: false,
         }
     }
 
@@ -296,10 +299,14 @@ mod tests {
                 cost: None,
                 warnings: Vec::new(),
                 downgrade: None,
-            });
+            }, false);
         }
         assert_eq!(step.history.len(), MAX_STEP_HISTORY);
         assert_eq!(step.history.first().unwrap().attempt, 4);
         assert_eq!(step.history.last().unwrap().attempt, 23);
+
+        let retained = step.history.last().unwrap().clone();
+        step.record_attempt(retained, true);
+        assert_eq!(step.history.len(), MAX_STEP_HISTORY + 1);
     }
 }
