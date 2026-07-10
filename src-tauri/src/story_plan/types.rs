@@ -82,6 +82,7 @@ pub struct StoryMemory {
 pub struct ChapterPlan {
     pub id: String,
     pub title: String,
+    #[serde(default)]
     pub summary: String,
 }
 
@@ -92,6 +93,7 @@ pub struct ScenePlan {
     pub file: String,
     pub chapter_id: String,
     pub title: String,
+    #[serde(default)]
     pub summary: String,
     #[serde(default)]
     pub character_ids: Vec<String>,
