@@ -371,7 +371,7 @@ Release Candidate 可以被结构性叙事问题阻断，例如分支缺乏动�
 
 | 切片 | 内容 | 价值锚点 |
 |---|---|---|
-| **P0 — Flow Shell** | Pipeline Orchestrator + StoryPlan IR + FlowBoard 空壳 + 2 个内置 step（Plan + Outline） | 骨架先立，UI 上能看到 DAG 跑起来 |
+| **P0 — Flow Shell（已完成）** | Pipeline Orchestrator + StoryPlan IR + FlowBoard + 内置确定性 step | 项目以 FlowBoard 为入口，DAG 状态、干预和崩溃恢复已闭环 |
 | **P1 — 内容链路** | 接 Plotter → Dialogist → AssetPlanner → SceneScript | 「提示词 → 可读剧本」闭环 |
 | **P2 — 资产闭环** | AssetTaskQueue + 自动绑定 + 并发限流 | 真正闭环 |
 | **P3 — 试玩 & 自审** | Quality Gate + One-Click Run & Play + Reviewer Agent | 端到端可玩 + 可信赖 |
@@ -384,10 +384,10 @@ P0 是地基，其余切片可以基于 P0 并行。**强烈建议先实现 P0**
 
 落地 P0 前需要明确的事项：
 
-- [ ] Flow 画布技术栈：React Flow vs 自研轻量
-- [ ] IR 落盘格式：JSON vs YAML vs 纯二进制
-- [ ] Pipeline 持久化粒度：每 step 一次 vs 每节点一次
-- [ ] 事件总线传输：Tauri event vs 独立 WS
+- [x] Flow 画布技术栈：React Flow（ADR 0053）
+- [x] IR 落盘格式：JSON（ADR 0054）
+- [x] Pipeline 持久化粒度：每 step 状态转换一次（ADR 0054）
+- [x] 事件总线传输：Tauri event（ADR 0055）
 - [ ] 多 Agent 上下文裁剪策略（每个 Agent 拿到 IR 的哪个子集）
 - [ ] AssetTaskQueue 并发上限默认值（家用网络与 API rate 平衡）
 - [ ] Quality Gate 中的「致命 vs 警告」分级阈值

@@ -26,12 +26,16 @@ export interface StepNodeData {
   id: string;
   kind: string;
   status: StepStatus;
+  selected?: boolean;
 }
 
 function StepNodeComponent({ data }: { data: StepNodeData }) {
   return (
     <div
-      className="min-w-40 rounded-lg border bg-card p-3 shadow-sm"
+      className={cn(
+        'min-w-40 rounded-lg border bg-card p-3 shadow-sm',
+        data.selected && 'border-primary ring-2 ring-primary/20',
+      )}
       data-step-id={data.id}
       data-step-status={data.status}
     >

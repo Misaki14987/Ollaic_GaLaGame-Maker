@@ -9,7 +9,7 @@ export const router = createHashRouter([
     },
   },
   {
-    path: "/flow",
+    path: "/flow/:projectId",
     lazy: async () => {
       const { FlowBoardPage } = await import("./components/FlowBoardPage");
       return { Component: FlowBoardPage };

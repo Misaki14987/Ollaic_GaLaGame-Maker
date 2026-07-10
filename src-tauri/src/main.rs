@@ -232,6 +232,7 @@ fn main() {
             pipeline::commands::pipeline_skip_step,
             pipeline::commands::pipeline_get_state,
             pipeline::commands::pipeline_get_plan,
+            pipeline::commands::pipeline_list_runs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -19,7 +19,7 @@
 
 | 模块 | 状态 | 说明 |
 |------|------|------|
-| 端到端 Agent 形态 | **规划中** | 见 [`v2-agent-pipeline.md`](./v2-agent-pipeline.md)：Pipeline Orchestrator、StoryPlan IR、多 Agent 分工、Flow 可视化画布、AssetTaskQueue、自动质检、一键可玩 |
+| 端到端 Agent 形态 | **P0 已完成** | Pipeline Orchestrator、StoryPlan IR、FlowBoard、暂停/续跑/重跑/跳过与崩溃恢复已闭环；P1–P3 继续按 [`v2-agent-pipeline.md`](./v2-agent-pipeline.md) 推进 |
 
 ## 模块索引
 

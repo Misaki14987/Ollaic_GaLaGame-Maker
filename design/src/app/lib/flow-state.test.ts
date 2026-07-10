@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { initialFlowState, reduceFlowEvent } from './flow-state';
-import type { PipelineEvent } from './pipeline-types';
+import type { PipelineEvent, RunState } from './pipeline-types';
 
 const ev = (e: PipelineEvent) => e;
 
@@ -68,6 +68,44 @@ describe('flow-state reducer', () => {
     s = reduceFlowEvent(s, ev({ type: 'runStarted', runId: 'run_1' }));
     s = reduceFlowEvent(s, ev({ type: 'stepStarted', runId: 'run_other', stepId: 'plan', kind: 'plan' }));
     expect(statusOf(s, 'plan')).toBe('pending');
+  });
+
+  it('hydrates the real DAG and completed statuses from a run snapshot', () => {
+    const run: RunState = {
+      runId: 'run_finished',
+      projectPath: '/tmp/project',
+      prompt: 'brief',
+      status: 'completed',
+      startedAt: 10,
+      updatedAt: 20,
+      steps: [
+        {
+          def: { id: 'brief', kind: 'plan', dependsOn: [], agent: null, prompt: '' },
+          status: 'succeeded',
+          attempt: 1,
+          output: '{"synopsis":"done"}',
+          error: null,
+          startedAt: 11,
+          finishedAt: 12,
+        },
+        {
+          def: { id: 'plot', kind: 'outline', dependsOn: ['brief'], agent: null, prompt: '' },
+          status: 'succeeded',
+          attempt: 1,
+          output: null,
+          error: null,
+          startedAt: 13,
+          finishedAt: 14,
+        },
+      ],
+    };
+
+    const s = reduceFlowEvent(initialFlowState(), { type: 'stateHydrated', state: run });
+    expect(s.runId).toBe('run_finished');
+    expect(s.runStatus).toBe('completed');
+    expect(s.steps.map((step) => step.id)).toEqual(['brief', 'plot']);
+    expect(s.steps[1].dependsOn).toEqual(['brief']);
+    expect(s.steps[0].output).toBe('{"synopsis":"done"}');
   });
 });
 
