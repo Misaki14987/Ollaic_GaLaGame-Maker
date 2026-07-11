@@ -38,11 +38,7 @@ pub fn bind_asset(project_path: &Path, task: &AssetTask) -> Result<String, Strin
         .filter(|value| value.chars().all(|ch| ch.is_ascii_alphanumeric()))
         .ok_or_else(|| format!("artifact has no safe extension: {}", artifact.display()))?;
     validate_stem(&task.target_stem)?;
-    let filename = format!("{}.{}", task.target_stem, extension);
-    let target = project_path
-        .join("game")
-        .join(task.kind.game_dir())
-        .join(&filename);
+    let (filename, target) = available_target(project_path, task, extension)?;
     let snapshots = snapshot_binding_files(project_path, &target)?;
     let bytes = fs::read(&artifact)
         .map_err(|error| format!("failed to read artifact {}: {error}", artifact.display()))?;
@@ -205,10 +201,72 @@ fn write_scene(path: &Path, nodes: &[WebGalNode]) -> Result<(), String> {
         .map_err(|error| format!("failed to write scene {}: {error}", path.display()))
 }
 
-fn asset_node(kind: CommandType, filename: &str) -> WebGalNode {
-    let mut node = WebGalNode::new(format!("asset-{filename}"), kind, filename.to_string());
+fn asset_node(task_id: &str, kind: CommandType, filename: &str) -> WebGalNode {
+    let mut node = WebGalNode::new(format!("asset-{task_id}"), kind, filename.to_string());
     node.asset = Some(filename.to_string());
     node
+}
+
+fn task_marker(task_id: &str) -> String {
+    format!("ollaic-asset-task:{task_id}")
+}
+
+fn available_target(
+    project_path: &Path,
+    task: &AssetTask,
+    extension: &str,
+) -> Result<(String, PathBuf), String> {
+    let candidates = std::iter::once(format!("{}.{}", task.target_stem, extension))
+        .chain(std::iter::once(format!(
+            "{}-{}.{}",
+            task.target_stem, task.id, extension
+        )))
+        .chain(
+            (2..=10_000)
+                .map(|index| format!("{}-{}-{index}.{}", task.target_stem, task.id, extension)),
+        );
+    for filename in candidates {
+        let target = project_path
+            .join("game")
+            .join(task.kind.game_dir())
+            .join(&filename);
+        if !target.exists()
+            || task.asset_file.as_deref() == Some(filename.as_str())
+            || scene_task_owns_filename(project_path, task, &filename)?
+        {
+            return Ok((filename, target));
+        }
+    }
+    Err(format!("no available target filename for task {}", task.id))
+}
+
+fn marker_node(task_id: &str) -> WebGalNode {
+    WebGalNode::new(
+        format!("asset-marker-{task_id}"),
+        CommandType::Comment,
+        task_marker(task_id),
+    )
+}
+
+fn scene_task_owns_filename(
+    project_path: &Path,
+    task: &AssetTask,
+    filename: &str,
+) -> Result<bool, String> {
+    if !matches!(
+        task.kind,
+        AssetKind::Background | AssetKind::Bgm | AssetKind::Sfx
+    ) {
+        return Ok(false);
+    }
+    let marker = task_marker(&task.id);
+    let path = scene_path(project_path, task.scene_ref.as_deref())?;
+    let nodes = read_scene(&path)?;
+    Ok(nodes.windows(2).any(|pair| {
+        pair[0].cmd_type == CommandType::Comment
+            && pair[0].content == marker
+            && pair[1].asset.as_deref() == Some(filename)
+    }))
 }
 
 fn bind_scene_command(
@@ -219,15 +277,38 @@ fn bind_scene_command(
 ) -> Result<(), String> {
     let path = scene_path(project_path, task.scene_ref.as_deref())?;
     let mut nodes = read_scene(&path)?;
-    if let Some(existing) = nodes.iter_mut().find(|node| node.cmd_type == kind) {
+    let marker = task_marker(&task.id);
+    if let Some(marker_index) = nodes
+        .iter()
+        .position(|node| node.cmd_type == CommandType::Comment && node.content == marker)
+    {
+        if let Some(existing) = nodes
+            .get_mut(marker_index + 1)
+            .filter(|node| node.cmd_type == kind)
+        {
+            existing.content = filename.to_string();
+            existing.asset = Some(filename.to_string());
+            return write_scene(&path, &nodes);
+        }
+    }
+    if let Some(existing_index) = task.asset_file.as_deref().and_then(|previous| {
+        nodes
+            .iter()
+            .position(|node| node.cmd_type == kind && node.asset.as_deref() == Some(previous))
+    }) {
+        let existing = &mut nodes[existing_index];
         existing.content = filename.to_string();
         existing.asset = Some(filename.to_string());
+        nodes.insert(existing_index, marker_node(&task.id));
     } else {
         let index = nodes
             .iter()
             .position(|node| !matches!(node.cmd_type, CommandType::Comment))
             .unwrap_or(nodes.len());
-        nodes.insert(index, asset_node(kind, filename));
+        nodes.splice(
+            index..index,
+            [marker_node(&task.id), asset_node(&task.id, kind, filename)],
+        );
     }
     write_scene(&path, &nodes)
 }
@@ -293,7 +374,10 @@ fn bind_figure(project_path: &Path, task: &AssetTask, filename: &str) -> Result<
             node.cmd_type == CommandType::ChangeFigure && node.asset.as_deref() == Some(filename)
         });
         if !already_bound {
-            nodes.insert(insert_at, asset_node(CommandType::ChangeFigure, filename));
+            nodes.insert(
+                insert_at,
+                asset_node(&task.id, CommandType::ChangeFigure, filename),
+            );
             write_scene(&path, &nodes)?;
         }
     }
@@ -414,9 +498,11 @@ mod tests {
                 finished_at: 1,
                 artifact: Some(artifact.to_string_lossy().into_owned()),
                 error: None,
+                used_local_fallback: false,
             }],
             asset_file: None,
             error: None,
+            used_local_fallback: false,
         };
         bind_asset(&project, &task).unwrap();
         for scene in ["start.txt", "route.txt"] {
@@ -456,9 +542,11 @@ mod tests {
                 finished_at: 1,
                 artifact: Some(outside.to_string_lossy().into_owned()),
                 error: None,
+                used_local_fallback: false,
             }],
             asset_file: None,
             error: None,
+            used_local_fallback: false,
         };
         assert!(bind_asset(&project, &task).is_err());
         assert!(!project.join("game/background/bg.png").exists());
@@ -469,6 +557,62 @@ mod tests {
         assert!(bind_asset(&project, &task).is_err());
         assert!(!project.join("game/background/bg.png").exists());
         let _ = fs::remove_file(outside);
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn same_kind_tasks_keep_distinct_scene_commands() {
+        let project = std::env::temp_dir().join("ollaic_bind_same_kind");
+        let _ = fs::remove_dir_all(&project);
+        fs::create_dir_all(project.join("game/scene")).unwrap();
+        fs::create_dir_all(project.join("game/vocal")).unwrap();
+        fs::write(project.join("game/scene/start.txt"), ":safe;\n").unwrap();
+        fs::write(project.join("game/vocal/impact-rain.wav"), b"user audio").unwrap();
+
+        for name in ["door", "rain"] {
+            let artifact = project
+                .join(".ollaic/artifacts/assets")
+                .join(name)
+                .join("1.wav");
+            fs::create_dir_all(artifact.parent().unwrap()).unwrap();
+            fs::write(&artifact, b"audio").unwrap();
+            bind_asset(
+                &project,
+                &AssetTask {
+                    id: name.into(),
+                    kind: AssetKind::Sfx,
+                    target_stem: "impact".into(),
+                    prompt: name.into(),
+                    scene_ref: Some("start.txt".into()),
+                    character_ref: None,
+                    dialogue_index: None,
+                    text: None,
+                    status: AssetTaskStatus::Running,
+                    attempts: vec![AssetAttempt {
+                        attempt: 1,
+                        started_at: 0,
+                        finished_at: 1,
+                        artifact: Some(artifact.to_string_lossy().into_owned()),
+                        error: None,
+                        used_local_fallback: false,
+                    }],
+                    asset_file: None,
+                    error: None,
+                    used_local_fallback: false,
+                },
+            )
+            .unwrap();
+        }
+
+        let scene = fs::read_to_string(project.join("game/scene/start.txt")).unwrap();
+        assert!(scene.contains("; ollaic-asset-task:door"));
+        assert!(scene.contains("playEffect:impact.wav;"));
+        assert!(scene.contains("; ollaic-asset-task:rain"));
+        assert!(scene.contains("playEffect:impact-rain-2.wav;"));
+        assert_eq!(
+            fs::read(project.join("game/vocal/impact-rain.wav")).unwrap(),
+            b"user audio"
+        );
         let _ = fs::remove_dir_all(project);
     }
 }
