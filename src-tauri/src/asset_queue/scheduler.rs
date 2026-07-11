@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use futures_util::stream::{FuturesUnordered, StreamExt};
 use tokio::sync::{Mutex, Semaphore};
 
-use super::binder::bind_asset;
+use super::binder::{bind_asset, rebind_asset};
 use super::store::{load_queue, save_queue};
 use super::types::{AssetAttempt, AssetKind, AssetQueue, AssetTask, AssetTaskStatus};
 use crate::story_plan::types::StoryPlan;
@@ -58,10 +58,32 @@ pub async fn run_queue_cancellable(
     let _queue_guard = super::lock_queue_writes().await;
     let mut queue = load_queue(project_path)?;
     let same_run = queue.run_id == run_id;
-    if !same_run {
-        queue = super::store::derive_queue(project_path, run_id, plan)?;
-    }
+    queue = if same_run {
+        // The upstream scene may have been re-run since this queue was derived;
+        // re-derive so moved dialogue regenerates instead of failing the
+        // bind_tts text check. Succeeded tasks whose text/target is unchanged
+        // are preserved, so this only re-runs what the upstream edit touched.
+        super::store::rederive_queue(project_path, run_id, plan, &queue)?
+    } else {
+        super::store::derive_queue(project_path, run_id, plan)?
+    };
     validate_limits(&queue)?;
+    if same_run {
+        for task in queue
+            .tasks
+            .iter_mut()
+            .filter(|task| task.status == AssetTaskStatus::Succeeded)
+        {
+            let _binding_guard = binding_gate.lock().await;
+            if cancelled.load(Ordering::SeqCst) {
+                return Err(ASSET_QUEUE_CANCELLED.to_string());
+            }
+            if let Err(error) = rebind_asset(project_path, task) {
+                task.status = AssetTaskStatus::Failed;
+                task.error = Some(format!("rebinding failed: {error}"));
+            }
+        }
+    }
     let attempt_budget = queue.limits.max_retries + 1;
     let runnable: Vec<(usize, u32)> = queue
         .tasks
@@ -822,7 +844,9 @@ mod tests {
     async fn recovery_preserves_completed_fallback_provenance() {
         let project = std::env::temp_dir().join(format!("ollaic_queue_provenance_{}", now_ms()));
         std::fs::create_dir_all(project.join("game/scene")).unwrap();
+        std::fs::create_dir_all(project.join("game/background")).unwrap();
         std::fs::write(project.join("game/scene/start.txt"), "; empty\n").unwrap();
+        std::fs::write(project.join("game/background/fallback.png"), b"fallback").unwrap();
         let mut fallback = task("fallback".into(), AssetKind::Background, None);
         fallback.status = AssetTaskStatus::Succeeded;
         fallback.asset_file = Some("fallback.png".into());
@@ -864,6 +888,59 @@ mod tests {
         assert!(!recovered.tasks[1].used_local_fallback);
         let persisted = load_queue(&project).unwrap();
         assert!(persisted.tasks[0].used_local_fallback);
+        let _ = std::fs::remove_dir_all(project);
+    }
+
+    #[tokio::test]
+    async fn same_run_rebinds_succeeded_assets_after_scene_recompile() {
+        let project = std::env::temp_dir().join(format!("ollaic_queue_rebind_{}", now_ms()));
+        std::fs::create_dir_all(project.join("game/scene")).unwrap();
+        std::fs::create_dir_all(project.join("game/config")).unwrap();
+        std::fs::create_dir_all(project.join("game/background")).unwrap();
+        std::fs::create_dir_all(project.join("game/figure")).unwrap();
+        std::fs::write(project.join("game/scene/start.txt"), "Alice:hello;\n").unwrap();
+        std::fs::write(
+            project.join("game/config/characters.json"),
+            r#"{"version":1,"characters":[{"id":"alice","name":"Alice"}]}"#,
+        )
+        .unwrap();
+        std::fs::write(project.join("game/background/room.png"), b"background").unwrap();
+        std::fs::write(project.join("game/figure/alice.png"), b"figure").unwrap();
+
+        let mut background = task("room".into(), AssetKind::Background, None);
+        background.status = AssetTaskStatus::Succeeded;
+        background.asset_file = Some("room.png".into());
+        let mut figure = task("alice".into(), AssetKind::Figure, None);
+        figure.status = AssetTaskStatus::Succeeded;
+        figure.asset_file = Some("alice.png".into());
+        figure.character_ref = Some("alice".into());
+        save_queue(
+            &project,
+            &AssetQueue::new("run-rebind", vec![background, figure], now_ms()),
+        )
+        .unwrap();
+
+        let generated = Arc::new(AlwaysFail(AtomicUsize::new(0)));
+        let result = run_queue(
+            &project,
+            "run-rebind",
+            &StoryPlan {
+                scenes: vec!["start.txt".into()],
+                ..StoryPlan::new("test")
+            },
+            generated.clone(),
+        )
+        .await
+        .unwrap();
+
+        assert!(result
+            .tasks
+            .iter()
+            .all(|task| task.status == AssetTaskStatus::Succeeded));
+        assert_eq!(generated.0.load(Ordering::SeqCst), 0);
+        let scene = std::fs::read_to_string(project.join("game/scene/start.txt")).unwrap();
+        assert!(scene.contains("changeBg:room.png;"));
+        assert!(scene.contains("changeFigure:alice.png;"));
         let _ = std::fs::remove_dir_all(project);
     }
 }

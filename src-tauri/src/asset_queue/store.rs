@@ -152,6 +152,45 @@ pub fn derive_queue(
     Ok(AssetQueue::new(run_id, tasks, now_ms()))
 }
 
+/// Refresh TTS tasks from the latest compiled scene dialogue while keeping
+/// every other task as-is. An upstream scene re-run can move or rewrite lines;
+/// `bind_tts` rejects a task whose `text` no longer matches the scene, so a
+/// stale queue would leave the assetQueue step stuck failing on every retry.
+/// Non-TTS tasks depend only on scene existence, which retry does not change,
+/// so they keep their succeeded state and bound files.
+pub fn rederive_queue(
+    project_path: &Path,
+    run_id: &str,
+    plan: &StoryPlan,
+    existing: &AssetQueue,
+) -> Result<AssetQueue, String> {
+    let fresh = derive_queue(project_path, run_id, plan)?;
+    let fresh_tts: HashMap<&str, &AssetTask> = fresh
+        .tasks
+        .iter()
+        .filter(|task| task.kind == AssetKind::Tts)
+        .map(|task| (task.id.as_str(), task))
+        .collect();
+    let mut queue = existing.clone();
+    queue.run_id = run_id.to_string();
+    for task in &mut queue.tasks {
+        if task.kind != AssetKind::Tts {
+            continue;
+        }
+        if let Some(fresh_task) = fresh_tts.get(task.id.as_str()) {
+            if fresh_task.text != task.text {
+                task.status = AssetTaskStatus::Pending;
+                task.text = fresh_task.text.clone();
+                task.error = None;
+                task.asset_file = None;
+                task.used_local_fallback = false;
+                task.attempts.clear();
+            }
+        }
+    }
+    Ok(queue)
+}
+
 fn safe_token(value: &str, fallback: usize) -> String {
     let token: String = value
         .chars()
@@ -257,4 +296,53 @@ mod tests {
         let _ = fs::remove_dir_all(project);
     }
 
+    #[test]
+    fn rederive_preserves_succeeded_tasks_but_reruns_dialogue_that_moved() {
+        let project = temp_project("rederive");
+        fs::write(
+            project.join("game/scene/start.txt"),
+            "Alice:Hello;\nBob:World;\n",
+        )
+        .unwrap();
+        let plan = StoryPlan {
+            scenes: vec!["start.txt".into()],
+            ..StoryPlan::new("test")
+        };
+        let first = derive_queue(&project, "run-1", &plan).unwrap();
+        assert_eq!(first.tasks.len(), 2);
+        let mut succeeded = first.clone();
+        for task in &mut succeeded.tasks {
+            task.status = AssetTaskStatus::Succeeded;
+            task.asset_file = Some(format!("{}.wav", task.target_stem));
+            task.attempts.push(crate::asset_queue::types::AssetAttempt {
+                attempt: 1,
+                started_at: 0,
+                finished_at: 1,
+                artifact: None,
+                error: None,
+                used_local_fallback: false,
+            });
+        }
+        // Move only the second dialogue line; the first stays put.
+        fs::write(
+            project.join("game/scene/start.txt"),
+            "Alice:Hello;\nBob:Changed;\n",
+        )
+        .unwrap();
+        let redone = rederive_queue(&project, "run-1", &plan, &succeeded).unwrap();
+        assert_eq!(redone.tasks.len(), 2);
+        assert_eq!(
+            redone.tasks[0].status,
+            AssetTaskStatus::Succeeded,
+            "unchanged dialogue stays succeeded"
+        );
+        assert!(redone.tasks[0].asset_file.is_some());
+        assert_eq!(
+            redone.tasks[1].status,
+            AssetTaskStatus::Pending,
+            "moved dialogue is rerun"
+        );
+        assert!(redone.tasks[1].asset_file.is_none());
+        let _ = fs::remove_dir_all(project);
+    }
 }
