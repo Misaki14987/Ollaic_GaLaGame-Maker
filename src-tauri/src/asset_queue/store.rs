@@ -161,11 +161,20 @@ pub fn derive_queue(
         .collect();
     let mut ids = HashSet::new();
     let mut tasks = Vec::new();
-    for task_plan in &plan.asset_plan {
+    for (index, task_plan) in plan.asset_plan.iter().enumerate() {
         let kind = AssetKind::from_plan(&task_plan.kind)
             .ok_or_else(|| format!("unsupported asset kind: {}", task_plan.kind))?;
         if !ids.insert(task_plan.id.clone()) {
             return Err(format!("duplicate asset task id: {}", task_plan.id));
+        }
+        if let Some(scene) = task_plan.scene_ref.as_deref() {
+            if !scene_files_by_ref.contains_key(scene)
+                && !scene_files.iter().any(|file| file == scene)
+            {
+                return Err(format!(
+                    "$.assetPlan[{index}].sceneRef: references unknown scene: {scene}"
+                ));
+            }
         }
         tasks.push(AssetTask {
             id: task_plan.id.clone(),
@@ -428,6 +437,28 @@ mod tests {
         .unwrap();
         let error = load_queue(&project).unwrap_err();
         assert!(error.contains("$.tasks[1].id"));
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn derive_rejects_unknown_plan_scene_reference_with_field_path() {
+        let project = temp_project("unknown_plan_scene_ref");
+        let plan = StoryPlan {
+            asset_plan: vec![crate::story_plan::AssetTaskPlan {
+                id: "bg_missing".into(),
+                kind: "background".into(),
+                target_stem: "bg_missing".into(),
+                prompt: "Missing".into(),
+                scene_ref: Some("missing".into()),
+                character_ref: None,
+                emotion: None,
+                status: "pending".into(),
+            }],
+            scenes: vec!["start.txt".into()],
+            ..StoryPlan::new("brief")
+        };
+        let error = derive_queue(&project, "run", &plan).unwrap_err();
+        assert!(error.contains("$.assetPlan[0].sceneRef"));
         let _ = fs::remove_dir_all(project);
     }
 

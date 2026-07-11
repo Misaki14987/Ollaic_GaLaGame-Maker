@@ -1,6 +1,6 @@
 # Agent Flow Data Contracts
 
-Agent Flow only passes typed, validated values between nodes. LLM text is not a
+Agent Flow only passes typed, validated values between Flow Steps. LLM text is not a
 handoff format: `generate_structured_validated` extracts JSON, deserializes it,
 normalizes compatible historical variants, and performs semantic validation.
 Syntax or semantic failure triggers one repair request containing the original
@@ -10,9 +10,9 @@ update `StoryPlan`.
 Contract errors use JSONPath, for example
 `contract violation at $.sceneDrafts[0].beats[2].speaker: references unknown character`.
 
-## Node Contracts
+## Step Contracts
 
-| Node | Input source | Typed output | Persisted handoff |
+| Flow Step | Input source | Typed output | Persisted handoff |
 | --- | --- | --- | --- |
 | Plan | Production Brief, step instruction | `{ synopsis: string }` | `StoryPlan.synopsis` |
 | Memory | brief, synopsis, instruction | `{ worldbook: string, glossary: Record<string,string> }` | `StoryPlan.memory` |
@@ -101,6 +101,6 @@ or `-`; scene files are single safe path components ending in `.txt`.
 `StoryPlan` and `AssetQueue` both use schema version `1`. A missing version is
 treated as version 1 for pre-version files; unknown future versions fail at
 `$.version`. Both stores validate before crash-safe save and validate every
-primary/backup candidate after structured deserialization. Cross-node errors
+primary/backup candidate after structured deserialization. Cross-step errors
 retain indexed paths such as `$.scenePlans[0].chapterId` and
 `$.assetPlan[3].characterRef`, so a resumed run cannot silently lose a reference.

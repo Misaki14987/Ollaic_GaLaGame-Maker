@@ -326,25 +326,25 @@ fn validate_drafts(
                         .map(move |(cue_index, cue)| (beat_index, cue_index, cue))
                 })
         {
-            let reason = if !character_ids.contains(cue.character_id.as_str()) {
-                Some("unknown characterId")
+            let error = if !character_ids.contains(cue.character_id.as_str()) {
+                Some(("characterId", "references unknown character"))
             } else if !crate::story_plan::types::is_webgal_flag_value(&cue.character_id) {
-                Some("characterId is unsafe for WebGAL")
+                Some(("characterId", "must be safe for WebGAL"))
             } else if cue.action == crate::story_plan::FigureCueAction::Show
                 && cue.position.is_none()
             {
-                Some("show cue has no position")
+                Some(("position", "required for show cues"))
             } else if cue.action == crate::story_plan::FigureCueAction::Show
                 && !crate::story_plan::types::is_webgal_flag_value(&cue.emotion)
             {
-                Some("show cue has an invalid emotion")
+                Some(("emotion", "must be a safe label for show cues"))
             } else {
                 None
             };
-            if let Some(reason) = reason {
+            if let Some((field, reason)) = error {
                 return Err(contract_error(
                     format!(
-                        "$.sceneDrafts[{draft_index}].beats[{beat_index}].figureCues[{cue_index}]"
+                        "$.sceneDrafts[{draft_index}].beats[{beat_index}].figureCues[{cue_index}].{field}"
                     ),
                     reason,
                 ));
@@ -524,5 +524,43 @@ mod tests {
         }];
 
         validate_drafts(&plans, &characters, &drafts).unwrap();
+    }
+
+    #[test]
+    fn invalid_figure_cue_reports_exact_field_path() {
+        let characters: Vec<crate::characters::types::Character> =
+            serde_json::from_value(serde_json::json!([{"id":"alice","name":"Alice"}])).unwrap();
+        let plans = vec![ScenePlan {
+            id: "opening".into(),
+            file: "start.txt".into(),
+            chapter_id: "ch1".into(),
+            title: "Opening".into(),
+            summary: "Summary".into(),
+            character_ids: vec!["alice".into()],
+        }];
+        let mut beats = (0..8)
+            .map(|index| DialogueBeat {
+                speaker: None,
+                text: format!("Beat {index}"),
+                figure_cues: Vec::new(),
+            })
+            .collect::<Vec<_>>();
+        beats[0].figure_cues.push(FigureCue {
+            action: FigureCueAction::Show,
+            character_id: "alice".into(),
+            position: None,
+            emotion: "default".into(),
+        });
+        let drafts = vec![SceneDraft {
+            scene_id: "opening".into(),
+            title: "Opening".into(),
+            stage_managed: true,
+            beats,
+        }];
+
+        let error = validate_drafts(&plans, &characters, &drafts).unwrap_err();
+        assert!(error
+            .0
+            .contains("$.sceneDrafts[0].beats[0].figureCues[0].position"));
     }
 }

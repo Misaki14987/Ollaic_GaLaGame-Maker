@@ -60,6 +60,19 @@ pub fn remove_plan(project_path: &Path) -> Result<(), PlanError> {
 }
 
 fn migrate_legacy_plan(plan: &mut StoryPlan) {
+    for chapter in &mut plan.chapters {
+        if chapter.summary.trim().is_empty() {
+            chapter.summary = format!(
+                "章节“{}”围绕故事主线继续推进：{}",
+                chapter.title, plan.synopsis
+            );
+        }
+    }
+    for scene in &mut plan.scene_plans {
+        if scene.summary.trim().is_empty() {
+            scene.summary = format!("围绕“{}”展开，推进主线冲突与人物关系。", scene.title);
+        }
+    }
     for character in &mut plan.characters {
         character.relations.retain(|relation| {
             !relation.target_id.trim().is_empty() && !relation.relation_type.trim().is_empty()
@@ -93,6 +106,20 @@ pub fn validate(plan: &StoryPlan) -> Result<(), PlanError> {
     }
     if plan.prompt.trim().is_empty() && plan.synopsis.trim().is_empty() {
         return Err(PlanError::EmptyPlan);
+    }
+    if !plan.memory.worldbook.trim().is_empty() || !plan.memory.glossary.is_empty() {
+        required("$.memory.worldbook", &plan.memory.worldbook)?;
+        if plan.memory.glossary.len() < 4 {
+            return invalid("$.memory.glossary", "must contain at least 4 terms");
+        }
+        for (term, definition) in &plan.memory.glossary {
+            if term.trim().is_empty() || definition.trim().is_empty() {
+                return invalid(
+                    format!("$.memory.glossary.{term}"),
+                    "term and definition must not be empty",
+                );
+            }
+        }
     }
     let mut seen: HashSet<&str> = HashSet::new();
     for (index, chapter) in plan.chapters.iter().enumerate() {
