@@ -57,6 +57,10 @@ impl Agent for DialogistAgent {
                 ctx.allow_local_fallback,
             ).await? {
                 fill_missing_titles(ctx.scene_plans, &mut routed.value.scene_drafts);
+                normalize_figure_cue_character_ids(
+                    ctx.characters,
+                    &mut routed.value.scene_drafts,
+                );
                 for draft in &mut routed.value.scene_drafts {
                     draft.stage_managed = true;
                 }
@@ -81,6 +85,28 @@ impl Agent for DialogistAgent {
             }
             .local_fallback())
         })
+    }
+}
+
+fn normalize_figure_cue_character_ids(
+    characters: &[crate::characters::types::Character],
+    drafts: &mut [SceneDraft],
+) {
+    for cue in drafts
+        .iter_mut()
+        .flat_map(|draft| &mut draft.beats)
+        .flat_map(|beat| &mut beat.figure_cues)
+    {
+        if let Some(character) = characters.iter().find(|character| {
+            character.id == cue.character_id
+                || character.name == cue.character_id
+                || character
+                    .aliases
+                    .iter()
+                    .any(|alias| alias == &cue.character_id)
+        }) {
+            cue.character_id.clone_from(&character.id);
+        }
     }
 }
 
@@ -246,27 +272,38 @@ fn validate_drafts(
         .map(|character| character.id.as_str())
         .collect();
     for draft in drafts {
-        let scene_cast: std::collections::HashSet<&str> = plans
+        let mut scene_cast: std::collections::HashSet<&str> = plans
             .iter()
             .find(|plan| plan.id == draft.scene_id)
             .map(|plan| plan.character_ids.iter().map(String::as_str).collect())
             .unwrap_or_default();
-        if draft
-            .beats
-            .iter()
-            .flat_map(|beat| &beat.figure_cues)
-            .any(|cue| {
-                !character_ids.contains(cue.character_id.as_str())
-                    || !scene_cast.contains(cue.character_id.as_str())
-                    || !crate::story_plan::types::is_webgal_flag_value(&cue.character_id)
-                    || (cue.action == crate::story_plan::FigureCueAction::Show
-                        && (cue.position.is_none()
-                            || !crate::story_plan::types::is_webgal_flag_value(&cue.emotion)))
-            })
-        {
-            return Err(AgentError(
-                "Dialogist returned an invalid Figure Cue".to_string(),
-            ));
+        if scene_cast.is_empty() {
+            scene_cast.clone_from(&character_ids);
+        }
+        for cue in draft.beats.iter().flat_map(|beat| &beat.figure_cues) {
+            let reason = if !character_ids.contains(cue.character_id.as_str()) {
+                Some("unknown characterId")
+            } else if !scene_cast.contains(cue.character_id.as_str()) {
+                Some("character is outside the scene cast")
+            } else if !crate::story_plan::types::is_webgal_flag_value(&cue.character_id) {
+                Some("characterId is unsafe for WebGAL")
+            } else if cue.action == crate::story_plan::FigureCueAction::Show
+                && cue.position.is_none()
+            {
+                Some("show cue has no position")
+            } else if cue.action == crate::story_plan::FigureCueAction::Show
+                && !crate::story_plan::types::is_webgal_flag_value(&cue.emotion)
+            {
+                Some("show cue has an invalid emotion")
+            } else {
+                None
+            };
+            if let Some(reason) = reason {
+                return Err(AgentError(format!(
+                    "Dialogist returned an invalid Figure Cue in scene {} for {}: {}",
+                    draft.scene_id, cue.character_id, reason
+                )));
+            }
         }
     }
     Ok(())
@@ -325,5 +362,46 @@ mod tests {
             .beats
             .iter()
             .any(|beat| beat.speaker.as_deref() == Some("林夏")));
+    }
+
+    #[test]
+    fn figure_cue_character_name_normalizes_to_stable_id() {
+        let characters = vec![serde_json::from_value(serde_json::json!({
+            "id": "ailla", "name": "艾拉", "aliases": ["Aila"]
+        }))
+        .unwrap()];
+        let mut drafts = vec![SceneDraft {
+            scene_id: "opening".into(),
+            title: "Opening".into(),
+            stage_managed: true,
+            beats: vec![DialogueBeat {
+                speaker: Some("艾拉".into()),
+                text: "走吧。".into(),
+                figure_cues: vec![FigureCue {
+                    action: FigureCueAction::Show,
+                    character_id: "艾拉".into(),
+                    position: Some(FigureStagePosition::Left),
+                    emotion: "default".into(),
+                }],
+            }],
+        }];
+
+        normalize_figure_cue_character_ids(&characters, &mut drafts);
+
+        assert_eq!(drafts[0].beats[0].figure_cues[0].character_id, "ailla");
+        drafts[0].beats.extend((0..3).map(|index| DialogueBeat {
+            speaker: None,
+            text: format!("Narration {index}"),
+            figure_cues: Vec::new(),
+        }));
+        let plans = vec![ScenePlan {
+            id: "opening".into(),
+            file: "start.txt".into(),
+            chapter_id: "ch1".into(),
+            title: "Opening".into(),
+            summary: String::new(),
+            character_ids: Vec::new(),
+        }];
+        validate_drafts(&plans, &characters, &drafts).unwrap();
     }
 }
