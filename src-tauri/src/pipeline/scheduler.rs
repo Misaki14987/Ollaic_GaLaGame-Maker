@@ -92,11 +92,13 @@ enum Action {
 /// The testable orchestrator core.
 pub struct Pipeline {
     agents: AgentRegistry,
+    figure_matting_model: Result<std::path::PathBuf, String>,
 }
 
 struct ConfiguredAssetGenerator {
     local_fallback: bool,
     cancelled: Arc<AtomicBool>,
+    figure_matting_model: Result<std::path::PathBuf, String>,
 }
 
 impl AssetGenerator for ConfiguredAssetGenerator {
@@ -110,7 +112,7 @@ impl AssetGenerator for ConfiguredAssetGenerator {
             if self.cancelled.load(Ordering::SeqCst) {
                 return Err(crate::asset_queue::scheduler::ASSET_QUEUE_CANCELLED.to_string());
             }
-            let result = generate_configured_asset(task).await;
+            let result = generate_configured_asset(task, &self.figure_matting_model).await;
             if self.cancelled.load(Ordering::SeqCst) {
                 return Err(crate::asset_queue::scheduler::ASSET_QUEUE_CANCELLED.to_string());
             }
@@ -123,7 +125,10 @@ impl AssetGenerator for ConfiguredAssetGenerator {
     }
 }
 
-async fn generate_configured_asset(task: &AssetTask) -> Result<GeneratedArtifact, String> {
+async fn generate_configured_asset(
+    task: &AssetTask,
+    figure_matting_model: &Result<std::path::PathBuf, String>,
+) -> Result<GeneratedArtifact, String> {
     let media = match task.kind {
         AssetKind::Background | AssetKind::Figure => {
             let config = crate::ai::config::load_image_config();
@@ -160,11 +165,23 @@ async fn generate_configured_asset(task: &AssetTask) -> Result<GeneratedArtifact
         .split_once(',')
         .map(|(_, payload)| payload)
         .unwrap_or(media.base64_data.as_str());
-    let bytes = base64::engine::general_purpose::STANDARD
+    let mut bytes = base64::engine::general_purpose::STANDARD
         .decode(encoded.trim())
         .map_err(|error| format!("failed to decode generated media: {error}"))?;
+    let mut extension = media.extension;
+    if task.kind == AssetKind::Figure {
+        let model_path = figure_matting_model.clone()?;
+        bytes = tokio::task::spawn_blocking(move || {
+            matte_figure_bytes(bytes, |source| {
+                crate::matting::commands::matte_image(&model_path, source)
+            })
+        })
+        .await
+        .map_err(|error| format!("figure matting task failed: {error}"))??;
+        extension = "png".to_string();
+    }
     Ok(GeneratedArtifact {
-        extension: media.extension,
+        extension,
         bytes,
         used_local_fallback: false,
     })
@@ -179,8 +196,50 @@ fn configured_model(value: &str) -> Result<String, String> {
         .ok_or_else(|| "asset provider has no configured model".to_string())
 }
 
+fn matte_figure_bytes(
+    bytes: Vec<u8>,
+    matte: impl FnOnce(&[u8]) -> Result<Vec<u8>, String>,
+) -> Result<Vec<u8>, String> {
+    matte(&bytes)
+}
+
+#[cfg(test)]
+mod figure_postprocess_tests {
+    use super::matte_figure_bytes;
+
+    #[test]
+    fn generated_figure_uses_matting_output() {
+        let output = matte_figure_bytes(b"opaque source".to_vec(), |source| {
+            assert_eq!(source, b"opaque source");
+            Ok(b"transparent png".to_vec())
+        })
+        .unwrap();
+        assert_eq!(output, b"transparent png");
+        assert_eq!(
+            matte_figure_bytes(b"opaque source".to_vec(), |_| Err("matting failed".into()))
+                .unwrap_err(),
+            "matting failed"
+        );
+    }
+}
+
 fn local_placeholder(kind: AssetKind) -> GeneratedArtifact {
-    if matches!(kind, AssetKind::Background | AssetKind::Figure) {
+    if kind == AssetKind::Figure {
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            1,
+            1,
+            image::Rgba([0, 0, 0, 0]),
+        ))
+        .write_to(&mut bytes, image::ImageFormat::Png)
+        .expect("embedded transparent placeholder is encodable");
+        return GeneratedArtifact {
+            extension: "png".to_string(),
+            bytes: bytes.into_inner(),
+            used_local_fallback: true,
+        };
+    }
+    if kind == AssetKind::Background {
         let bytes = base64::engine::general_purpose::STANDARD
             .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+XfP7WQAAAABJRU5ErkJggg==")
             .expect("embedded placeholder png is valid");
@@ -201,11 +260,23 @@ fn local_placeholder(kind: AssetKind) -> GeneratedArtifact {
 
 impl Pipeline {
     pub fn new(agents: AgentRegistry) -> Self {
-        Pipeline { agents }
+        Pipeline {
+            agents,
+            figure_matting_model: Err("figure matting model is not configured".to_string()),
+        }
     }
 
     pub fn with_default_agents() -> Self {
         Self::new(AgentRegistry::with_defaults())
+    }
+
+    pub fn with_default_agents_and_matting(
+        figure_matting_model: Result<std::path::PathBuf, String>,
+    ) -> Self {
+        Self {
+            agents: AgentRegistry::with_defaults(),
+            figure_matting_model,
+        }
     }
 
     /// Create + persist a run, emit `RunStarted`, return a handle set to
@@ -701,6 +772,7 @@ impl Pipeline {
             let generator = Arc::new(ConfiguredAssetGenerator {
                 local_fallback: allow_local_fallback,
                 cancelled: handle.cancelled.clone(),
+                figure_matting_model: self.figure_matting_model.clone(),
             });
             match crate::asset_queue::run_queue_cancellable(
                 project_path,

@@ -20,6 +20,16 @@ The authoring behaviour for a scene: inserting, removing, reordering, connecting
 
 A media file owned by a project and stored in an appropriate `game/` category directory, such as `background`, `figure`, `bgm`, `sfx`, `vocal`, or `video`.
 
+### Figure Asset
+
+A transparent character performance image that Scene Staging can show, hide, position, and change during a Scene. It is distinct from a full-frame character illustration or CG.
+_Avoid_: Character image, portrait, centered illustration
+
+### Scene Staging
+
+The beat-level performance plan that decides which Characters are visible and when they enter, leave, move, or change expression. A Scene's participant list is only the available cast, not a requirement to show everyone.
+_Avoid_: Automatic figure binding, fixed left-right layout
+
 ### Asset Reference
 
 A semantic reference from a Scene command to an Asset file. It is discovered from parsed Scene meaning rather than arbitrary text matches, and follows its Asset when the Asset is renamed.

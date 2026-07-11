@@ -19,7 +19,7 @@
 
 | 模块 | 状态 | 说明 |
 |------|------|------|
-| 端到端 Agent 形态 | **P2 已完成** | 内容 Flow 后接 AssetTaskQueue，已实现分类限流、自动重试、Artifact 保留和 Scene / Character 自动绑定；P3 继续按 [`v2-agent-pipeline.md`](./v2-agent-pipeline.md) 推进 |
+| 端到端 Agent 形态 | **P2 已完成** | 内容 Flow 后接 AssetTaskQueue，已实现分类限流、自动重试、Artifact 保留、透明 Figure 晋升和由 Agent 决策的多角色 Scene Staging；P3 继续按 [`v2-agent-pipeline.md`](./v2-agent-pipeline.md) 推进 |
 
 ## 模块索引
 

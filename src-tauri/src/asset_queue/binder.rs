@@ -42,6 +42,9 @@ pub fn bind_asset(project_path: &Path, task: &AssetTask) -> Result<String, Strin
     let snapshots = snapshot_binding_files(project_path, &target)?;
     let bytes = fs::read(&artifact)
         .map_err(|error| format!("failed to read artifact {}: {error}", artifact.display()))?;
+    if task.kind == AssetKind::Figure {
+        validate_transparent_figure(extension, &bytes)?;
+    }
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent)
             .map_err(|error| format!("failed to create asset directory: {error}"))?;
@@ -75,6 +78,17 @@ pub fn rebind_asset(project_path: &Path, task: &AssetTask) -> Result<String, Str
     if !target.is_file() {
         return Err(format!("promoted asset is missing: {}", target.display()));
     }
+    if task.kind == AssetKind::Figure {
+        let bytes = fs::read(&target)
+            .map_err(|error| format!("failed to read promoted figure: {error}"))?;
+        validate_transparent_figure(
+            target
+                .extension()
+                .and_then(|value| value.to_str())
+                .unwrap_or(""),
+            &bytes,
+        )?;
+    }
     let snapshots = snapshot_binding_files(project_path, &target)?;
     if let Err(error) = apply_binding(project_path, task, filename) {
         return match restore_binding_files(snapshots) {
@@ -107,6 +121,19 @@ fn validate_stem(value: &str) -> Result<(), String> {
             .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
     {
         return Err(format!("invalid asset target stem: {value}"));
+    }
+    Ok(())
+}
+
+fn validate_transparent_figure(extension: &str, bytes: &[u8]) -> Result<(), String> {
+    if !extension.eq_ignore_ascii_case("png") {
+        return Err("figure artifact must be a transparent PNG".to_string());
+    }
+    let image = image::load_from_memory_with_format(bytes, image::ImageFormat::Png)
+        .map_err(|error| format!("invalid figure PNG: {error}"))?
+        .to_rgba8();
+    if !image.pixels().any(|pixel| pixel[3] < u8::MAX) {
+        return Err("figure artifact has no transparent pixels".to_string());
     }
     Ok(())
 }
@@ -235,7 +262,7 @@ fn asset_node(task_id: &str, kind: CommandType, filename: &str) -> WebGalNode {
     node
 }
 
-fn task_marker(task_id: &str) -> String {
+pub(crate) fn task_marker(task_id: &str) -> String {
     format!("ollaic-asset-task:{task_id}")
 }
 
@@ -329,10 +356,16 @@ fn bind_scene_command(
         existing.asset = Some(filename.to_string());
         nodes.insert(existing_index, marker_node(&task.id));
     } else {
-        let index = nodes
+        let mut index = nodes
             .iter()
             .position(|node| !matches!(node.cmd_type, CommandType::Comment))
             .unwrap_or(nodes.len());
+        while index > 0
+            && nodes[index - 1].cmd_type == CommandType::Comment
+            && nodes[index - 1].content.starts_with("ollaic-asset-task:")
+        {
+            index -= 1;
+        }
         nodes.splice(
             index..index,
             [marker_node(&task.id), asset_node(&task.id, kind, filename)],
@@ -357,16 +390,17 @@ fn bind_figure(project_path: &Path, task: &AssetTask, filename: &str) -> Result<
         .find(|character| character.id == character_ref || character.name == character_ref)
         .ok_or_else(|| format!("character not found: {character_ref}"))?;
     let character_name = character.name.clone();
+    let emotion = task.emotion.as_deref().unwrap_or("default");
     if let Some(sprite) = character
         .sprites
         .iter_mut()
-        .find(|sprite| sprite.emotion == "default")
+        .find(|sprite| sprite.emotion == emotion)
     {
         sprite.file = filename.to_string();
         sprite.prompt = Some(task.prompt.clone());
     } else {
         character.sprites.push(CharacterSprite {
-            emotion: "default".to_string(),
+            emotion: emotion.to_string(),
             file: filename.to_string(),
             prompt: Some(task.prompt.clone()),
         });
@@ -383,6 +417,37 @@ fn bind_figure(project_path: &Path, task: &AssetTask, filename: &str) -> Result<
     };
     for path in paths {
         let mut nodes = read_scene(&path)?;
+        let stage_managed = nodes.iter().any(|node| {
+            node.cmd_type == CommandType::Comment && node.content == "Ollaic Scene Staging"
+        });
+        if stage_managed {
+            let mut changed = false;
+            let marker = task_marker(&task.id);
+            for index in 0..nodes.len().saturating_sub(1) {
+                if nodes[index].cmd_type != CommandType::Comment
+                    || nodes[index].content != marker
+                    || nodes[index + 1].cmd_type != CommandType::ChangeFigure
+                {
+                    continue;
+                }
+                let node = &mut nodes[index + 1];
+                node.content = filename.to_string();
+                node.asset = Some(filename.to_string());
+                node.figure_character = Some(character_ref.to_string());
+                node.figure_emotion = Some(emotion.to_string());
+                changed = true;
+            }
+            if changed {
+                write_scene(&path, &nodes)?;
+            } else if explicit_scene {
+                return Err(format!(
+                    "staged figure marker not found for task {} in {}",
+                    task.id,
+                    path.display()
+                ));
+            }
+            continue;
+        }
         let dialogue = nodes.iter().position(|node| {
             node.cmd_type == CommandType::Dialogue
                 && node.character.as_deref() == Some(character_name.as_str())
@@ -493,23 +558,46 @@ mod tests {
     use super::*;
     use crate::asset_queue::types::{AssetAttempt, AssetTaskStatus};
 
+    fn png(alpha: u8) -> Vec<u8> {
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            1,
+            1,
+            image::Rgba([255, 255, 255, alpha]),
+        ))
+        .write_to(&mut bytes, image::ImageFormat::Png)
+        .unwrap();
+        bytes.into_inner()
+    }
+
+    #[test]
+    fn figure_promotion_requires_transparent_png_pixels() {
+        assert!(validate_transparent_figure("png", &png(0)).is_ok());
+        assert!(validate_transparent_figure("png", &png(255)).is_err());
+        assert!(validate_transparent_figure("webp", &png(0)).is_err());
+    }
+
     #[test]
     fn figure_without_scene_ref_binds_every_scene_containing_character() {
         let project = std::env::temp_dir().join("ollaic_figure_bind_all");
         let _ = fs::remove_dir_all(&project);
         fs::create_dir_all(project.join("game/scene")).unwrap();
         fs::create_dir_all(project.join("game/config")).unwrap();
-        fs::write(project.join("game/scene/start.txt"), "Alice:one;\n").unwrap();
+        fs::write(
+            project.join("game/scene/start.txt"),
+            "; Ollaic Scene Staging\n; ollaic-asset-task:figure_alice\nchangeFigure:none -id=alice -figureCharacter=alice -figureEmotion=default -right;\nAlice:one;\nBob:reply;\n",
+        )
+        .unwrap();
         fs::write(project.join("game/scene/route.txt"), "Alice:two;\n").unwrap();
         fs::write(project.join("game/scene/other.txt"), "Bob:three;\n").unwrap();
         fs::write(
             project.join("game/config/characters.json"),
-            r#"{"version":1,"characters":[{"id":"alice","name":"Alice"}]}"#,
+            r#"{"version":1,"characters":[{"id":"alice","name":"Alice"},{"id":"bob","name":"Bob"}]}"#,
         )
         .unwrap();
         let artifact = project.join(".ollaic/artifacts/assets/figure_alice/1.png");
         fs::create_dir_all(artifact.parent().unwrap()).unwrap();
-        fs::write(&artifact, b"image").unwrap();
+        fs::write(&artifact, png(0)).unwrap();
         let task = AssetTask {
             id: "figure_alice".into(),
             kind: AssetKind::Figure,
@@ -517,6 +605,7 @@ mod tests {
             prompt: "Alice".into(),
             scene_ref: None,
             character_ref: Some("alice".into()),
+            emotion: Some("default".into()),
             dialogue_index: None,
             text: None,
             status: AssetTaskStatus::Running,
@@ -533,14 +622,23 @@ mod tests {
             used_local_fallback: false,
         };
         bind_asset(&project, &task).unwrap();
-        for scene in ["start.txt", "route.txt"] {
-            assert!(fs::read_to_string(project.join("game/scene").join(scene))
-                .unwrap()
-                .contains("changeFigure:alice_default.png;"));
-        }
-        assert!(!fs::read_to_string(project.join("game/scene/other.txt"))
-            .unwrap()
-            .contains("changeFigure:"));
+        let bob_artifact = project.join(".ollaic/artifacts/assets/figure_bob/1.png");
+        fs::create_dir_all(bob_artifact.parent().unwrap()).unwrap();
+        fs::write(&bob_artifact, png(0)).unwrap();
+        let mut bob = task.clone();
+        bob.id = "figure_bob".into();
+        bob.target_stem = "bob_default".into();
+        bob.character_ref = Some("bob".into());
+        bob.attempts[0].artifact = Some(bob_artifact.to_string_lossy().into_owned());
+        bind_asset(&project, &bob).unwrap();
+
+        let start = fs::read_to_string(project.join("game/scene/start.txt")).unwrap();
+        assert!(start.contains("changeFigure:alice_default.png -right"));
+        assert!(!start.contains("changeFigure:bob_default.png"));
+        let route = fs::read_to_string(project.join("game/scene/route.txt")).unwrap();
+        assert!(route.contains("changeFigure:alice_default.png;"));
+        let other = fs::read_to_string(project.join("game/scene/other.txt")).unwrap();
+        assert!(other.contains("changeFigure:bob_default.png;"));
         let _ = fs::remove_dir_all(project);
     }
 
@@ -561,6 +659,7 @@ mod tests {
             prompt: "background".into(),
             scene_ref: Some("../../outside".into()),
             character_ref: None,
+            emotion: None,
             dialogue_index: None,
             text: None,
             status: AssetTaskStatus::Running,
@@ -613,6 +712,7 @@ mod tests {
                     prompt: name.into(),
                     scene_ref: Some("start.txt".into()),
                     character_ref: None,
+                    emotion: None,
                     dialogue_index: None,
                     text: None,
                     status: AssetTaskStatus::Running,

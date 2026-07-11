@@ -150,6 +150,26 @@ pub fn validate(plan: &StoryPlan) -> Result<(), PlanError> {
                 draft.scene_id
             )));
         }
+        let scene_cast: HashSet<&str> = plan
+            .scene_plans
+            .iter()
+            .find(|scene| scene.id == draft.scene_id)
+            .map(|scene| scene.character_ids.iter().map(String::as_str).collect())
+            .unwrap_or_default();
+        for cue in draft.beats.iter().flat_map(|beat| &beat.figure_cues) {
+            if !character_ids.contains(cue.character_id.as_str())
+                || !scene_cast.contains(cue.character_id.as_str())
+                || !crate::story_plan::types::is_webgal_flag_value(&cue.character_id)
+                || (cue.action == crate::story_plan::FigureCueAction::Show
+                    && (cue.position.is_none()
+                        || !crate::story_plan::types::is_webgal_flag_value(&cue.emotion)))
+            {
+                return Err(PlanError::InvalidReference(format!(
+                    "invalid figure cue in scene {} for character {}",
+                    draft.scene_id, cue.character_id
+                )));
+            }
+        }
     }
     let mut asset_ids: HashSet<&str> = HashSet::new();
     for asset in &plan.asset_plan {
@@ -169,6 +189,19 @@ pub fn validate(plan: &StoryPlan) -> Result<(), PlanError> {
         {
             return Err(PlanError::InvalidReference(format!(
                 "invalid asset task: {}",
+                asset.id
+            )));
+        }
+        if (asset.kind == "figure"
+            && (asset.character_ref.as_deref().is_none_or(str::is_empty)
+                || asset
+                    .emotion
+                    .as_deref()
+                    .is_some_and(|value| !crate::story_plan::types::is_webgal_flag_value(value))))
+            || (asset.kind != "figure" && asset.emotion.is_some())
+        {
+            return Err(PlanError::InvalidReference(format!(
+                "invalid figure variant task: {}",
                 asset.id
             )));
         }

@@ -143,7 +143,7 @@ fn main() {
                     }
                 }
             });
-            app.manage(Orchestrator::new());
+            app.manage(Orchestrator::new(app.handle()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

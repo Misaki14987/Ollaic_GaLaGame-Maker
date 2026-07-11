@@ -160,6 +160,7 @@ mod tests {
                 prompt: "background".into(),
                 scene_ref: Some("start.txt".into()),
                 character_ref: None,
+                emotion: None,
                 dialogue_index: None,
                 text: None,
                 status: AssetTaskStatus::Failed,

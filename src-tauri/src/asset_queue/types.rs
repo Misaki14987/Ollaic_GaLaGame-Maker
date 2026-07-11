@@ -67,6 +67,8 @@ pub struct AssetTask {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub character_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emotion: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dialogue_index: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,

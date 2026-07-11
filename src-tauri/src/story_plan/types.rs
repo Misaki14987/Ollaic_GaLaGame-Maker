@@ -124,6 +124,8 @@ pub struct SceneDraft {
     #[serde(default)]
     pub title: String,
     #[serde(default)]
+    pub stage_managed: bool,
+    #[serde(default)]
     pub beats: Vec<DialogueBeat>,
 }
 
@@ -133,6 +135,41 @@ pub struct DialogueBeat {
     #[serde(default)]
     pub speaker: Option<String>,
     pub text: String,
+    #[serde(default)]
+    pub figure_cues: Vec<FigureCue>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum FigureCueAction {
+    Show,
+    Hide,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum FigureStagePosition {
+    Left,
+    Center,
+    Right,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FigureCue {
+    pub action: FigureCueAction,
+    pub character_id: String,
+    #[serde(default)]
+    pub position: Option<FigureStagePosition>,
+    #[serde(default)]
+    pub emotion: String,
+}
+
+pub(crate) fn is_webgal_flag_value(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -147,6 +184,8 @@ pub struct AssetTaskPlan {
     pub scene_ref: Option<String>,
     #[serde(default)]
     pub character_ref: Option<String>,
+    #[serde(default)]
+    pub emotion: Option<String>,
     #[serde(default = "pending_status")]
     pub status: String,
 }
