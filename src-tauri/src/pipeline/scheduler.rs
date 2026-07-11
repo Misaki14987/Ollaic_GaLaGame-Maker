@@ -1069,7 +1069,7 @@ fn apply_output(plan: &mut StoryPlan, out: &AgentOutput) {
         plan.scenes.clear();
     }
     if let Some(drafts) = &out.scene_drafts {
-        fill_missing_scene_casts_from_drafts(&mut plan.scene_plans, drafts);
+        merge_scene_casts_from_drafts(&mut plan.scene_plans, drafts);
         plan.scene_drafts = drafts.clone();
         plan.asset_plan.clear();
         plan.scenes.clear();
@@ -1131,14 +1131,11 @@ fn matches_character_reference(reference: &str, candidate: &str) -> bool {
     reference == candidate || reference.eq_ignore_ascii_case(candidate)
 }
 
-fn fill_missing_scene_casts_from_drafts(
+fn merge_scene_casts_from_drafts(
     scenes: &mut [crate::story_plan::ScenePlan],
     drafts: &[crate::story_plan::SceneDraft],
 ) {
-    for scene in scenes
-        .iter_mut()
-        .filter(|scene| scene.character_ids.is_empty())
-    {
+    for scene in scenes {
         let Some(draft) = drafts.iter().find(|draft| draft.scene_id == scene.id) else {
             continue;
         };
@@ -1258,7 +1255,7 @@ mod character_cast_tests {
     }
 
     #[test]
-    fn dialogist_output_repairs_legacy_empty_scene_cast() {
+    fn dialogist_output_merges_staged_character_into_scene_cast() {
         let mut plan = StoryPlan::new("test");
         plan.scene_plans = vec![crate::story_plan::ScenePlan {
             id: "opening".into(),
@@ -1266,14 +1263,14 @@ mod character_cast_tests {
             chapter_id: "ch1".into(),
             title: "Opening".into(),
             summary: String::new(),
-            character_ids: Vec::new(),
+            character_ids: vec!["erin".into()],
         }];
         let draft = serde_json::from_value(serde_json::json!({
             "sceneId": "opening",
             "beats": [{
                 "text": "艾拉走入画面。",
                 "figureCues": [{
-                    "action": "show", "characterId": "ailla",
+                    "action": "show", "characterId": "viper",
                     "position": "left", "emotion": "default"
                 }]
             }]
@@ -1288,7 +1285,7 @@ mod character_cast_tests {
             },
         );
 
-        assert_eq!(plan.scene_plans[0].character_ids, vec!["ailla"]);
+        assert_eq!(plan.scene_plans[0].character_ids, vec!["erin", "viper"]);
     }
 }
 

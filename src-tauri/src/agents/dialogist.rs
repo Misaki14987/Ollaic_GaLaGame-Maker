@@ -48,7 +48,7 @@ impl Agent for DialogistAgent {
                 "scenePlans": ctx.scene_plans,
                 "branches": ctx.branches,
                 "stepInstruction": ctx.instruction,
-                "requirements": "每个 scenePlan 对应一个 sceneDraft，sceneId 必须一致；每场至少 8 个 beat。speaker 为角色 name 或 null（旁白），text 不含 WebGAL 命令。必须用 figureCues 显式决定镜头需要的角色何时 show/hide；show 必须给候选 characterId、left/center/right position 和安全英文 emotion 标签，hide 只需 characterId。不要把 scenePlan 的参与者全部默认上屏。对白要推进冲突、体现人物口吻。"
+                "requirements": "每个 scenePlan 对应一个 sceneDraft，sceneId 必须一致；每场至少 8 个 beat。speaker 为角色 name 或 null（旁白），text 不含 WebGAL 命令。必须用 figureCues 显式决定镜头需要的角色何时 show/hide；show 必须给项目已有 characterId、left/center/right position 和安全英文 emotion 标签，hide 只需 characterId。可根据演出需要补充 scenePlan 未列出的已有角色，但不要把全部角色默认上屏。对白要推进冲突、体现人物口吻。"
             });
             if let Some(mut routed) = generate_structured::<DialogistResponse>(
                 "Dialogist / 场景对白",
@@ -272,19 +272,9 @@ fn validate_drafts(
         .map(|character| character.id.as_str())
         .collect();
     for draft in drafts {
-        let mut scene_cast: std::collections::HashSet<&str> = plans
-            .iter()
-            .find(|plan| plan.id == draft.scene_id)
-            .map(|plan| plan.character_ids.iter().map(String::as_str).collect())
-            .unwrap_or_default();
-        if scene_cast.is_empty() {
-            scene_cast.clone_from(&character_ids);
-        }
         for cue in draft.beats.iter().flat_map(|beat| &beat.figure_cues) {
             let reason = if !character_ids.contains(cue.character_id.as_str()) {
                 Some("unknown characterId")
-            } else if !scene_cast.contains(cue.character_id.as_str()) {
-                Some("character is outside the scene cast")
             } else if !crate::story_plan::types::is_webgal_flag_value(&cue.character_id) {
                 Some("characterId is unsafe for WebGAL")
             } else if cue.action == crate::story_plan::FigureCueAction::Show
@@ -402,6 +392,47 @@ mod tests {
             summary: String::new(),
             character_ids: Vec::new(),
         }];
+        validate_drafts(&plans, &characters, &drafts).unwrap();
+    }
+
+    #[test]
+    fn known_character_cue_can_expand_planned_scene_cast() {
+        let characters: Vec<crate::characters::types::Character> =
+            serde_json::from_value(serde_json::json!([
+                {"id":"erin","name":"艾琳"},
+                {"id":"viper","name":"毒蛇"}
+            ]))
+            .unwrap();
+        let plans = vec![ScenePlan {
+            id: "ambush".into(),
+            file: "ambush.txt".into(),
+            chapter_id: "ch2".into(),
+            title: "Ambush".into(),
+            summary: String::new(),
+            character_ids: vec!["erin".into()],
+        }];
+        let mut beats = vec![DialogueBeat {
+            speaker: Some("毒蛇".into()),
+            text: "抓住他们。".into(),
+            figure_cues: vec![FigureCue {
+                action: FigureCueAction::Show,
+                character_id: "viper".into(),
+                position: Some(FigureStagePosition::Right),
+                emotion: "angry".into(),
+            }],
+        }];
+        beats.extend((0..3).map(|index| DialogueBeat {
+            speaker: None,
+            text: format!("Narration {index}"),
+            figure_cues: Vec::new(),
+        }));
+        let drafts = vec![SceneDraft {
+            scene_id: "ambush".into(),
+            title: "Ambush".into(),
+            stage_managed: true,
+            beats,
+        }];
+
         validate_drafts(&plans, &characters, &drafts).unwrap();
     }
 }

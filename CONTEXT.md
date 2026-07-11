@@ -27,7 +27,7 @@ _Avoid_: Character image, portrait, centered illustration
 
 ### Scene Staging
 
-The beat-level performance plan that decides which Characters are visible and when they enter, leave, move, or change expression. A Scene's participant list is only the available cast, not a requirement to show everyone.
+The beat-level performance plan that decides which Characters are visible and when they enter, leave, move, or change expression. A Scene's participant list is an initial cast hint, not a requirement to show everyone; staging may add another project Character when the performance requires it.
 _Avoid_: Automatic figure binding, fixed left-right layout
 
 ### Asset Reference
