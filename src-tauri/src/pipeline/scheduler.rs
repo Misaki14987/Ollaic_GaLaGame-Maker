@@ -680,14 +680,7 @@ impl Pipeline {
                 project_path.to_string_lossy().to_string(),
             ) {
                 Ok(characters) => {
-                    let ids: HashSet<String> = characters
-                        .iter()
-                        .map(|character| character.id.clone())
-                        .collect();
-                    plan.characters = characters;
-                    for scene in &mut plan.scene_plans {
-                        scene.character_ids.retain(|id| ids.contains(id.as_str()));
-                    }
+                    apply_canonical_characters(&mut plan, characters, kind == StepKind::Character);
                 }
                 Err(error) => {
                     self.fail_step(
@@ -1069,12 +1062,14 @@ fn apply_output(plan: &mut StoryPlan, out: &AgentOutput) {
         plan.scenes.clear();
     }
     if let Some(characters) = &out.characters {
+        reconcile_scene_casts(&mut plan.scene_plans, characters);
         plan.characters = characters.clone();
         plan.scene_drafts.clear();
         plan.asset_plan.clear();
         plan.scenes.clear();
     }
     if let Some(drafts) = &out.scene_drafts {
+        fill_missing_scene_casts_from_drafts(&mut plan.scene_plans, drafts);
         plan.scene_drafts = drafts.clone();
         plan.asset_plan.clear();
         plan.scenes.clear();
@@ -1085,6 +1080,156 @@ fn apply_output(plan: &mut StoryPlan, out: &AgentOutput) {
     }
     if let Some(scenes) = &out.scenes {
         plan.scenes = scenes.iter().map(|scene| scene.name.clone()).collect();
+    }
+}
+
+fn apply_canonical_characters(
+    plan: &mut StoryPlan,
+    characters: Vec<crate::characters::types::Character>,
+    preserve_scene_cast: bool,
+) {
+    if !preserve_scene_cast {
+        let ids: HashSet<&str> = characters
+            .iter()
+            .map(|character| character.id.as_str())
+            .collect();
+        for scene in &mut plan.scene_plans {
+            scene.character_ids.retain(|id| ids.contains(id.as_str()));
+        }
+    }
+    plan.characters = characters;
+}
+
+fn reconcile_scene_casts(
+    scenes: &mut [crate::story_plan::ScenePlan],
+    characters: &[crate::characters::types::Character],
+) {
+    for scene in scenes {
+        for reference in &mut scene.character_ids {
+            if let Some(character) = characters.iter().find(|character| {
+                character.id == *reference
+                    || character.name == *reference
+                    || character.aliases.iter().any(|alias| alias == reference)
+            }) {
+                reference.clone_from(&character.id);
+            }
+        }
+        let mut seen = HashSet::new();
+        scene
+            .character_ids
+            .retain(|character| seen.insert(character.clone()));
+    }
+}
+
+fn fill_missing_scene_casts_from_drafts(
+    scenes: &mut [crate::story_plan::ScenePlan],
+    drafts: &[crate::story_plan::SceneDraft],
+) {
+    for scene in scenes
+        .iter_mut()
+        .filter(|scene| scene.character_ids.is_empty())
+    {
+        let Some(draft) = drafts.iter().find(|draft| draft.scene_id == scene.id) else {
+            continue;
+        };
+        for character_id in draft
+            .beats
+            .iter()
+            .flat_map(|beat| &beat.figure_cues)
+            .map(|cue| &cue.character_id)
+        {
+            if !scene.character_ids.contains(character_id) {
+                scene.character_ids.push(character_id.clone());
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod character_cast_tests {
+    use super::*;
+
+    #[test]
+    fn character_output_reconciles_provisional_scene_cast_names() {
+        let mut plan = StoryPlan::new("test");
+        plan.scene_plans = vec![crate::story_plan::ScenePlan {
+            id: "opening".into(),
+            file: "start.txt".into(),
+            chapter_id: "ch1".into(),
+            title: "Opening".into(),
+            summary: String::new(),
+            character_ids: vec!["艾拉".into(), "洛因".into()],
+        }];
+        let characters = serde_json::from_value(serde_json::json!([
+            {"id":"ailla","name":"艾拉"},
+            {"id":"luoyin","name":"洛因"}
+        ]))
+        .unwrap();
+
+        apply_output(
+            &mut plan,
+            &AgentOutput {
+                characters: Some(characters),
+                ..AgentOutput::default()
+            },
+        );
+
+        assert_eq!(plan.scene_plans[0].character_ids, vec!["ailla", "luoyin"]);
+    }
+
+    #[test]
+    fn character_step_keeps_provisional_cast_when_old_config_is_loaded() {
+        let mut plan = StoryPlan::new("test");
+        plan.scene_plans = vec![crate::story_plan::ScenePlan {
+            id: "opening".into(),
+            file: "start.txt".into(),
+            chapter_id: "ch1".into(),
+            title: "Opening".into(),
+            summary: String::new(),
+            character_ids: vec!["艾拉".into(), "洛因".into()],
+        }];
+        let old_characters = serde_json::from_value(serde_json::json!([
+            {"id":"old","name":"旧角色"}
+        ]))
+        .unwrap();
+
+        apply_canonical_characters(&mut plan, old_characters, true);
+
+        assert_eq!(plan.scene_plans[0].character_ids, vec!["艾拉", "洛因"]);
+    }
+
+    #[test]
+    fn dialogist_output_repairs_legacy_empty_scene_cast() {
+        let mut plan = StoryPlan::new("test");
+        plan.scene_plans = vec![crate::story_plan::ScenePlan {
+            id: "opening".into(),
+            file: "start.txt".into(),
+            chapter_id: "ch1".into(),
+            title: "Opening".into(),
+            summary: String::new(),
+            character_ids: Vec::new(),
+        }];
+        let draft = serde_json::from_value(serde_json::json!({
+            "sceneId": "opening",
+            "beats": [{
+                "text": "艾拉走入画面。",
+                "figureCues": [{
+                    "action": "show", "characterId": "ailla",
+                    "position": "left", "emotion": "default"
+                }]
+            }]
+        }))
+        .unwrap();
+
+        apply_output(
+            &mut plan,
+            &AgentOutput {
+                scene_drafts: Some(vec![draft]),
+                ..AgentOutput::default()
+            },
+        );
+
+        assert_eq!(plan.scene_plans[0].character_ids, vec!["ailla"]);
     }
 }
 
