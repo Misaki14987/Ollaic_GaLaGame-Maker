@@ -32,8 +32,10 @@ pub struct CharacterSprite {
 #[serde(rename_all = "camelCase")]
 pub struct CharacterRelation {
     /// Target character id.
+    #[serde(default)]
     pub target_id: String,
     /// Relation type in Chinese, e.g. "哥哥", "朋友", "敌人".
+    #[serde(default)]
     pub relation_type: String,
     /// Optional detail.
     #[serde(default)]
