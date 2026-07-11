@@ -1105,20 +1105,30 @@ fn reconcile_scene_casts(
     characters: &[crate::characters::types::Character],
 ) {
     for scene in scenes {
-        for reference in &mut scene.character_ids {
-            if let Some(character) = characters.iter().find(|character| {
-                character.id == *reference
-                    || character.name == *reference
-                    || character.aliases.iter().any(|alias| alias == reference)
-            }) {
-                reference.clone_from(&character.id);
-            }
-        }
         let mut seen = HashSet::new();
-        scene
+        scene.character_ids = scene
             .character_ids
-            .retain(|character| seen.insert(character.clone()));
+            .iter()
+            .filter_map(|reference| {
+                characters
+                    .iter()
+                    .find(|character| {
+                        matches_character_reference(reference, &character.id)
+                            || matches_character_reference(reference, &character.name)
+                            || character
+                                .aliases
+                                .iter()
+                                .any(|alias| matches_character_reference(reference, alias))
+                    })
+                    .map(|character| character.id.clone())
+            })
+            .filter(|character| seen.insert(character.clone()))
+            .collect();
     }
+}
+
+fn matches_character_reference(reference: &str, candidate: &str) -> bool {
+    reference == candidate || reference.eq_ignore_ascii_case(candidate)
 }
 
 fn fill_missing_scene_casts_from_drafts(
@@ -1175,6 +1185,55 @@ mod character_cast_tests {
         );
 
         assert_eq!(plan.scene_plans[0].character_ids, vec!["ailla", "luoyin"]);
+    }
+
+    #[test]
+    fn character_output_reconciles_provisional_id_case() {
+        let mut plan = StoryPlan::new("test");
+        plan.scene_plans = vec![crate::story_plan::ScenePlan {
+            id: "opening".into(),
+            file: "start.txt".into(),
+            chapter_id: "ch1".into(),
+            title: "Opening".into(),
+            summary: String::new(),
+            character_ids: vec!["Erin".into(), "Xiaoqi".into()],
+        }];
+        let characters = serde_json::from_value(serde_json::json!([
+            {"id":"erin","name":"艾琳"},
+            {"id":"xiaoqi","name":"小七"}
+        ]))
+        .unwrap();
+
+        apply_output(
+            &mut plan,
+            &AgentOutput {
+                characters: Some(characters),
+                ..AgentOutput::default()
+            },
+        );
+
+        assert_eq!(plan.scene_plans[0].character_ids, vec!["erin", "xiaoqi"]);
+    }
+
+    #[test]
+    fn unresolved_provisional_cast_uses_empty_cast_recovery() {
+        let mut scenes = vec![crate::story_plan::ScenePlan {
+            id: "opening".into(),
+            file: "start.txt".into(),
+            chapter_id: "ch1".into(),
+            title: "Opening".into(),
+            summary: String::new(),
+            character_ids: vec!["Erin".into()],
+        }];
+        let characters: Vec<crate::characters::types::Character> =
+            serde_json::from_value(serde_json::json!([
+                {"id":"aila","name":"艾拉"}
+            ]))
+            .unwrap();
+
+        reconcile_scene_casts(&mut scenes, &characters);
+
+        assert!(scenes[0].character_ids.is_empty());
     }
 
     #[test]
