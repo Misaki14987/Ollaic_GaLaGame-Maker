@@ -140,6 +140,33 @@ export interface AssetTaskPlan {
   status: string;
 }
 
+export type AssetTaskStatus = 'pending' | 'running' | 'retrying' | 'succeeded' | 'failed';
+
+export interface AssetTaskAttempt {
+  attempt: number;
+  artifact?: string | null;
+  error?: string | null;
+}
+
+export interface AssetQueueTask {
+  id: string;
+  kind: string;
+  targetStem: string;
+  prompt: string;
+  sceneRef?: string | null;
+  characterRef?: string | null;
+  status: AssetTaskStatus;
+  attempts: AssetTaskAttempt[];
+  assetFile?: string | null;
+  error?: string | null;
+}
+
+export interface AssetQueueState {
+  runId: string;
+  tasks: AssetQueueTask[];
+  updatedAt: number;
+}
+
 export interface PipelineRunSummary {
   runId: string;
   status: string;

@@ -337,6 +337,15 @@ pub async fn ai_generate_image(
     model: String,
     reference_image_path: Option<String>,
 ) -> Result<GeneratedMedia, String> {
+    generate_image_media(Some(&app_handle), prompt, model, reference_image_path).await
+}
+
+pub(crate) async fn generate_image_media(
+    app_handle: Option<&AppHandle>,
+    prompt: String,
+    model: String,
+    reference_image_path: Option<String>,
+) -> Result<GeneratedMedia, String> {
     let cfg = config::load_image_config();
     validate_provider_config_basics(&cfg, "图片")?;
     let model = model.trim();
@@ -362,7 +371,7 @@ pub async fn ai_generate_image(
             // data:image/<格式>;base64,<编码> 形式传入 image 字段，实现角色一致性。
             generate_openai_compatible_image(&cfg, model, &prompt, reference.as_ref()).await
         }
-        "aliyun" => generate_dashscope_image(&app_handle, &cfg, model, &prompt).await,
+        "aliyun" => generate_dashscope_image(app_handle, &cfg, model, &prompt).await,
         "gemini" => generate_gemini_image(&cfg, model, &prompt, reference.as_ref()).await,
         "sd-webui" => generate_sd_webui_image(&cfg, &prompt).await,
         "stability" => Err("Stability AI 图片接口需要 multipart/form-data；当前客户端尚未启用该格式，请先通过自定义 OpenAI 兼容网关接入。".to_string()),
@@ -377,6 +386,15 @@ pub async fn ai_generate_image(
 
 #[tauri::command]
 pub async fn ai_generate_tts(
+    text: String,
+    voice_prompt: String,
+    model: String,
+    format: String,
+) -> Result<GeneratedMedia, String> {
+    generate_tts_media(text, voice_prompt, model, format).await
+}
+
+pub(crate) async fn generate_tts_media(
     text: String,
     voice_prompt: String,
     model: String,
@@ -417,6 +435,14 @@ pub async fn ai_generate_tts(
 /// `{model, input, response_format}` and return raw audio bytes.
 #[tauri::command]
 pub async fn generate_music(
+    prompt: String,
+    model: String,
+    format: String,
+) -> Result<GeneratedMedia, String> {
+    generate_music_media(prompt, model, format).await
+}
+
+pub(crate) async fn generate_music_media(
     prompt: String,
     model: String,
     format: String,
@@ -1094,7 +1120,7 @@ async fn generate_openai_compatible_image(
 }
 
 async fn generate_dashscope_image(
-    app_handle: &AppHandle,
+    app_handle: Option<&AppHandle>,
     cfg: &AiProviderConfig,
     model: &str,
     prompt: &str,
@@ -1231,7 +1257,7 @@ async fn generate_dashscope_image(
 }
 
 fn emit_media_generation_progress(
-    app_handle: &AppHandle,
+    app_handle: Option<&AppHandle>,
     cfg: &AiProviderConfig,
     model: &str,
     phase: &str,
@@ -1239,17 +1265,19 @@ fn emit_media_generation_progress(
     total_attempts: u8,
     message: &str,
 ) {
-    let _ = app_handle.emit(
-        "ai-media-generation-progress",
-        AiMediaGenerationProgress {
-            provider: cfg.provider.clone(),
-            model: model.to_string(),
-            phase: phase.to_string(),
-            attempt,
-            total_attempts,
-            message: message.to_string(),
-        },
-    );
+    if let Some(app_handle) = app_handle {
+        let _ = app_handle.emit(
+            "ai-media-generation-progress",
+            AiMediaGenerationProgress {
+                provider: cfg.provider.clone(),
+                model: model.to_string(),
+                phase: phase.to_string(),
+                attempt,
+                total_attempts,
+                message: message.to_string(),
+            },
+        );
+    }
 }
 
 async fn generate_gemini_image(

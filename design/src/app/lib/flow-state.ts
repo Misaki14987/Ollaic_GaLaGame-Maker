@@ -9,6 +9,7 @@ import type { PipelineEvent, RunState, RunStatus, StepRunHistory, StepStatus } f
 export interface FlowStepView {
   id: string;
   kind: string;
+  agent: string | null;
   status: StepStatus;
   dependsOn: string[];
   attempt: number;
@@ -29,15 +30,16 @@ export interface FlowState {
   steps: FlowStepView[];
 }
 
-/** The P1 prompt-to-editable-WebGAL production recipe. */
+/** The P2 prompt-to-bound-assets production recipe. */
 export const DEFAULT_RECIPE_STEPS: ReadonlyArray<{ id: string; kind: string; dependsOn: string[] }> = [
   { id: 'plan', kind: 'plan', dependsOn: [] },
   { id: 'memory', kind: 'memory', dependsOn: ['plan'] },
   { id: 'outline', kind: 'outline', dependsOn: ['memory'] },
   { id: 'character', kind: 'character', dependsOn: ['outline'] },
   { id: 'dialogist', kind: 'scene', dependsOn: ['character'] },
-  { id: 'asset', kind: 'asset', dependsOn: ['dialogist'] },
-  { id: 'scene', kind: 'scene', dependsOn: ['asset'] },
+  { id: 'assetPlan', kind: 'asset', dependsOn: ['dialogist'] },
+  { id: 'scene', kind: 'scene', dependsOn: ['assetPlan'] },
+  { id: 'assetQueue', kind: 'asset', dependsOn: ['scene'] },
 ];
 
 export function initialFlowState(): FlowState {
@@ -50,6 +52,7 @@ export function initialFlowState(): FlowState {
     steps: DEFAULT_RECIPE_STEPS.map((s) => ({
       id: s.id,
       kind: s.kind,
+      agent: null,
       status: 'pending' as StepStatus,
       dependsOn: s.dependsOn,
       attempt: 0,
@@ -78,6 +81,7 @@ export function reduceFlowEvent(state: FlowState, event: FlowAction): FlowState 
       steps: event.state.steps.map((step) => ({
         id: step.def.id,
         kind: step.def.kind,
+        agent: step.def.agent ?? null,
         status: step.status,
         dependsOn: step.def.dependsOn,
         attempt: step.attempt,

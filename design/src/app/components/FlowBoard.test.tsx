@@ -171,6 +171,55 @@ describe('FlowBoard', () => {
     expect(screen.getByTestId('flow-run-status')).toHaveTextContent('已完成');
   });
 
+  it('shows live asset queue progress and refreshes it on the asset event', async () => {
+    const user = userEvent.setup();
+    const queued = runState('running');
+    queued.steps.push({
+      def: { id: 'media-production', kind: 'asset', dependsOn: ['outline'], agent: 'assetQueue', prompt: '' },
+      status: 'running',
+      attempt: 1,
+      output: null,
+      error: null,
+      startedAt: 2,
+      finishedAt: null,
+    });
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'pipeline_list_runs') return Promise.resolve([queued] as unknown);
+      if (cmd === 'pipeline_get_state') return Promise.resolve(queued as unknown);
+      if (cmd === 'asset_queue_get' || cmd === 'asset_queue_promote_artifact') return Promise.resolve({
+        runId: 'run_1',
+        updatedAt: 3,
+        tasks: [
+          {
+            id: 'bg', kind: 'background', targetStem: 'bg', prompt: '背景', status: 'succeeded',
+            attempts: [{ attempt: 1, artifact: '.ollaic/artifacts/bg/1.png' }],
+            assetFile: cmd === 'asset_queue_promote_artifact' ? 'bg-promoted.png' : 'bg.png',
+          },
+          { id: 'voice', kind: 'tts', targetStem: 'voice', prompt: '对白', status: 'running', attempts: [{ attempt: 1 }] },
+        ],
+      } as unknown);
+      return Promise.resolve(undefined);
+    });
+
+    render(<FlowBoard projectPath="/tmp/proj" />);
+
+    expect(await screen.findByText('1/2 已处理')).toBeInTheDocument();
+    expect(mockedInvoke).toHaveBeenCalledWith('asset_queue_get', { projectPath: '/tmp/proj' });
+    expect(screen.getByLabelText('media-production 步骤进度')).toHaveAttribute('aria-valuenow', '50');
+    await user.click(screen.getByRole('button', { name: 'open-media-production' }));
+    await user.click(screen.getByRole('tab', { name: '输出' }));
+    await user.click(screen.getByRole('button', { name: '提升 bg 候选 1' }));
+    expect(mockedInvoke).toHaveBeenCalledWith('asset_queue_promote_artifact', {
+      projectPath: '/tmp/proj', taskId: 'bg', attempt: 1,
+    });
+    expect(await screen.findByText('正式素材 bg-promoted.png')).toBeInTheDocument();
+    const callsBeforeEvent = mockedInvoke.mock.calls.filter(([cmd]) => cmd === 'asset_queue_get').length;
+    emit({ type: 'stepSucceeded', runId: 'run_1', stepId: 'media-production', output: '{"tasks":2}' });
+    await vi.waitFor(() => expect(
+      mockedInvoke.mock.calls.filter(([cmd]) => cmd === 'asset_queue_get').length,
+    ).toBeGreaterThan(callsBeforeEvent));
+  });
+
   it('disables run while the brief is empty', () => {
     render(<FlowBoard projectPath="/tmp/proj" />);
     expect(screen.getByRole('button', { name: '创建流程' })).toBeDisabled();

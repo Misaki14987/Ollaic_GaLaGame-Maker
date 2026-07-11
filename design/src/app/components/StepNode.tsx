@@ -121,7 +121,7 @@ function StepNodeComponent({ data, selected = false, isConnectable = true }: Ste
     ? defaultProgress(data.status)
     : Math.min(100, Math.max(0, explicitProgress));
   const progressWidth = progress == null ? '42%' : `${progress}%`;
-  const kindLabel = KIND_LABEL[data.kind] ?? data.kind;
+  const kindLabel = data.id === 'assetQueue' ? '资产生产' : KIND_LABEL[data.kind] ?? data.kind;
   const cost = Number.isFinite(data.cost) ? Math.max(0, data.cost ?? 0) : null;
 
   return (
