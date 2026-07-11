@@ -7,7 +7,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { PipelineEvent, RunState, StoryPlan } from './pipeline-types';
+import type { AssetQueueState, PipelineEvent, RunState, StoryPlan } from './pipeline-types';
 
 /** Start an Agent Flow for a project. Returns the new run id. */
 export async function pipelineStart(projectPath: string, prompt: string, allowLocalFallback: boolean): Promise<string> {
@@ -91,6 +91,34 @@ export async function pipelineGetState(runId: string): Promise<RunState | null> 
 /** The project's StoryPlan (`.ollaic/plan.json`), if one exists. */
 export async function pipelineGetPlan(projectPath: string): Promise<StoryPlan | null> {
   return invoke<StoryPlan | null>('pipeline_get_plan', { projectPath });
+}
+
+export async function assetQueueGet(projectPath: string): Promise<AssetQueueState | null> {
+  return invoke<AssetQueueState | null>('asset_queue_get', { projectPath });
+}
+
+export async function assetQueuePreviewArtifact(
+  projectPath: string,
+  taskId: string,
+  attempt: number,
+): Promise<string> {
+  return invoke<string>('asset_queue_preview_artifact', { projectPath, taskId, attempt });
+}
+
+export async function assetQueueDeleteArtifact(
+  projectPath: string,
+  taskId: string,
+  attempt: number,
+): Promise<AssetQueueState> {
+  return invoke<AssetQueueState>('asset_queue_delete_artifact', { projectPath, taskId, attempt });
+}
+
+export async function assetQueuePromoteArtifact(
+  projectPath: string,
+  taskId: string,
+  attempt: number,
+): Promise<AssetQueueState> {
+  return invoke<AssetQueueState>('asset_queue_promote_artifact', { projectPath, taskId, attempt });
 }
 
 /** Persisted runs for a project, newest first. */

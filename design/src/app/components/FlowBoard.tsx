@@ -37,6 +37,10 @@ import { Switch } from './ui/switch';
 import { initialFlowState, reduceFlowEvent, type FlowStepView } from '../lib/flow-state';
 import { layoutFlowSteps, loadFlowPositions, saveFlowPositions } from '../lib/flow-layout';
 import {
+  assetQueueDeleteArtifact,
+  assetQueueGet,
+  assetQueuePreviewArtifact,
+  assetQueuePromoteArtifact,
   listenPipelineEvents,
   pipelineClearRunHistory,
   pipelineExportRunHistory,
@@ -55,7 +59,7 @@ import {
   pipelineUpdateDependencies,
   pipelineUpdateStepPrompt,
 } from '../lib/pipeline-ipc';
-import type { PipelineEvent, RunState, RunStatus, StoryPlan } from '../lib/pipeline-types';
+import type { AssetQueueState, PipelineEvent, RunState, RunStatus, StoryPlan } from '../lib/pipeline-types';
 
 const NODE_TYPES = { step: StepNode };
 
@@ -117,6 +121,20 @@ function isDowngraded(step: FlowStepView) {
   }
 }
 
+function isAssetQueueStep(step: FlowStepView) {
+  return step.kind === 'asset' && (step.id === 'assetQueue' || step.agent === 'assetQueue');
+}
+
+function assetQueueProgress(queue: AssetQueueState | null) {
+  if (!queue?.tasks.length) return null;
+  const done = queue.tasks.filter((task) => task.status === 'succeeded' || task.status === 'failed').length;
+  const failed = queue.tasks.filter((task) => task.status === 'failed').length;
+  return {
+    progress: (done / queue.tasks.length) * 100,
+    summary: `${done}/${queue.tasks.length} 已处理${failed ? ` · ${failed} 失败` : ''}`,
+  };
+}
+
 function recordsFromSnapshot(snapshot: RunState): PipelineEventRecord[] {
   const events: PipelineEventRecord[] = [{
     event: { type: 'runStarted', runId: snapshot.runId },
@@ -167,6 +185,7 @@ export function FlowBoard({ projectPath, onOpenArtifact }: FlowBoardProps) {
   const [prompt, setPrompt] = useState('');
   const [allowLocalFallback, setAllowLocalFallback] = useState(false);
   const [plan, setPlan] = useState<StoryPlan | null>(null);
+  const [assetQueue, setAssetQueue] = useState<AssetQueueState | null>(null);
   const [events, setEvents] = useState<PipelineEventRecord[]>([]);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -180,6 +199,7 @@ export function FlowBoard({ projectPath, onOpenArtifact }: FlowBoardProps) {
   const flowInstanceRef = useRef<ReactFlowInstance<StepNodeData> | null>(null);
   const loadRequestRef = useRef(0);
   const planRequestRef = useRef(0);
+  const assetQueueRequestRef = useRef(0);
   const subscriptionRef = useRef(0);
   const headerRef = useRef<HTMLElement | null>(null);
   const workspaceRef = useRef<HTMLDivElement | null>(null);
@@ -190,11 +210,39 @@ export function FlowBoard({ projectPath, onOpenArtifact }: FlowBoardProps) {
       ? true
       : window.matchMedia('(min-width: 1280px)').matches
   ));
+  const assetQueueStep = state.steps.find(isAssetQueueStep) ?? null;
+  const assetQueueStepIdsRef = useRef<Set<string>>(new Set());
+  assetQueueStepIdsRef.current = new Set(state.steps.filter(isAssetQueueStep).map((step) => step.id));
 
   const refreshPlan = useCallback(async () => {
     const request = ++planRequestRef.current;
     const storyPlan = await pipelineGetPlan(projectPath);
     if (request === planRequestRef.current) setPlan(storyPlan);
+  }, [projectPath]);
+
+  const refreshAssetQueue = useCallback(async () => {
+    const request = ++assetQueueRequestRef.current;
+    try {
+      const queue = await assetQueueGet(projectPath);
+      if (request === assetQueueRequestRef.current) {
+        setAssetQueue(queue?.runId === runIdRef.current ? queue : null);
+      }
+    } catch {
+      // Queue state is supplementary; pipeline controls must remain usable.
+    }
+  }, [projectPath]);
+
+  const previewAssetArtifact = useCallback((taskId: string, attempt: number) => (
+    assetQueuePreviewArtifact(projectPath, taskId, attempt)
+  ), [projectPath]);
+
+  const updateAssetArtifact = useCallback(async (
+    action: typeof assetQueueDeleteArtifact,
+    taskId: string,
+    attempt: number,
+  ) => {
+    const queue = await action(projectPath, taskId, attempt);
+    if (queue.runId === runIdRef.current) setAssetQueue(queue);
   }, [projectPath]);
 
   const subscribe = useCallback(async (runId: string) => {
@@ -207,13 +255,14 @@ export function FlowBoard({ projectPath, onOpenArtifact }: FlowBoardProps) {
       dispatch(event);
       setEvents((current) => [...current, { event, receivedAt: Date.now() }]);
       if (event.type === 'stepSucceeded' || event.type === 'runCompleted') void refreshPlan();
+      if ('stepId' in event && assetQueueStepIdsRef.current.has(event.stepId)) void refreshAssetQueue();
     });
     if (subscriptionRef.current !== subscription || runIdRef.current !== runId) {
       unlisten();
       return;
     }
     unlistenRef.current = unlisten;
-  }, [refreshPlan]);
+  }, [refreshAssetQueue, refreshPlan]);
 
   const refresh = useCallback(async (runId: string) => {
     const snapshot = await pipelineGetState(runId);
@@ -237,6 +286,7 @@ export function FlowBoard({ projectPath, onOpenArtifact }: FlowBoardProps) {
       if (!latest) {
         dispatch({ type: 'reset' });
         setEvents([]);
+        setAssetQueue(null);
         setDetached(false);
         runIdRef.current = null;
         return;
@@ -270,16 +320,29 @@ export function FlowBoard({ projectPath, onOpenArtifact }: FlowBoardProps) {
   }, [projectPath, subscribe]);
 
   useEffect(() => {
+    setAssetQueue(null);
     void loadLatest();
     return () => {
       loadRequestRef.current += 1;
       planRequestRef.current += 1;
+      assetQueueRequestRef.current += 1;
       subscriptionRef.current += 1;
       runIdRef.current = null;
       unlistenRef.current?.();
       unlistenRef.current = null;
     };
   }, [loadLatest]);
+
+  useEffect(() => {
+    if (!assetQueueStep) {
+      setAssetQueue(null);
+      return;
+    }
+    void refreshAssetQueue();
+    if (assetQueueStep.status !== 'running') return;
+    const timer = window.setInterval(() => void refreshAssetQueue(), 1000);
+    return () => window.clearInterval(timer);
+  }, [assetQueueStep?.id, assetQueueStep?.status, refreshAssetQueue]);
 
   useEffect(() => {
     if (typeof window.matchMedia !== 'function') return;
@@ -310,6 +373,7 @@ export function FlowBoard({ projectPath, onOpenArtifact }: FlowBoardProps) {
     const isNewLayout = layoutKeyRef.current !== layoutKey;
     const stored = isNewLayout ? loadFlowPositions(projectPath, state.runId) : {};
     const layout = layoutFlowSteps(state.steps, stored);
+    const queueProgress = assetQueueProgress(assetQueue);
     setNodes((current) => state.steps.map((step) => {
       const existing = isNewLayout ? null : current.find((node) => node.id === step.id);
       return {
@@ -324,14 +388,15 @@ export function FlowBoard({ projectPath, onOpenArtifact }: FlowBoardProps) {
           cost: step.history.some((attempt) => attempt.cost != null)
             ? step.history.reduce((sum, attempt) => sum + (attempt.cost ?? 0), 0)
             : undefined,
-          summary: summarizeStep(step),
+          progress: isAssetQueueStep(step) ? queueProgress?.progress : undefined,
+          summary: isAssetQueueStep(step) && queueProgress ? queueProgress.summary : summarizeStep(step),
           downgraded: isDowngraded(step),
           selected: step.id === selectedStepId,
         },
       };
     }));
     layoutKeyRef.current = layoutKey;
-  }, [projectPath, selectedStepId, setNodes, state.runId, state.steps]);
+  }, [assetQueue, projectPath, selectedStepId, setNodes, state.runId, state.steps]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -374,6 +439,7 @@ export function FlowBoard({ projectPath, onOpenArtifact }: FlowBoardProps) {
       unlistenRef.current?.();
       unlistenRef.current = null;
       dispatch({ type: 'reset' });
+      setAssetQueue(null);
       const runId = await pipelineStart(projectPath, prompt.trim(), allowLocalFallback);
       await subscribe(runId);
       setDetached(false);
@@ -789,6 +855,10 @@ export function FlowBoard({ projectPath, onOpenArtifact }: FlowBoardProps) {
               onPromptRerun={updatePromptAndRetry}
               onOpenArtifact={(step) => onOpenArtifact?.(step, plan)}
               events={events}
+              assetQueue={assetQueue}
+              onPreviewAssetArtifact={previewAssetArtifact}
+              onDeleteAssetArtifact={(taskId, attempt) => updateAssetArtifact(assetQueueDeleteArtifact, taskId, attempt)}
+              onPromoteAssetArtifact={(taskId, attempt) => updateAssetArtifact(assetQueuePromoteArtifact, taskId, attempt)}
             />
           </div>
         )}

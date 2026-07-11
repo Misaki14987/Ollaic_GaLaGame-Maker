@@ -10,6 +10,7 @@ import {
 const step = (id: string, dependsOn: string[] = []): FlowStepView => ({
   id,
   kind: id,
+  agent: null,
   dependsOn,
   status: 'pending',
   attempt: 0,

@@ -3,18 +3,22 @@ import {
   AlertTriangle,
   Braces,
   Clock3,
+  Eye,
   GitBranch,
   History,
   ListTree,
+  Loader2,
   PencilLine,
   RotateCcw,
   SkipForward,
   SquareArrowOutUpRight,
+  Trash2,
+  Upload,
   Workflow,
   X,
 } from 'lucide-react';
 import type { FlowStepView } from '../lib/flow-state';
-import type { StepStatus } from '../lib/pipeline-types';
+import type { AssetQueueState, AssetTaskStatus, StepStatus } from '../lib/pipeline-types';
 import type { PipelineEventRecord } from './PipelineEventLedger';
 import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
@@ -31,6 +35,14 @@ const STATUS: Record<StepStatus, { label: string; className: string }> = {
   skipped: { label: '已跳过', className: 'bg-muted-foreground' },
 };
 
+const ASSET_STATUS: Record<AssetTaskStatus, { label: string; className: string }> = {
+  pending: { label: '等待', className: 'bg-muted-foreground' },
+  running: { label: '生成中', className: 'bg-blue-500' },
+  retrying: { label: '重试中', className: 'bg-amber-500' },
+  succeeded: { label: '已完成', className: 'bg-emerald-500' },
+  failed: { label: '失败', className: 'bg-destructive' },
+};
+
 export interface FlowStepInspectorProps {
   selected: FlowStepView | null;
   busy: boolean;
@@ -41,6 +53,10 @@ export interface FlowStepInspectorProps {
   onPromptRerun: (stepId: string, prompt: string) => void;
   onOpenArtifact?: (step: FlowStepView) => void;
   events?: readonly PipelineEventRecord[];
+  assetQueue?: AssetQueueState | null;
+  onPreviewAssetArtifact?: (taskId: string, attempt: number) => Promise<string>;
+  onDeleteAssetArtifact?: (taskId: string, attempt: number) => Promise<void>;
+  onPromoteAssetArtifact?: (taskId: string, attempt: number) => Promise<void>;
 }
 
 function formatted(value: string | null | undefined) {
@@ -89,11 +105,21 @@ export function FlowStepInspector({
   onPromptRerun,
   onOpenArtifact,
   events = [],
+  assetQueue = null,
+  onPreviewAssetArtifact,
+  onDeleteAssetArtifact,
+  onPromoteAssetArtifact,
 }: FlowStepInspectorProps) {
   const [promptDraft, setPromptDraft] = useState(selected?.prompt ?? '');
+  const [artifactBusy, setArtifactBusy] = useState<string | null>(null);
+  const [artifactError, setArtifactError] = useState<string | null>(null);
+  const [artifactPreviews, setArtifactPreviews] = useState<Record<string, string>>({});
 
   useEffect(() => {
     setPromptDraft(selected?.prompt ?? '');
+    setArtifactBusy(null);
+    setArtifactError(null);
+    setArtifactPreviews({});
   }, [selected?.id, selected?.prompt]);
 
   if (!selected) return null;
@@ -102,6 +128,19 @@ export function FlowStepInspector({
   const stepEvents = events.filter((record) => (
     'stepId' in record.event && record.event.stepId === selected.id
   ));
+  const showAssetQueue = selected.kind === 'asset'
+    && (selected.id === 'assetQueue' || selected.agent === 'assetQueue');
+  const runArtifactAction = async (key: string, action: () => Promise<void>) => {
+    setArtifactBusy(key);
+    setArtifactError(null);
+    try {
+      await action();
+    } catch (error) {
+      setArtifactError(String(error));
+    } finally {
+      setArtifactBusy(null);
+    }
+  };
 
   return (
     <aside
@@ -203,9 +242,118 @@ export function FlowStepInspector({
 
         <TabsContent value="output" className="min-h-0 flex-1">
           <ScrollArea className="h-full">
-            <div className="p-4">
+            <div className="space-y-5 p-4">
+              {showAssetQueue && (
+                <section>
+                  <SectionLabel>资产任务</SectionLabel>
+                  {artifactError && (
+                    <div role="alert" className="mb-3 flex items-start gap-2 border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
+                      <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                      <span className="break-words">{artifactError}</span>
+                    </div>
+                  )}
+                  {assetQueue?.tasks.length ? (
+                    <ol className="divide-y divide-border border border-border" aria-label="资产任务列表">
+                      {assetQueue.tasks.map((task) => {
+                        const status = ASSET_STATUS[task.status];
+                        const error = task.error ?? task.attempts.at(-1)?.error;
+                        return (
+                          <li key={task.id} className="space-y-2 bg-surface-container-lowest p-3 text-xs">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <span className={cn('size-1.5 shrink-0 rounded-full', status.className)} aria-hidden="true" />
+                              <strong className="min-w-0 flex-1 truncate" title={task.targetStem}>{task.targetStem}</strong>
+                              <span className="shrink-0 text-[10px] text-muted-foreground">{task.kind} · {status.label}</span>
+                            </div>
+                            <p className="break-words leading-5 text-foreground/85">{task.prompt}</p>
+                            <div className="flex flex-wrap gap-x-3 gap-y-1 font-mono-family text-[10px] text-muted-foreground">
+                              <span>场景 {task.sceneRef || '未指定'}</span>
+                              {task.characterRef && <span>角色 {task.characterRef}</span>}
+                              <span>重试 {Math.max(0, task.attempts.length - 1)}</span>
+                            </div>
+                            {task.assetFile && <p className="break-all font-mono-family text-[10px] text-emerald-700 dark:text-emerald-400">正式素材 {task.assetFile}</p>}
+                            {task.attempts.filter((attempt) => attempt.artifact).map((attempt) => {
+                              const key = `${task.id}:${attempt.attempt}`;
+                              const preview = artifactPreviews[key];
+                              return (
+                                <div key={key} className="space-y-2 border-t border-border/70 pt-2">
+                                  <p className="break-all font-mono-family text-[10px] text-muted-foreground">
+                                    候选 {attempt.attempt} · {attempt.artifact}
+                                  </p>
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {onPreviewAssetArtifact && (
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        disabled={artifactBusy !== null}
+                                        aria-label={`预览 ${task.targetStem} 候选 ${attempt.attempt}`}
+                                        onClick={() => void runArtifactAction(`preview:${key}`, async () => {
+                                          const data = await onPreviewAssetArtifact(task.id, attempt.attempt);
+                                          setArtifactPreviews((current) => ({ ...current, [key]: data }));
+                                        })}
+                                      >
+                                        {artifactBusy === `preview:${key}` ? <Loader2 className="animate-spin" /> : <Eye />}
+                                        预览
+                                      </Button>
+                                    )}
+                                    {onPromoteAssetArtifact && (
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        disabled={artifactBusy !== null}
+                                        aria-label={`提升 ${task.targetStem} 候选 ${attempt.attempt}`}
+                                        onClick={() => void runArtifactAction(`promote:${key}`, () => onPromoteAssetArtifact(task.id, attempt.attempt))}
+                                      >
+                                        {artifactBusy === `promote:${key}` ? <Loader2 className="animate-spin" /> : <Upload />}
+                                        提升
+                                      </Button>
+                                    )}
+                                    {onDeleteAssetArtifact && (
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        className="text-destructive"
+                                        disabled={artifactBusy !== null}
+                                        aria-label={`删除 ${task.targetStem} 候选 ${attempt.attempt}`}
+                                        onClick={() => void runArtifactAction(`delete:${key}`, async () => {
+                                          await onDeleteAssetArtifact(task.id, attempt.attempt);
+                                          setArtifactPreviews((current) => {
+                                            const next = { ...current };
+                                            delete next[key];
+                                            return next;
+                                          });
+                                        })}
+                                      >
+                                        {artifactBusy === `delete:${key}` ? <Loader2 className="animate-spin" /> : <Trash2 />}
+                                        删除
+                                      </Button>
+                                    )}
+                                  </div>
+                                  {preview?.startsWith('data:image/') && (
+                                    <img src={preview} alt={`${task.targetStem} 候选 ${attempt.attempt}`} className="max-h-48 w-full object-contain" />
+                                  )}
+                                  {preview?.startsWith('data:audio/') && (
+                                    <audio src={preview} controls className="w-full" aria-label={`${task.targetStem} 候选 ${attempt.attempt} 音频预览`} />
+                                  )}
+                                </div>
+                              );
+                            })}
+                            {error && <p className="break-words text-[11px] text-destructive">{error}</p>}
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">暂无资产任务</p>
+                  )}
+                </section>
+              )}
+              <section>
               <SectionLabel>结构化输出</SectionLabel>
               {selected.output ? <DataBlock value={selected.output} /> : <p className="text-xs text-muted-foreground">暂无输出</p>}
+              </section>
             </div>
           </ScrollArea>
         </TabsContent>

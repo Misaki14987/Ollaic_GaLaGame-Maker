@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { FlowStepView } from '../lib/flow-state';
@@ -7,6 +7,7 @@ import { FlowStepInspector } from './FlowStepInspector';
 const step: FlowStepView = {
   id: 'outline',
   kind: 'outline',
+  agent: null,
   status: 'pending',
   dependsOn: ['plan'],
   attempt: 1,
@@ -110,5 +111,87 @@ describe('FlowStepInspector', () => {
     );
     await user.click(screen.getByRole('button', { name: '打开角色' }));
     expect(onOpenArtifact).toHaveBeenCalledWith(character);
+  });
+
+  it('shows asset queue task progress without replacing the step output', async () => {
+    const user = userEvent.setup();
+    let resolvePreview: (data: string) => void = () => {};
+    const onPreviewAssetArtifact = vi.fn(() => new Promise<string>((resolve) => { resolvePreview = resolve; }));
+    const onPromoteAssetArtifact = vi.fn(() => Promise.resolve());
+    const onDeleteAssetArtifact = vi.fn(() => Promise.reject(new Error('artifact locked')));
+    const assetStep = {
+      ...step,
+      id: 'media-production',
+      kind: 'asset',
+      agent: 'assetQueue',
+      status: 'running' as const,
+      output: '{"queued":2}',
+    };
+    render(
+      <FlowStepInspector
+        selected={assetStep}
+        busy={false}
+        detached={false}
+        onClose={vi.fn()}
+        onRetry={vi.fn()}
+        onSkip={vi.fn()}
+        onPromptRerun={vi.fn()}
+        assetQueue={{
+          runId: 'run_1',
+          updatedAt: 30,
+          tasks: [
+            {
+              id: 'bg-opening',
+              kind: 'background',
+              targetStem: 'bg_opening',
+              prompt: '黄昏时的空教室',
+              sceneRef: 'opening',
+              status: 'succeeded',
+              attempts: [{ attempt: 1, artifact: '.ollaic/artifacts/bg_opening.png' }],
+              assetFile: 'bg_opening.png',
+            },
+            {
+              id: 'voice-opening-1',
+              kind: 'tts',
+              targetStem: 'voice_opening_1',
+              prompt: '平静但犹豫的语气',
+              sceneRef: 'opening',
+              characterRef: 'heroine',
+              status: 'failed',
+              attempts: [{ attempt: 1, error: 'provider timeout' }, { attempt: 2, error: 'provider timeout' }],
+              error: 'provider timeout',
+            },
+          ],
+        }}
+        onPreviewAssetArtifact={onPreviewAssetArtifact}
+        onPromoteAssetArtifact={onPromoteAssetArtifact}
+        onDeleteAssetArtifact={onDeleteAssetArtifact}
+      />,
+    );
+
+    await user.click(screen.getByRole('tab', { name: '输出' }));
+    expect(screen.getByRole('list', { name: '资产任务列表' })).toBeInTheDocument();
+    expect(screen.getByText('黄昏时的空教室')).toBeInTheDocument();
+    expect(screen.getByText('重试 1')).toBeInTheDocument();
+    expect(screen.getByText('正式素材 bg_opening.png')).toBeInTheDocument();
+    expect(screen.getByText('provider timeout')).toBeInTheDocument();
+    expect(screen.getByText(/"queued": 2/)).toBeInTheDocument();
+
+    const preview = screen.getByRole('button', { name: '预览 bg_opening 候选 1' });
+    const promote = screen.getByRole('button', { name: '提升 bg_opening 候选 1' });
+    const remove = screen.getByRole('button', { name: '删除 bg_opening 候选 1' });
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+    await user.click(preview);
+    expect(promote).toBeDisabled();
+    expect(remove).toBeDisabled();
+    expect(onPreviewAssetArtifact).toHaveBeenCalledWith('bg-opening', 1);
+    await act(async () => resolvePreview('data:image/png;base64,AAAA'));
+    expect(await screen.findByRole('img', { name: 'bg_opening 候选 1' })).toHaveAttribute('src', 'data:image/png;base64,AAAA');
+
+    await user.click(promote);
+    expect(onPromoteAssetArtifact).toHaveBeenCalledWith('bg-opening', 1);
+    await user.click(remove);
+    expect(onDeleteAssetArtifact).toHaveBeenCalledWith('bg-opening', 1);
+    expect(await screen.findByRole('alert')).toHaveTextContent('artifact locked');
   });
 });

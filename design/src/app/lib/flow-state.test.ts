@@ -10,7 +10,7 @@ describe('flow-state reducer', () => {
     expect(s.runStatus).toBe('idle');
     expect(s.runId).toBeNull();
     expect(s.steps.map((x) => x.id)).toEqual([
-      'plan', 'memory', 'outline', 'character', 'dialogist', 'asset', 'scene',
+      'plan', 'memory', 'outline', 'character', 'dialogist', 'assetPlan', 'scene', 'assetQueue',
     ]);
     expect(s.steps.every((x) => x.status === 'pending')).toBe(true);
   });
@@ -117,6 +117,7 @@ describe('flow-state reducer', () => {
     expect(s.steps.map((step) => step.id)).toEqual(['brief', 'plot']);
     expect(s.steps[1].dependsOn).toEqual(['brief']);
     expect(s.steps[0].output).toBe('{"synopsis":"done"}');
+    expect(s.steps[0].agent).toBeNull();
   });
 });
 

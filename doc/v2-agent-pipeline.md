@@ -268,15 +268,15 @@ FlowBoard 的主按钮随当前状态变化：初始为「生成草稿试玩」�
 
 ---
 
-### 3.5 AssetTaskQueue ⭐ 资产闭环
+### 3.5 AssetTaskQueue ⭐ 资产闭环（P2 已实现）
 
 **作用**：把 image / TTS / music 的零散调用变成统一队列，自动绑定到 scene / character，自带重试 / 验收。
 
 **目标源码**：
-- `src-tauri/src/asset_queue/queue.rs` — 状态机 `pending → running → succeeded / failed / retrying`
+- `src-tauri/src/asset_queue/types.rs` / `store.rs` — 状态机与 `.ollaic/assets/queue.json` 持久化
 - `src-tauri/src/asset_queue/scheduler.rs` — 并发池（默认 2 image + 4 tts + 1 music，可配置）
 - `src-tauri/src/asset_queue/binder.rs` — 按 `AssetTask.sceneRef` 自动写到 `game/background/*`、`game/figure/*`、`game/bgm/*`、`game/vocal/*`，并更新脚本引用
-- `src-tauri/src/asset_queue/reviewer.rs` — 可选 AI 自评（构图、口型匹配、风格一致），不达标入 retry
+- 可选 AI 自评（构图、口型匹配、风格一致）留到质量评估需求明确后接入，不属于 P2 阻断项
 
 **收敛现有能力**：`ai_generate_image / ai_generate_tts / generate_music / generate_batch_tts` 收敛为队列单一入口。
 
@@ -383,7 +383,7 @@ Release Candidate 可以被结构性叙事问题阻断，例如分支缺乏动�
 |---|---|---|
 | **P0 — Flow Shell（已完成）** | Pipeline Orchestrator + StoryPlan IR + FlowBoard + 2 个内置确定性 step（Plan + Outline） | 项目以 FlowBoard 为入口，DAG 状态、干预和崩溃恢复已闭环 |
 | **P1 — 内容链路（已完成）** | Plan → Memory → Plotter → Character → Dialogist → AssetPlanner → SceneScript | 「Production Brief → 可编辑 WebGAL」闭环 |
-| **P2 — 资产闭环** | AssetTaskQueue + 自动绑定 + 并发限流 | 真正闭环 |
+| **P2 — 资产闭环（已完成）** | AssetTaskQueue + 自动绑定 + 并发限流 | 生成候选经 Artifact 晋升为正式素材并写入 Scene / Character 引用 |
 | **P3 — 试玩 & 自审** | Quality Gate + One-Click Run & Play + Reviewer Agent | 端到端可玩 + 可信赖 |
 
 P0 是地基，其余切片可以基于 P0 并行。**强烈建议先实现 P0**，否则后续每个功能都要 hack 状态。
@@ -399,5 +399,5 @@ P0 是地基，其余切片可以基于 P0 并行。**强烈建议先实现 P0**
 - [x] Pipeline 持久化粒度：每 step 状态转换一次（ADR 0054）
 - [x] 事件总线传输：Tauri event（ADR 0055）
 - [x] P1 多 Agent 上下文按职责显式投影；长篇作品的动态裁剪留待质量与成本测试后扩展
-- [ ] AssetTaskQueue 并发上限默认值（家用网络与 API rate 平衡）
+- [x] AssetTaskQueue 默认按能力分别限流：2 image / 4 TTS / 1 music，队列持久化且可继续运行
 - [ ] Quality Gate 中的「致命 vs 警告」分级阈值

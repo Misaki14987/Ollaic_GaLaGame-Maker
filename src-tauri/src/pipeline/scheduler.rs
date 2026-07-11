@@ -8,9 +8,13 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use base64::Engine;
 use tokio::sync::{Mutex, Notify};
 
 use crate::agents::{AgentContext, AgentError, AgentOutput, AgentRegistry};
+use crate::asset_queue::{
+    AssetGenerator, AssetKind, AssetTask, AssetTaskStatus, GeneratedArtifact,
+};
 use crate::pipeline::dsl::{FlowRecipe, StepKind};
 use crate::pipeline::events::{EventSink, PipelineEvent};
 use crate::pipeline::state::{Clock, RunState, RunStatus, StepRunHistory, StepStatus};
@@ -24,6 +28,7 @@ pub struct RunHandle {
     pub state: Arc<Mutex<RunState>>,
     notify: Arc<Notify>,
     pause_after_step: AtomicBool,
+    cancelled: Arc<AtomicBool>,
 }
 
 impl RunHandle {
@@ -60,6 +65,7 @@ impl RunHandle {
         }
         drop(state);
         self.pause_after_step.store(false, Ordering::SeqCst);
+        self.cancelled.store(true, Ordering::SeqCst);
         self.notify.notify_one();
         sink.emit(PipelineEvent::RunStopped { run_id });
         Ok(())
@@ -84,6 +90,112 @@ enum Action {
 /// The testable orchestrator core.
 pub struct Pipeline {
     agents: AgentRegistry,
+}
+
+struct ConfiguredAssetGenerator {
+    local_fallback: bool,
+    used_fallback: AtomicBool,
+    cancelled: Arc<AtomicBool>,
+}
+
+impl AssetGenerator for ConfiguredAssetGenerator {
+    fn generate<'a>(
+        &'a self,
+        task: &'a AssetTask,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<GeneratedArtifact, String>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            if self.cancelled.load(Ordering::SeqCst) {
+                return Err(crate::asset_queue::scheduler::ASSET_QUEUE_CANCELLED.to_string());
+            }
+            let result = generate_configured_asset(task).await;
+            if self.cancelled.load(Ordering::SeqCst) {
+                return Err(crate::asset_queue::scheduler::ASSET_QUEUE_CANCELLED.to_string());
+            }
+            match result {
+                Ok(artifact) => Ok(artifact),
+                Err(_) if self.local_fallback => {
+                    self.used_fallback.store(true, Ordering::SeqCst);
+                    Ok(local_placeholder(task.kind))
+                }
+                Err(error) => Err(error),
+            }
+        })
+    }
+}
+
+async fn generate_configured_asset(task: &AssetTask) -> Result<GeneratedArtifact, String> {
+    let media = match task.kind {
+        AssetKind::Background | AssetKind::Figure => {
+            let config = crate::ai::config::load_image_config();
+            crate::ai::commands::generate_image_media(
+                None,
+                task.prompt.clone(),
+                configured_model(&config.model)?,
+                None,
+            )
+            .await?
+        }
+        AssetKind::Tts => {
+            let config = crate::ai::config::load_tts_config();
+            crate::ai::commands::generate_tts_media(
+                task.text.clone().unwrap_or_default(),
+                task.prompt.clone(),
+                configured_model(&config.model)?,
+                "mp3".to_string(),
+            )
+            .await?
+        }
+        AssetKind::Bgm | AssetKind::Sfx => {
+            let config = crate::ai::config::load_music_config();
+            crate::ai::commands::generate_music_media(
+                task.prompt.clone(),
+                configured_model(&config.model)?,
+                "mp3".to_string(),
+            )
+            .await?
+        }
+    };
+    let encoded = media
+        .base64_data
+        .split_once(',')
+        .map(|(_, payload)| payload)
+        .unwrap_or(media.base64_data.as_str());
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded.trim())
+        .map_err(|error| format!("failed to decode generated media: {error}"))?;
+    Ok(GeneratedArtifact {
+        extension: media.extension,
+        bytes,
+    })
+}
+
+fn configured_model(value: &str) -> Result<String, String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .find(|model| !model.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| "asset provider has no configured model".to_string())
+}
+
+fn local_placeholder(kind: AssetKind) -> GeneratedArtifact {
+    if matches!(kind, AssetKind::Background | AssetKind::Figure) {
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+XfP7WQAAAABJRU5ErkJggg==")
+            .expect("embedded placeholder png is valid");
+        return GeneratedArtifact {
+            extension: "png".to_string(),
+            bytes,
+        };
+    }
+    let mut bytes = b"RIFF\x24\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0data\0\0\0\0".to_vec();
+    bytes.truncate(44);
+    GeneratedArtifact {
+        extension: "wav".to_string(),
+        bytes,
+    }
 }
 
 impl Pipeline {
@@ -153,6 +265,7 @@ impl Pipeline {
             state: Arc::new(Mutex::new(state)),
             notify: Arc::new(Notify::new()),
             pause_after_step: AtomicBool::new(false),
+            cancelled: Arc::new(AtomicBool::new(false)),
         }))
     }
 
@@ -208,6 +321,7 @@ impl Pipeline {
             state: Arc::new(Mutex::new(state)),
             notify: Arc::new(Notify::new()),
             pause_after_step: AtomicBool::new(false),
+            cancelled: Arc::new(AtomicBool::new(false)),
         }))
     }
 
@@ -259,6 +373,7 @@ impl Pipeline {
             state: Arc::new(Mutex::new(state)),
             notify: Arc::new(Notify::new()),
             pause_after_step: AtomicBool::new(false),
+            cancelled: Arc::new(AtomicBool::new(false)),
         }))
     }
 
@@ -577,12 +692,49 @@ impl Pipeline {
             let state = handle.state.lock().await;
             state.find_step(&id).and_then(|step| step.def.agent.clone())
         };
-        let result = match self.agents.get(kind, agent_key.as_deref()) {
-            Some(agent) => agent.run(&ctx).await,
-            None => Err(AgentError(format!(
-                "no agent registered for step kind '{}'",
-                kind.as_str()
-            ))),
+        let result = if agent_key.as_deref() == Some("assetQueue") {
+            let run_id = handle.state.lock().await.run_id.clone();
+            let generator = Arc::new(ConfiguredAssetGenerator {
+                local_fallback: allow_local_fallback,
+                used_fallback: AtomicBool::new(false),
+                cancelled: handle.cancelled.clone(),
+            });
+            match crate::asset_queue::run_queue(project_path, &run_id, &plan, generator.clone())
+                .await
+            {
+                Ok(queue) => {
+                    let failed = queue
+                        .tasks
+                        .iter()
+                        .filter(|task| task.status == AssetTaskStatus::Failed)
+                        .count();
+                    if failed == 0 {
+                        let downgraded = generator.used_fallback.load(Ordering::SeqCst);
+                        Ok(AgentOutput {
+                            asset_queue: serde_json::to_value(queue).ok(),
+                            warnings: downgraded
+                                .then(|| "部分媒体供应商不可用，已生成本地占位素材".to_string())
+                                .into_iter()
+                                .collect(),
+                            downgrade: downgraded.then(|| "local-placeholder-assets".to_string()),
+                            ..AgentOutput::default()
+                        })
+                    } else {
+                        Err(AgentError(format!(
+                            "asset queue finished with {failed} failed task(s)"
+                        )))
+                    }
+                }
+                Err(error) => Err(AgentError(error)),
+            }
+        } else {
+            match self.agents.get(kind, agent_key.as_deref()) {
+                Some(agent) => agent.run(&ctx).await,
+                None => Err(AgentError(format!(
+                    "no agent registered for step kind '{}'",
+                    kind.as_str()
+                ))),
+            }
         };
         match result {
             Ok(out) => {
@@ -1025,6 +1177,7 @@ fn serialize_output(out: &AgentOutput) -> String {
             "excerpt": draft.beats.first().map(|beat| &beat.text),
         })).collect::<Vec<_>>()),
         "assetPlan": out.asset_plan,
+        "assetQueue": out.asset_queue,
         "scenes": out.scenes.as_ref().map(|scenes| scenes.iter().map(|scene| serde_json::json!({
             "name": scene.name,
             "contentRef": format!("game/scene/{}", scene.name),
@@ -1057,6 +1210,18 @@ fn describe_output(out: &AgentOutput) -> String {
     }
     if let Some(assets) = &out.asset_plan {
         changed.push(format!("assetPlan:{}", assets.len()));
+    }
+    if let Some(queue) = &out.asset_queue {
+        let succeeded = queue["tasks"]
+            .as_array()
+            .map(|tasks| {
+                tasks
+                    .iter()
+                    .filter(|task| task["status"] == "succeeded")
+                    .count()
+            })
+            .unwrap_or(0);
+        changed.push(format!("assetQueue:{} succeeded", succeeded));
     }
     if let Some(scenes) = &out.scenes {
         changed.push(format!("sceneFiles:{}", scenes.len()));
@@ -1108,6 +1273,7 @@ impl RunHandle {
             sink.emit(PipelineEvent::RunResumed { run_id });
         }
         self.notify.notify_one();
+        self.cancelled.store(false, Ordering::SeqCst);
         Ok(())
     }
 
@@ -1195,6 +1361,7 @@ impl RunHandle {
         if resumed {
             sink.emit(PipelineEvent::RunResumed { run_id });
         }
+        self.cancelled.store(false, Ordering::SeqCst);
         self.notify.notify_one();
         Ok(())
     }

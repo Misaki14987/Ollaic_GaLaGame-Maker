@@ -71,6 +71,9 @@ pub struct AgentOutput {
     pub asset_plan: Option<Vec<AssetTaskPlan>>,
     #[serde(default)]
     pub scenes: Option<Vec<SceneScript>>,
+    /// Persisted AssetTaskQueue summary produced by the P2 asset executor.
+    #[serde(default)]
+    pub asset_queue: Option<serde_json::Value>,
     #[serde(default)]
     pub glossary: Option<std::collections::BTreeMap<String, String>>,
     #[serde(default)]

@@ -266,7 +266,7 @@ fn recipe_rejects_unknown_dependency() {
 // ---------- scheduler: tracer bullet ----------
 
 #[tokio::test]
-async fn runs_full_p1_recipe_in_order_and_writes_editable_story() {
+async fn runs_full_p2_recipe_and_binds_generated_assets() {
     let project = fresh_project("happy");
     let sink = Arc::new(RecordingSink::new());
     let clock = StepClock::new();
@@ -306,10 +306,12 @@ async fn runs_full_p1_recipe_in_order_and_writes_editable_story() {
             "step_succeeded:character",
             "step_started:dialogist",
             "step_succeeded:dialogist",
-            "step_started:asset",
-            "step_succeeded:asset",
+            "step_started:assetPlan",
+            "step_succeeded:assetPlan",
             "step_started:scene",
             "step_succeeded:scene",
+            "step_started:assetQueue",
+            "step_succeeded:assetQueue",
             "run_completed",
         ]
     );
@@ -330,11 +332,61 @@ async fn runs_full_p1_recipe_in_order_and_writes_editable_story() {
     let opening = std::fs::read_to_string(project.join("game/scene/start.txt")).unwrap();
     assert!(opening.contains("林夏:"));
     assert!(opening.contains("changeScene:chapter_01.txt;"));
+    assert!(opening.contains("changeBg:"));
+    assert!(opening.contains("bgm:"));
+    assert!(opening.contains("changeFigure:"));
+    assert!(opening.lines().any(|line| line.contains(" -vo_start_")));
     let decision = std::fs::read_to_string(project.join("game/scene/decision.txt")).unwrap();
     assert!(decision.contains(
         "choose:握住她的手，一起承担:ending_trust.txt|遵守协议，回到日常:ending_depart.txt;"
     ));
     assert!(project.join("game/config/characters.json").is_file());
+    assert!(project
+        .join("game/background")
+        .read_dir()
+        .unwrap()
+        .next()
+        .is_some());
+    assert!(project
+        .join("game/figure")
+        .read_dir()
+        .unwrap()
+        .next()
+        .is_some());
+    assert!(project
+        .join("game/bgm")
+        .read_dir()
+        .unwrap()
+        .next()
+        .is_some());
+    assert!(project
+        .join("game/vocal")
+        .read_dir()
+        .unwrap()
+        .next()
+        .is_some());
+    let asset_queue = crate::asset_queue::load_queue(&project).unwrap();
+    assert!(!asset_queue.tasks.is_empty());
+    assert!(asset_queue
+        .tasks
+        .iter()
+        .all(|task| task.status == crate::asset_queue::AssetTaskStatus::Succeeded));
+    assert!(asset_queue
+        .tasks
+        .iter()
+        .all(|task| task.attempts.len() <= 4));
+    let asset_step = handle
+        .state
+        .lock()
+        .await
+        .find_step("assetQueue")
+        .unwrap()
+        .clone();
+    assert_eq!(
+        asset_step.history[0].downgrade.as_deref(),
+        Some("local-placeholder-assets")
+    );
+    assert!(!asset_step.history[0].warnings.is_empty());
 
     // Run history was recorded.
     assert_eq!(plan.pipeline_runs.len(), 1);

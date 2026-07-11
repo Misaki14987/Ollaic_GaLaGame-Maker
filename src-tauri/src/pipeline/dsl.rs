@@ -143,7 +143,7 @@ impl FlowRecipe {
     }
 }
 
-/// The P1 prompt-to-editable-WebGAL production recipe.
+/// The P2 prompt-to-playable-assets production recipe.
 pub fn default_recipe() -> FlowRecipe {
     FlowRecipe::new()
         .step(StepDef::new("plan", StepKind::Plan))
@@ -156,14 +156,19 @@ pub fn default_recipe() -> FlowRecipe {
                 .depends_on("character"),
         )
         .step(
-            StepDef::new("asset", StepKind::Asset)
+            StepDef::new("assetPlan", StepKind::Asset)
                 .agent("assetPlanner")
                 .depends_on("dialogist"),
         )
         .step(
             StepDef::new("scene", StepKind::Scene)
                 .agent("sceneScript")
-                .depends_on("asset"),
+                .depends_on("assetPlan"),
+        )
+        .step(
+            StepDef::new("assetQueue", StepKind::Asset)
+                .agent("assetQueue")
+                .depends_on("scene"),
         )
 }
 

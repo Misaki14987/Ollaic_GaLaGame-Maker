@@ -2,6 +2,7 @@
 
 mod agents;
 mod ai;
+mod asset_queue;
 mod assets;
 mod characters;
 mod json_store;
@@ -10,9 +11,9 @@ mod pipeline;
 mod story_plan;
 mod webgal;
 
+use pipeline::commands::Orchestrator;
 use std::path::PathBuf;
 use tauri::Manager;
-use pipeline::commands::Orchestrator;
 use webgal::runtime_manager::{self, RuntimeInfo};
 use webgal::runtime_server::RuntimeServer;
 
@@ -201,6 +202,10 @@ fn main() {
             ai::commands::get_ai_agent_trace_path,
             ai::commands::append_ai_agent_trace,
             ai::commands::generate_batch_tts,
+            asset_queue::commands::asset_queue_get,
+            asset_queue::commands::asset_queue_preview_artifact,
+            asset_queue::commands::asset_queue_delete_artifact,
+            asset_queue::commands::asset_queue_promote_artifact,
             // Matting (background removal)
             matting::commands::remove_background,
             // Assets
