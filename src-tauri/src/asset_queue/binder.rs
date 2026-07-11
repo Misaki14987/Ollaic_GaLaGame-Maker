@@ -49,20 +49,7 @@ pub fn bind_asset(project_path: &Path, task: &AssetTask) -> Result<String, Strin
     crate::json_store::write_crash_safe(&target, &bytes)
         .map_err(|error| format!("failed to promote asset {}: {error}", target.display()))?;
 
-    let binding = (|| {
-        match task.kind {
-            AssetKind::Background => {
-                bind_scene_command(project_path, task, &filename, CommandType::ChangeBg)?
-            }
-            AssetKind::Figure => bind_figure(project_path, task, &filename)?,
-            AssetKind::Bgm => bind_scene_command(project_path, task, &filename, CommandType::Bgm)?,
-            AssetKind::Sfx => {
-                bind_scene_command(project_path, task, &filename, CommandType::PlayEffect)?
-            }
-            AssetKind::Tts => bind_tts(project_path, task, &filename)?,
-        }
-        update_asset_metadata(project_path, task, &filename)
-    })();
+    let binding = apply_binding(project_path, task, &filename);
     if let Err(error) = binding {
         return match restore_binding_files(snapshots) {
             Ok(()) => Err(error),
@@ -70,6 +57,47 @@ pub fn bind_asset(project_path: &Path, task: &AssetTask) -> Result<String, Strin
         };
     }
     Ok(filename)
+}
+
+/// Restore scene/config references to an already-promoted successful asset.
+pub fn rebind_asset(project_path: &Path, task: &AssetTask) -> Result<String, String> {
+    let filename = task
+        .asset_file
+        .as_deref()
+        .ok_or_else(|| format!("task {} has no promoted asset", task.id))?;
+    if Path::new(filename).components().count() != 1 || filename.contains('\\') {
+        return Err(format!("invalid promoted asset filename: {filename}"));
+    }
+    let target = project_path
+        .join("game")
+        .join(task.kind.game_dir())
+        .join(filename);
+    if !target.is_file() {
+        return Err(format!("promoted asset is missing: {}", target.display()));
+    }
+    let snapshots = snapshot_binding_files(project_path, &target)?;
+    if let Err(error) = apply_binding(project_path, task, filename) {
+        return match restore_binding_files(snapshots) {
+            Ok(()) => Err(error),
+            Err(rollback) => Err(format!("{error}; rollback failed: {rollback}")),
+        };
+    }
+    Ok(filename.to_string())
+}
+
+fn apply_binding(project_path: &Path, task: &AssetTask, filename: &str) -> Result<(), String> {
+    match task.kind {
+        AssetKind::Background => {
+            bind_scene_command(project_path, task, filename, CommandType::ChangeBg)?
+        }
+        AssetKind::Figure => bind_figure(project_path, task, filename)?,
+        AssetKind::Bgm => bind_scene_command(project_path, task, filename, CommandType::Bgm)?,
+        AssetKind::Sfx => {
+            bind_scene_command(project_path, task, filename, CommandType::PlayEffect)?
+        }
+        AssetKind::Tts => bind_tts(project_path, task, filename)?,
+    }
+    update_asset_metadata(project_path, task, filename)
 }
 
 fn validate_stem(value: &str) -> Result<(), String> {
