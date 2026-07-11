@@ -33,7 +33,7 @@ impl Agent for CharacterAgent {
                 "chapters": ctx.chapters,
                 "scenePlans": ctx.scene_plans,
                 "stepInstruction": ctx.instruction,
-                "requirements": "生成 3-5 个可直接保存的角色卡。id 使用稳定英文小写标识，并覆盖 scenePlans.characterIds。name 是 WebGAL 对白中的显示名。description、personality、dialogueStyle、keywords 必须具体。sprites 留空，资产由 P2 生成。"
+                "requirements": "生成 3-5 个可直接保存的角色卡。id 使用稳定英文小写标识，并覆盖 scenePlans.characterIds；若对 provisional characterId 做了小写化、翻译或改名，必须把原值逐字保存在该角色 aliases。name 是 WebGAL 对白中的显示名。description、personality、dialogueStyle、keywords 必须具体。sprites 留空，资产由 P2 生成。"
             });
             if let Some(routed) = generate_structured::<CharacterResponse>(
                 "Character / 角色设计",
