@@ -19,7 +19,7 @@
 
 | 模块 | 状态 | 说明 |
 |------|------|------|
-| 端到端 Agent 形态 | **P0 已完成** | Pipeline Orchestrator、StoryPlan IR、FlowBoard、暂停/续跑/重跑/跳过与崩溃恢复已闭环；P1–P3 继续按 [`v2-agent-pipeline.md`](./v2-agent-pipeline.md) 推进 |
+| 端到端 Agent 形态 | **P1 已完成** | P0 的 Flow 运行时已稳定；Plan → Memory → Plotter → Character → Dialogist → AssetPlanner → SceneScript 已实现「Production Brief → 可编辑 WebGAL」内容闭环，P2–P3 继续按 [`v2-agent-pipeline.md`](./v2-agent-pipeline.md) 推进 |
 
 ## 模块索引
 

@@ -182,12 +182,14 @@ interface StoryPlan {
 
 **作用**：单 LLM 写不出 5w–10w 字一致性作品。按职责拆分，每个 Agent 独立 system prompt / 上下文裁剪 / 模型路由。
 
-**目标源码**：
-- `src-tauri/src/agents/worldbuilder.rs`
-- `src-tauri/src/agents/plotter.rs`
+**当前源码**：
+- `src-tauri/src/agents/plan.rs`
+- `src-tauri/src/agents/memory.rs` — Worldbuilder 职责
+- `src-tauri/src/agents/outline.rs` — Plotter 职责
+- `src-tauri/src/agents/character.rs`
 - `src-tauri/src/agents/dialogist.rs`
 - `src-tauri/src/agents/asset_planner.rs`
-- `src-tauri/src/agents/reviewer.rs`
+- `src-tauri/src/agents/scene.rs` — 确定性 SceneScript 编译
 - `src-tauri/src/agents/router.rs` — 按 step 路由到合适 Agent + 模型
 
 **模型路由建议**：
@@ -200,7 +202,15 @@ interface StoryPlan {
 | AssetPlanner | 结构化输出 | 视觉语言可外接 |
 | Reviewer | 长上下文 + 强推理 | — |
 
-**验收**：5 个 Agent 都能被 pipeline 独立调用；新增 Agent 无需改 Orchestrator。
+P1 已实现前六类内容职责；Reviewer 属于 P3 Quality Gate。各 Agent 通过 `AgentRegistry` 被 pipeline 独立调用，新增 Agent 无需修改 Orchestrator。
+
+#### 结构化输出边界（P1 已实现）
+
+- OpenAI / DeepSeek 内容 Agent 请求启用 JSON Mode，先约束为合法 JSON。
+- 响应必须通过 Rust `serde` 类型校验；字符串中的未转义控制字符由解析器确定性转义。
+- 类型校验失败时，携带原上下文、原响应和校验错误自动修复一次；仍失败则 Flow Step 失败，不写入 StoryPlan。
+- Agent 自身继续执行场景覆盖、角色完整性、脚本可编译性等语义校验。
+- JSON Mode 不保证 Schema 或内容正确。只有明确支持 strict JSON Schema 的 provider 才能增加生成阶段的 Schema 约束；无论 provider 能力如何，应用侧校验不得省略。
 
 ---
 
@@ -372,7 +382,7 @@ Release Candidate 可以被结构性叙事问题阻断，例如分支缺乏动�
 | 切片 | 内容 | 价值锚点 |
 |---|---|---|
 | **P0 — Flow Shell（已完成）** | Pipeline Orchestrator + StoryPlan IR + FlowBoard + 2 个内置确定性 step（Plan + Outline） | 项目以 FlowBoard 为入口，DAG 状态、干预和崩溃恢复已闭环 |
-| **P1 — 内容链路** | 接 Plotter → Dialogist → AssetPlanner → SceneScript | 「提示词 → 可读剧本」闭环 |
+| **P1 — 内容链路（已完成）** | Plan → Memory → Plotter → Character → Dialogist → AssetPlanner → SceneScript | 「Production Brief → 可编辑 WebGAL」闭环 |
 | **P2 — 资产闭环** | AssetTaskQueue + 自动绑定 + 并发限流 | 真正闭环 |
 | **P3 — 试玩 & 自审** | Quality Gate + One-Click Run & Play + Reviewer Agent | 端到端可玩 + 可信赖 |
 
@@ -388,6 +398,6 @@ P0 是地基，其余切片可以基于 P0 并行。**强烈建议先实现 P0**
 - [x] IR 落盘格式：JSON（ADR 0054）
 - [x] Pipeline 持久化粒度：每 step 状态转换一次（ADR 0054）
 - [x] 事件总线传输：Tauri event（ADR 0055）
-- [ ] 多 Agent 上下文裁剪策略（每个 Agent 拿到 IR 的哪个子集）
+- [x] P1 多 Agent 上下文按职责显式投影；长篇作品的动态裁剪留待质量与成本测试后扩展
 - [ ] AssetTaskQueue 并发上限默认值（家用网络与 API rate 平衡）
 - [ ] Quality Gate 中的「致命 vs 警告」分级阈值
