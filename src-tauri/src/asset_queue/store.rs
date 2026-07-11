@@ -100,6 +100,7 @@ pub fn derive_queue(
             attempts: Vec::new(),
             asset_file: None,
             error: None,
+            used_local_fallback: false,
         });
     }
 
@@ -143,6 +144,7 @@ pub fn derive_queue(
                     attempts: Vec::new(),
                     asset_file: None,
                     error: None,
+                    used_local_fallback: false,
                 });
             }
         }
@@ -254,4 +256,5 @@ mod tests {
         assert_eq!(queue.tasks[2].prompt, "voice-42");
         let _ = fs::remove_dir_all(project);
     }
+
 }

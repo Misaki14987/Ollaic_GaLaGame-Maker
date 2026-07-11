@@ -1,6 +1,7 @@
 use std::future::Future;
 use std::path::Path;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -17,6 +18,7 @@ pub const ASSET_QUEUE_CANCELLED: &str = "asset queue cancelled";
 pub struct GeneratedArtifact {
     pub extension: String,
     pub bytes: Vec<u8>,
+    pub used_local_fallback: bool,
 }
 
 pub trait AssetGenerator: Send + Sync {
@@ -34,6 +36,26 @@ pub async fn run_queue(
     plan: &StoryPlan,
     generator: Arc<dyn AssetGenerator>,
 ) -> Result<AssetQueue, String> {
+    run_queue_cancellable(
+        project_path,
+        run_id,
+        plan,
+        generator,
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(Mutex::new(())),
+    )
+    .await
+}
+
+pub async fn run_queue_cancellable(
+    project_path: &Path,
+    run_id: &str,
+    plan: &StoryPlan,
+    generator: Arc<dyn AssetGenerator>,
+    cancelled: Arc<AtomicBool>,
+    binding_gate: Arc<Mutex<()>>,
+) -> Result<AssetQueue, String> {
+    let _queue_guard = super::lock_queue_writes().await;
     let mut queue = load_queue(project_path)?;
     let same_run = queue.run_id == run_id;
     if !same_run {
@@ -104,7 +126,19 @@ pub async fn run_queue(
     }
     generated.sort_unstable();
 
-    for index in generated {
+    for (position, &index) in generated.iter().enumerate() {
+        let _binding_guard = binding_gate.lock().await;
+        if cancelled.load(Ordering::SeqCst) {
+            let mut state = queue.lock().await;
+            for &pending in &generated[position..] {
+                if state.tasks[pending].status != AssetTaskStatus::Succeeded {
+                    state.tasks[pending].status = AssetTaskStatus::Pending;
+                }
+            }
+            state.updated_at = now_ms();
+            save_queue(&project_path, &state)?;
+            return Err(ASSET_QUEUE_CANCELLED.to_string());
+        }
         let task = queue.lock().await.tasks[index].clone();
         let result = bind_asset(&project_path, &task);
         let mut state = queue.lock().await;
@@ -114,6 +148,12 @@ pub async fn run_queue(
                 task.status = AssetTaskStatus::Succeeded;
                 task.asset_file = Some(filename);
                 task.error = None;
+                task.used_local_fallback = task
+                    .attempts
+                    .iter()
+                    .rev()
+                    .find(|attempt| attempt.artifact.is_some())
+                    .is_some_and(|attempt| attempt.used_local_fallback);
             }
             Err(error) => {
                 task.status = AssetTaskStatus::Failed;
@@ -164,7 +204,7 @@ async fn generate_task(
             .await
             .and_then(|generated| write_artifact(project_path, &task, attempt, generated));
         match generated {
-            Ok(artifact) => {
+            Ok((artifact, used_local_fallback)) => {
                 let mut state = queue.lock().await;
                 state.tasks[index].attempts.push(AssetAttempt {
                     attempt,
@@ -172,6 +212,7 @@ async fn generate_task(
                     finished_at: now_ms(),
                     artifact: Some(artifact.to_string_lossy().into_owned()),
                     error: None,
+                    used_local_fallback,
                 });
                 state.updated_at = now_ms();
                 save_queue(project_path, &state)?;
@@ -189,6 +230,7 @@ async fn generate_task(
                     finished_at: now_ms(),
                     artifact: None,
                     error: Some(error.clone()),
+                    used_local_fallback: false,
                 });
                 task.error = Some(error);
                 task.status = if attempt < attempt_limit {
@@ -211,7 +253,7 @@ fn write_artifact(
     task: &AssetTask,
     attempt: u32,
     generated: GeneratedArtifact,
-) -> Result<std::path::PathBuf, String> {
+) -> Result<(std::path::PathBuf, bool), String> {
     validate_extension(&generated.extension)?;
     validate_component(&task.id)?;
     let artifact = project_path
@@ -228,7 +270,7 @@ fn write_artifact(
     }
     crate::json_store::write_crash_safe(&artifact, &generated.bytes)
         .map_err(|error| format!("failed to write artifact {}: {error}", artifact.display()))?;
-    Ok(artifact)
+    Ok((artifact, generated.used_local_fallback))
 }
 
 fn validate_limits(queue: &AssetQueue) -> Result<(), String> {
@@ -273,6 +315,10 @@ mod tests {
     struct AlwaysGenerate;
     struct AlwaysFail(AtomicUsize);
     struct FailFourThenSucceed(AtomicUsize);
+    struct BlockingGenerator {
+        started: Arc<tokio::sync::Semaphore>,
+        proceed: Arc<tokio::sync::Semaphore>,
+    }
     struct ConcurrencyProbe {
         current: [AtomicUsize; 3],
         maximum: [AtomicUsize; 3],
@@ -290,6 +336,7 @@ mod tests {
                     Ok(GeneratedArtifact {
                         extension: "png".to_string(),
                         bytes: b"image".to_vec(),
+                        used_local_fallback: false,
                     })
                 }
             })
@@ -305,6 +352,7 @@ mod tests {
                 Ok(GeneratedArtifact {
                     extension: "wav".to_string(),
                     bytes: b"audio".to_vec(),
+                    used_local_fallback: false,
                 })
             })
         }
@@ -334,8 +382,30 @@ mod tests {
                     Ok(GeneratedArtifact {
                         extension: "png".to_string(),
                         bytes: b"image".to_vec(),
+                        used_local_fallback: false,
                     })
                 }
+            })
+        }
+    }
+
+    impl AssetGenerator for BlockingGenerator {
+        fn generate<'a>(
+            &'a self,
+            _task: &'a AssetTask,
+        ) -> Pin<Box<dyn Future<Output = Result<GeneratedArtifact, String>> + Send + 'a>> {
+            Box::pin(async move {
+                self.started.add_permits(1);
+                self.proceed
+                    .acquire()
+                    .await
+                    .map_err(|_| "test semaphore closed".to_string())?
+                    .forget();
+                Ok(GeneratedArtifact {
+                    extension: "png".to_string(),
+                    bytes: b"image".to_vec(),
+                    used_local_fallback: false,
+                })
             })
         }
     }
@@ -371,6 +441,7 @@ mod tests {
                 Ok(GeneratedArtifact {
                     extension: if class == 0 { "png" } else { "wav" }.to_string(),
                     bytes: vec![class as u8],
+                    used_local_fallback: false,
                 })
             })
         }
@@ -390,6 +461,7 @@ mod tests {
             attempts: Vec::new(),
             asset_file: None,
             error: None,
+            used_local_fallback: false,
         }
     }
 
@@ -397,7 +469,7 @@ mod tests {
     async fn retries_generation_then_binds_serially() {
         let project = std::env::temp_dir().join(format!("ollaic_queue_run_{}", now_ms()));
         std::fs::create_dir_all(project.join("game/scene")).unwrap();
-        std::fs::write(project.join("game/scene/start.txt"), ":hello;\n").unwrap();
+        std::fs::write(project.join("game/scene/start.txt"), "; empty\n").unwrap();
         let queue = AssetQueue::new(
             "run-1",
             vec![AssetTask {
@@ -413,6 +485,7 @@ mod tests {
                 attempts: Vec::new(),
                 asset_file: None,
                 error: None,
+                used_local_fallback: false,
             }],
             now_ms(),
         );
@@ -454,12 +527,13 @@ mod tests {
                 prompt: "narrator".to_string(),
                 scene_ref: Some("start.txt".to_string()),
                 character_ref: None,
-                dialogue_index: Some(0),
-                text: Some("stale".to_string()),
+                dialogue_index: Some(99),
+                text: Some("actual".to_string()),
                 status: AssetTaskStatus::Pending,
                 attempts: Vec::new(),
                 asset_file: None,
                 error: None,
+                used_local_fallback: false,
             }],
             now_ms(),
         );
@@ -490,7 +564,9 @@ mod tests {
         std::fs::write(project.join("game/scene/start.txt"), scene).unwrap();
         let mut tasks = Vec::new();
         tasks.extend((0..6).map(|index| task(format!("bg_{index}"), AssetKind::Background, None)));
-        tasks.extend((0..8).map(|index| task(format!("tts_{index}"), AssetKind::Tts, Some(index))));
+        tasks.extend(
+            (0..8).map(|index| task(format!("tts_start_{index}"), AssetKind::Tts, Some(index))),
+        );
         tasks.extend((0..3).map(|index| task(format!("bgm_{index}"), AssetKind::Bgm, None)));
         save_queue(&project, &AssetQueue::new("run-limits", tasks, now_ms())).unwrap();
         let plan = StoryPlan {
@@ -515,7 +591,7 @@ mod tests {
     async fn permanent_failure_stops_after_initial_attempt_plus_three_retries() {
         let project = std::env::temp_dir().join(format!("ollaic_queue_fail_{}", now_ms()));
         std::fs::create_dir_all(project.join("game/scene")).unwrap();
-        std::fs::write(project.join("game/scene/start.txt"), ":line;\n").unwrap();
+        std::fs::write(project.join("game/scene/start.txt"), "; empty\n").unwrap();
         save_queue(
             &project,
             &AssetQueue::new(
@@ -543,7 +619,7 @@ mod tests {
     async fn manual_rerun_gets_a_fresh_retry_budget() {
         let project = std::env::temp_dir().join(format!("ollaic_queue_rerun_{}", now_ms()));
         std::fs::create_dir_all(project.join("game/scene")).unwrap();
-        std::fs::write(project.join("game/scene/start.txt"), ":line;\n").unwrap();
+        std::fs::write(project.join("game/scene/start.txt"), "; empty\n").unwrap();
         save_queue(
             &project,
             &AssetQueue::new(
@@ -585,7 +661,11 @@ mod tests {
                 .join("\n");
             std::fs::write(project.join("game/scene").join(&file), source).unwrap();
             for line in 0..8 {
-                let mut task = task(format!("tts_{scene}_{line}"), AssetKind::Tts, Some(line));
+                let mut task = task(
+                    format!("tts_scene_{scene}_{line}"),
+                    AssetKind::Tts,
+                    Some(line),
+                );
                 task.scene_ref = Some(file.clone());
                 task.text = Some(format!("scene {scene} line {line}"));
                 tasks.push(task);
@@ -612,6 +692,178 @@ mod tests {
             .iter()
             .all(|task| task.status == AssetTaskStatus::Succeeded));
         assert!(started.elapsed() < Duration::from_secs(30));
+        let _ = std::fs::remove_dir_all(project);
+    }
+
+    #[tokio::test]
+    async fn cancellation_after_generation_stops_serial_binding() {
+        let project = std::env::temp_dir().join(format!("ollaic_queue_cancel_bind_{}", now_ms()));
+        std::fs::create_dir_all(project.join("game/scene")).unwrap();
+        std::fs::write(project.join("game/scene/start.txt"), "; empty\n").unwrap();
+        save_queue(
+            &project,
+            &AssetQueue::new(
+                "run-cancel-bind",
+                vec![task("bg_one".into(), AssetKind::Background, None)],
+                now_ms(),
+            ),
+        )
+        .unwrap();
+        let plan = StoryPlan {
+            scenes: vec!["start.txt".into()],
+            ..StoryPlan::new("test")
+        };
+        let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let binding_gate = Arc::new(Mutex::new(()));
+        let binding_guard = binding_gate.lock().await;
+        let run_binding_gate = binding_gate.clone();
+        let run_project = project.clone();
+        let run_cancelled = cancelled.clone();
+        let run = tokio::spawn(async move {
+            run_queue_cancellable(
+                &run_project,
+                "run-cancel-bind",
+                &plan,
+                Arc::new(AlwaysGenerate),
+                run_cancelled,
+                run_binding_gate,
+            )
+            .await
+        });
+        let artifact = project.join(".ollaic/artifacts/assets/bg_one/1.wav");
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !artifact.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("generation did not reach the binding gate");
+        cancelled.store(true, Ordering::SeqCst);
+        drop(binding_guard);
+
+        let result = run.await.unwrap();
+        assert_eq!(result.unwrap_err(), ASSET_QUEUE_CANCELLED);
+        assert!(cancelled.load(Ordering::SeqCst));
+        assert!(!project.join("game/background/bg_one.wav").exists());
+        let _ = std::fs::remove_dir_all(project);
+    }
+
+    #[tokio::test]
+    async fn scheduler_does_not_overwrite_artifact_command_edits() {
+        let project = std::env::temp_dir().join(format!("ollaic_queue_command_race_{}", now_ms()));
+        std::fs::create_dir_all(project.join("game/scene")).unwrap();
+        std::fs::write(project.join("game/scene/start.txt"), "; empty\n").unwrap();
+        let artifact = project.join(".ollaic/artifacts/assets/old/1.png");
+        std::fs::create_dir_all(artifact.parent().unwrap()).unwrap();
+        std::fs::write(&artifact, b"old").unwrap();
+        let mut old = task("old".into(), AssetKind::Background, None);
+        old.status = AssetTaskStatus::Succeeded;
+        old.asset_file = Some("old.png".into());
+        old.attempts.push(AssetAttempt {
+            attempt: 1,
+            started_at: 0,
+            finished_at: 1,
+            artifact: Some(artifact.to_string_lossy().into_owned()),
+            error: None,
+            used_local_fallback: false,
+        });
+        save_queue(
+            &project,
+            &AssetQueue::new(
+                "run-command-race",
+                vec![old, task("new".into(), AssetKind::Background, None)],
+                now_ms(),
+            ),
+        )
+        .unwrap();
+        let started = Arc::new(tokio::sync::Semaphore::new(0));
+        let proceed = Arc::new(tokio::sync::Semaphore::new(0));
+        let generator = Arc::new(BlockingGenerator {
+            started: started.clone(),
+            proceed: proceed.clone(),
+        });
+        let run_project = project.clone();
+        let run = tokio::spawn(async move {
+            run_queue(
+                &run_project,
+                "run-command-race",
+                &StoryPlan {
+                    scenes: vec!["start.txt".into()],
+                    ..StoryPlan::new("test")
+                },
+                generator,
+            )
+            .await
+        });
+        tokio::time::timeout(Duration::from_secs(1), started.acquire())
+            .await
+            .expect("generator did not start")
+            .unwrap()
+            .forget();
+        let edit_project = project.to_string_lossy().into_owned();
+        let mut edit = tokio::spawn(async move {
+            crate::asset_queue::commands::asset_queue_delete_artifact(edit_project, "old".into(), 1)
+                .await
+        });
+        assert!(tokio::time::timeout(Duration::from_millis(20), &mut edit)
+            .await
+            .is_err());
+        proceed.add_permits(10);
+        run.await.unwrap().unwrap();
+        let edited = edit.await.unwrap().unwrap();
+        assert!(edited.tasks[0].attempts[0].artifact.is_none());
+
+        let persisted = load_queue(&project).unwrap();
+        assert!(persisted.tasks[0].attempts[0].artifact.is_none());
+        let _ = std::fs::remove_dir_all(project);
+    }
+
+    #[tokio::test]
+    async fn recovery_preserves_completed_fallback_provenance() {
+        let project = std::env::temp_dir().join(format!("ollaic_queue_provenance_{}", now_ms()));
+        std::fs::create_dir_all(project.join("game/scene")).unwrap();
+        std::fs::write(project.join("game/scene/start.txt"), "; empty\n").unwrap();
+        let mut fallback = task("fallback".into(), AssetKind::Background, None);
+        fallback.status = AssetTaskStatus::Succeeded;
+        fallback.asset_file = Some("fallback.png".into());
+        fallback.used_local_fallback = true;
+        fallback.attempts.push(AssetAttempt {
+            attempt: 1,
+            started_at: 0,
+            finished_at: 1,
+            artifact: None,
+            error: None,
+            used_local_fallback: true,
+        });
+        save_queue(
+            &project,
+            &AssetQueue::new(
+                "run-provenance",
+                vec![
+                    fallback,
+                    task("provider".into(), AssetKind::Background, None),
+                ],
+                now_ms(),
+            ),
+        )
+        .unwrap();
+
+        let recovered = run_queue(
+            &project,
+            "run-provenance",
+            &StoryPlan {
+                scenes: vec!["start.txt".into()],
+                ..StoryPlan::new("test")
+            },
+            Arc::new(AlwaysGenerate),
+        )
+        .await
+        .unwrap();
+
+        assert!(recovered.tasks[0].used_local_fallback);
+        assert!(!recovered.tasks[1].used_local_fallback);
+        let persisted = load_queue(&project).unwrap();
+        assert!(persisted.tasks[0].used_local_fallback);
         let _ = std::fs::remove_dir_all(project);
     }
 }

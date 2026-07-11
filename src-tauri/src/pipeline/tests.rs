@@ -375,6 +375,12 @@ async fn runs_full_p2_recipe_and_binds_generated_assets() {
         .tasks
         .iter()
         .all(|task| task.attempts.len() <= 4));
+    let queue_json = serde_json::to_value(&asset_queue).unwrap();
+    assert!(queue_json["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|task| task["usedLocalFallback"] == true));
     let asset_step = handle
         .state
         .lock()

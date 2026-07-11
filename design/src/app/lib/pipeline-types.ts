@@ -146,6 +146,7 @@ export interface AssetTaskAttempt {
   attempt: number;
   artifact?: string | null;
   error?: string | null;
+  usedLocalFallback?: boolean;
 }
 
 export interface AssetQueueTask {
@@ -159,6 +160,7 @@ export interface AssetQueueTask {
   attempts: AssetTaskAttempt[];
   assetFile?: string | null;
   error?: string | null;
+  usedLocalFallback?: boolean;
 }
 
 export interface AssetQueueState {

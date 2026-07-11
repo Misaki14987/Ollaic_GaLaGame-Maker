@@ -29,6 +29,7 @@ pub struct RunHandle {
     notify: Arc<Notify>,
     pause_after_step: AtomicBool,
     cancelled: Arc<AtomicBool>,
+    asset_binding_gate: Arc<Mutex<()>>,
 }
 
 impl RunHandle {
@@ -38,6 +39,7 @@ impl RunHandle {
         sink: &dyn EventSink,
         clock: &dyn Clock,
     ) -> Result<(), PipelineError> {
+        let _binding_guard = self.asset_binding_gate.lock().await;
         let mut state = self.state.lock().await;
         if state.status.is_terminal() {
             return Ok(());
@@ -94,7 +96,6 @@ pub struct Pipeline {
 
 struct ConfiguredAssetGenerator {
     local_fallback: bool,
-    used_fallback: AtomicBool,
     cancelled: Arc<AtomicBool>,
 }
 
@@ -115,10 +116,7 @@ impl AssetGenerator for ConfiguredAssetGenerator {
             }
             match result {
                 Ok(artifact) => Ok(artifact),
-                Err(_) if self.local_fallback => {
-                    self.used_fallback.store(true, Ordering::SeqCst);
-                    Ok(local_placeholder(task.kind))
-                }
+                Err(_) if self.local_fallback => Ok(local_placeholder(task.kind)),
                 Err(error) => Err(error),
             }
         })
@@ -168,6 +166,7 @@ async fn generate_configured_asset(task: &AssetTask) -> Result<GeneratedArtifact
     Ok(GeneratedArtifact {
         extension: media.extension,
         bytes,
+        used_local_fallback: false,
     })
 }
 
@@ -188,6 +187,7 @@ fn local_placeholder(kind: AssetKind) -> GeneratedArtifact {
         return GeneratedArtifact {
             extension: "png".to_string(),
             bytes,
+            used_local_fallback: true,
         };
     }
     let mut bytes = b"RIFF\x24\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0data\0\0\0\0".to_vec();
@@ -195,6 +195,7 @@ fn local_placeholder(kind: AssetKind) -> GeneratedArtifact {
     GeneratedArtifact {
         extension: "wav".to_string(),
         bytes,
+        used_local_fallback: true,
     }
 }
 
@@ -266,6 +267,7 @@ impl Pipeline {
             notify: Arc::new(Notify::new()),
             pause_after_step: AtomicBool::new(false),
             cancelled: Arc::new(AtomicBool::new(false)),
+            asset_binding_gate: Arc::new(Mutex::new(())),
         }))
     }
 
@@ -322,6 +324,7 @@ impl Pipeline {
             notify: Arc::new(Notify::new()),
             pause_after_step: AtomicBool::new(false),
             cancelled: Arc::new(AtomicBool::new(false)),
+            asset_binding_gate: Arc::new(Mutex::new(())),
         }))
     }
 
@@ -374,6 +377,7 @@ impl Pipeline {
             notify: Arc::new(Notify::new()),
             pause_after_step: AtomicBool::new(false),
             cancelled: Arc::new(AtomicBool::new(false)),
+            asset_binding_gate: Arc::new(Mutex::new(())),
         }))
     }
 
@@ -696,11 +700,17 @@ impl Pipeline {
             let run_id = handle.state.lock().await.run_id.clone();
             let generator = Arc::new(ConfiguredAssetGenerator {
                 local_fallback: allow_local_fallback,
-                used_fallback: AtomicBool::new(false),
                 cancelled: handle.cancelled.clone(),
             });
-            match crate::asset_queue::run_queue(project_path, &run_id, &plan, generator.clone())
-                .await
+            match crate::asset_queue::run_queue_cancellable(
+                project_path,
+                &run_id,
+                &plan,
+                generator,
+                handle.cancelled.clone(),
+                handle.asset_binding_gate.clone(),
+            )
+            .await
             {
                 Ok(queue) => {
                     let failed = queue
@@ -709,7 +719,9 @@ impl Pipeline {
                         .filter(|task| task.status == AssetTaskStatus::Failed)
                         .count();
                     if failed == 0 {
-                        let downgraded = generator.used_fallback.load(Ordering::SeqCst);
+                        let downgraded = queue.tasks.iter().any(|task| {
+                            task.status == AssetTaskStatus::Succeeded && task.used_local_fallback
+                        });
                         Ok(AgentOutput {
                             asset_queue: serde_json::to_value(queue).ok(),
                             warnings: downgraded

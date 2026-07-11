@@ -35,11 +35,12 @@ pub fn asset_queue_preview_artifact(
 }
 
 #[tauri::command]
-pub fn asset_queue_delete_artifact(
+pub async fn asset_queue_delete_artifact(
     project_path: String,
     task_id: String,
     attempt: u32,
 ) -> Result<AssetQueue, String> {
+    let _guard = super::lock_queue_writes().await;
     let project = Path::new(&project_path);
     let mut queue = load_queue(project)?;
     let artifact = resolve_artifact(project, &queue, &task_id, attempt)?;
@@ -62,11 +63,12 @@ pub fn asset_queue_delete_artifact(
 }
 
 #[tauri::command]
-pub fn asset_queue_promote_artifact(
+pub async fn asset_queue_promote_artifact(
     project_path: String,
     task_id: String,
     attempt: u32,
 ) -> Result<AssetQueue, String> {
+    let _guard = super::lock_queue_writes().await;
     let project = Path::new(&project_path);
     let mut queue = load_queue(project)?;
     let task_index = queue
@@ -83,10 +85,12 @@ pub fn asset_queue_promote_artifact(
     resolve_artifact(project, &queue, &task_id, attempt)?;
     let mut candidate = queue.tasks[task_index].clone();
     candidate.attempts = vec![selected];
+    candidate.used_local_fallback = candidate.attempts[0].used_local_fallback;
     let filename = bind_asset(project, &candidate)?;
     queue.tasks[task_index].status = AssetTaskStatus::Succeeded;
     queue.tasks[task_index].asset_file = Some(filename);
     queue.tasks[task_index].error = None;
+    queue.tasks[task_index].used_local_fallback = candidate.used_local_fallback;
     queue.updated_at = now_ms();
     save_queue(project, &queue)?;
     Ok(queue)
@@ -137,8 +141,8 @@ mod tests {
     use super::*;
     use crate::asset_queue::types::{AssetAttempt, AssetKind, AssetTask};
 
-    #[test]
-    fn artifact_can_be_previewed_promoted_and_deleted() {
+    #[tokio::test]
+    async fn artifact_can_be_previewed_promoted_and_deleted() {
         let project =
             std::env::temp_dir().join(format!("ollaic_artifact_commands_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&project);
@@ -165,9 +169,11 @@ mod tests {
                     finished_at: 2,
                     artifact: Some(artifact.to_string_lossy().into_owned()),
                     error: None,
+                    used_local_fallback: false,
                 }],
                 asset_file: None,
                 error: Some("review rejected".into()),
+                used_local_fallback: false,
             }],
             2,
         );
@@ -179,15 +185,18 @@ mod tests {
                 .unwrap()
                 .starts_with("data:image/png;base64,")
         );
-        let promoted =
-            asset_queue_promote_artifact(project_string.clone(), "bg_start".into(), 1).unwrap();
+        let promoted = asset_queue_promote_artifact(project_string.clone(), "bg_start".into(), 1)
+            .await
+            .unwrap();
         assert_eq!(promoted.tasks[0].status, AssetTaskStatus::Succeeded);
         assert!(
             std::fs::read_to_string(project.join("game/scene/start.txt"))
                 .unwrap()
                 .contains("changeBg:bg_start.png;")
         );
-        let cleaned = asset_queue_delete_artifact(project_string, "bg_start".into(), 1).unwrap();
+        let cleaned = asset_queue_delete_artifact(project_string, "bg_start".into(), 1)
+            .await
+            .unwrap();
         assert!(cleaned.tasks[0].attempts[0].artifact.is_none());
         assert!(!artifact.exists());
         let _ = std::fs::remove_dir_all(project);
