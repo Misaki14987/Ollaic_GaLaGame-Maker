@@ -40,14 +40,16 @@ impl Agent for CharacterAgent {
                 concat!(
                     "根据剧情结构创建一致、可演出的角色卡。严格使用 JSON：",
                     r#"{"characters":[{"id":"protagonist","name":"...","aliases":[],"description":"...","personality":"...","stance":"...","keywords":["..."],"dialogueStyle":"...","gender":"...","age":"...","sprites":[],"relations":[],"notes":""}]}"#,
-                    "。id 和 name 必填，字段使用 camelCase。"
+                    "。id 和 name 必填，字段使用 camelCase。relations 可留空；若填写，每项必须同时包含 targetId、relationType、description。"
                 ),
                 &input,
                 ctx.allow_local_fallback,
             ).await? {
-                validate_characters(&routed.value.characters)?;
+                let mut characters = routed.value.characters;
+                discard_incomplete_relations(&mut characters);
+                validate_characters(&characters)?;
                 return Ok(AgentOutput {
-                    characters: Some(routed.value.characters),
+                    characters: Some(characters),
                     model: Some(routed.model),
                     prompt_tokens: routed.prompt_tokens,
                     completion_tokens: routed.completion_tokens,
@@ -154,6 +156,14 @@ fn validate_characters(characters: &[Character]) -> Result<(), AgentError> {
     Ok(())
 }
 
+fn discard_incomplete_relations(characters: &mut [Character]) {
+    for character in characters {
+        character.relations.retain(|relation| {
+            !relation.target_id.trim().is_empty() && !relation.relation_type.trim().is_empty()
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -165,6 +175,24 @@ mod tests {
         let parsed: CharacterResponse =
             serde_json::from_str(response).expect("numeric age should be accepted");
         assert_eq!(parsed.characters[0].age, "28");
+    }
+
+    #[test]
+    fn model_response_accepts_incomplete_optional_relations() {
+        let response = r#"{"characters":[
+            {"id":"hero","name":"陆川","relations":[
+                {"relationType":"朋友"},
+                {"targetId":"heroine","relationType":"朋友"}
+            ]},
+            {"id":"heroine","name":"林夏","relations":[{"targetId":"hero"}]}
+        ]}"#;
+        let mut parsed: CharacterResponse = serde_json::from_str(response)
+            .expect("incomplete optional relations should not reject all character cards");
+        discard_incomplete_relations(&mut parsed.characters);
+        assert_eq!(parsed.characters.len(), 2);
+        assert_eq!(parsed.characters[0].relations.len(), 1);
+        assert_eq!(parsed.characters[0].relations[0].target_id, "heroine");
+        assert!(parsed.characters[1].relations.is_empty());
     }
 
     #[tokio::test]
