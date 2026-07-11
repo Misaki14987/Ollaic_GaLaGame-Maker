@@ -7,7 +7,7 @@ use crate::story_plan::types::{
     DialogueBeat, FigureCue, FigureCueAction, FigureStagePosition, SceneDraft, ScenePlan,
 };
 
-use super::router::generate_structured;
+use super::router::{contract_error, generate_structured_validated};
 use super::{Agent, AgentContext, AgentError, AgentOutput};
 
 pub struct DialogistAgent;
@@ -50,21 +50,23 @@ impl Agent for DialogistAgent {
                 "stepInstruction": ctx.instruction,
                 "requirements": "每个 scenePlan 对应一个 sceneDraft，sceneId 必须一致；每场至少 8 个 beat。speaker 为角色 name 或 null（旁白），text 不含 WebGAL 命令。必须用 figureCues 显式决定镜头需要的角色何时 show/hide；show 必须给项目已有 characterId、left/center/right position 和安全英文 emotion 标签，hide 只需 characterId。可根据演出需要补充 scenePlan 未列出的已有角色，但不要把全部角色默认上屏。对白要推进冲突、体现人物口吻。"
             });
-            if let Some(mut routed) = generate_structured::<DialogistResponse>(
+            if let Some(routed) = generate_structured_validated::<DialogistResponse, _>(
                 "Dialogist / 场景对白",
                 "把场景卡扩写成可编译的结构化旁白、对白和演出。JSON 格式：{\"sceneDrafts\":[{\"sceneId\":\"...\",\"title\":\"...\",\"beats\":[{\"speaker\":null,\"text\":\"...\",\"figureCues\":[{\"action\":\"show\",\"characterId\":\"heroine\",\"position\":\"right\",\"emotion\":\"default\"}]}]}]}。",
                 &input,
                 ctx.allow_local_fallback,
+                |response| {
+                    fill_missing_titles(ctx.scene_plans, &mut response.scene_drafts);
+                    normalize_figure_cue_character_ids(
+                        ctx.characters,
+                        &mut response.scene_drafts,
+                    );
+                    for draft in &mut response.scene_drafts {
+                        draft.stage_managed = true;
+                    }
+                    validate_drafts(ctx.scene_plans, ctx.characters, &response.scene_drafts)
+                },
             ).await? {
-                fill_missing_titles(ctx.scene_plans, &mut routed.value.scene_drafts);
-                normalize_figure_cue_character_ids(
-                    ctx.characters,
-                    &mut routed.value.scene_drafts,
-                );
-                for draft in &mut routed.value.scene_drafts {
-                    draft.stage_managed = true;
-                }
-                validate_drafts(ctx.scene_plans, ctx.characters, &routed.value.scene_drafts)?;
                 return Ok(AgentOutput {
                     scene_drafts: Some(routed.value.scene_drafts),
                     model: Some(routed.model),
@@ -253,26 +255,77 @@ fn validate_drafts(
     characters: &[crate::characters::types::Character],
     drafts: &[SceneDraft],
 ) -> Result<(), AgentError> {
-    let ids: std::collections::HashSet<&str> =
-        drafts.iter().map(|draft| draft.scene_id.as_str()).collect();
-    if drafts.len() != plans.len() || plans.iter().any(|plan| !ids.contains(plan.id.as_str())) {
-        return Err(AgentError(
-            "Dialogist output does not cover every scene plan".to_string(),
+    if drafts.len() != plans.len() {
+        return Err(contract_error(
+            "$.sceneDrafts",
+            format!("must contain exactly {} drafts", plans.len()),
         ));
     }
-    if drafts.iter().any(|draft| {
-        draft.beats.len() < 4 || draft.beats.iter().any(|beat| beat.text.trim().is_empty())
-    }) {
-        return Err(AgentError(
-            "Dialogist returned an empty or undersized scene".to_string(),
-        ));
+    let plan_ids: std::collections::HashSet<&str> =
+        plans.iter().map(|plan| plan.id.as_str()).collect();
+    let mut draft_ids = std::collections::HashSet::new();
+    for (draft_index, draft) in drafts.iter().enumerate() {
+        let path = format!("$.sceneDrafts[{draft_index}]");
+        if !plan_ids.contains(draft.scene_id.as_str()) {
+            return Err(contract_error(
+                format!("{path}.sceneId"),
+                "references unknown scene plan",
+            ));
+        }
+        if !draft_ids.insert(draft.scene_id.as_str()) {
+            return Err(contract_error(format!("{path}.sceneId"), "must be unique"));
+        }
+        if draft.title.trim().is_empty() {
+            return Err(contract_error(format!("{path}.title"), "must not be empty"));
+        }
+        if draft.beats.len() < 8 {
+            return Err(contract_error(
+                format!("{path}.beats"),
+                "must contain at least 8 beats",
+            ));
+        }
     }
     let character_ids: std::collections::HashSet<&str> = characters
         .iter()
         .map(|character| character.id.as_str())
         .collect();
-    for draft in drafts {
-        for cue in draft.beats.iter().flat_map(|beat| &beat.figure_cues) {
+    let character_names: std::collections::HashSet<&str> = characters
+        .iter()
+        .flat_map(|character| {
+            std::iter::once(character.name.as_str())
+                .chain(character.aliases.iter().map(String::as_str))
+        })
+        .collect();
+    for (draft_index, draft) in drafts.iter().enumerate() {
+        for (beat_index, beat) in draft.beats.iter().enumerate() {
+            let beat_path = format!("$.sceneDrafts[{draft_index}].beats[{beat_index}]");
+            if beat.text.trim().is_empty() {
+                return Err(contract_error(
+                    format!("{beat_path}.text"),
+                    "must not be empty",
+                ));
+            }
+            if let Some(speaker) = beat.speaker.as_deref() {
+                if !character_names.contains(speaker) {
+                    return Err(contract_error(
+                        format!("{beat_path}.speaker"),
+                        format!("references unknown character name or alias: {speaker}"),
+                    ));
+                }
+            }
+        }
+        for (beat_index, cue_index, cue) in
+            draft
+                .beats
+                .iter()
+                .enumerate()
+                .flat_map(|(beat_index, beat)| {
+                    beat.figure_cues
+                        .iter()
+                        .enumerate()
+                        .map(move |(cue_index, cue)| (beat_index, cue_index, cue))
+                })
+        {
             let reason = if !character_ids.contains(cue.character_id.as_str()) {
                 Some("unknown characterId")
             } else if !crate::story_plan::types::is_webgal_flag_value(&cue.character_id) {
@@ -289,10 +342,12 @@ fn validate_drafts(
                 None
             };
             if let Some(reason) = reason {
-                return Err(AgentError(format!(
-                    "Dialogist returned an invalid Figure Cue in scene {} for {}: {}",
-                    draft.scene_id, cue.character_id, reason
-                )));
+                return Err(contract_error(
+                    format!(
+                        "$.sceneDrafts[{draft_index}].beats[{beat_index}].figureCues[{cue_index}]"
+                    ),
+                    reason,
+                ));
             }
         }
     }
@@ -324,6 +379,41 @@ mod tests {
             serde_json::from_str(response).expect("missing draft title should be recoverable");
         fill_missing_titles(&plans, &mut parsed.scene_drafts);
         assert_eq!(parsed.scene_drafts[0].title, "初次相遇");
+    }
+
+    #[test]
+    fn duplicate_scene_draft_reports_exact_scene_id_path() {
+        let plans = ["opening", "ending"].map(|id| ScenePlan {
+            id: id.into(),
+            file: format!("{id}.txt"),
+            chapter_id: "ch1".into(),
+            title: id.into(),
+            summary: id.into(),
+            character_ids: Vec::new(),
+        });
+        let beats = (0..8)
+            .map(|index| DialogueBeat {
+                speaker: None,
+                text: format!("beat {index}"),
+                figure_cues: Vec::new(),
+            })
+            .collect::<Vec<_>>();
+        let drafts = vec![
+            SceneDraft {
+                scene_id: "opening".into(),
+                title: "Opening".into(),
+                stage_managed: true,
+                beats: beats.clone(),
+            },
+            SceneDraft {
+                scene_id: "opening".into(),
+                title: "Duplicate".into(),
+                stage_managed: true,
+                beats,
+            },
+        ];
+        let error = validate_drafts(&plans, &[], &drafts).unwrap_err();
+        assert!(error.0.contains("$.sceneDrafts[1].sceneId"));
     }
 
     #[test]
@@ -379,7 +469,7 @@ mod tests {
         normalize_figure_cue_character_ids(&characters, &mut drafts);
 
         assert_eq!(drafts[0].beats[0].figure_cues[0].character_id, "ailla");
-        drafts[0].beats.extend((0..3).map(|index| DialogueBeat {
+        drafts[0].beats.extend((0..7).map(|index| DialogueBeat {
             speaker: None,
             text: format!("Narration {index}"),
             figure_cues: Vec::new(),
@@ -421,7 +511,7 @@ mod tests {
                 emotion: "angry".into(),
             }],
         }];
-        beats.extend((0..3).map(|index| DialogueBeat {
+        beats.extend((0..7).map(|index| DialogueBeat {
             speaker: None,
             text: format!("Narration {index}"),
             figure_cues: Vec::new(),

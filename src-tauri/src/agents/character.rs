@@ -5,7 +5,7 @@ use serde::Deserialize;
 
 use crate::characters::types::Character;
 
-use super::router::generate_structured;
+use super::router::{contract_error, generate_structured_validated};
 use super::{Agent, AgentContext, AgentError, AgentOutput};
 
 pub struct CharacterAgent;
@@ -35,7 +35,7 @@ impl Agent for CharacterAgent {
                 "stepInstruction": ctx.instruction,
                 "requirements": "生成 3-5 个可直接保存的角色卡。id 使用稳定英文小写标识，并覆盖 scenePlans.characterIds；若对 provisional characterId 做了小写化、翻译或改名，必须把原值逐字保存在该角色 aliases。name 是 WebGAL 对白中的显示名。description、personality、dialogueStyle、keywords 必须具体。sprites 留空，资产由 P2 生成。"
             });
-            if let Some(routed) = generate_structured::<CharacterResponse>(
+            if let Some(routed) = generate_structured_validated::<CharacterResponse, _>(
                 "Character / 角色设计",
                 concat!(
                     "根据剧情结构创建一致、可演出的角色卡。严格使用 JSON：",
@@ -44,12 +44,13 @@ impl Agent for CharacterAgent {
                 ),
                 &input,
                 ctx.allow_local_fallback,
+                |response| {
+                    discard_incomplete_relations(&mut response.characters);
+                    validate_characters(&response.characters, ctx.scene_plans)
+                },
             ).await? {
-                let mut characters = routed.value.characters;
-                discard_incomplete_relations(&mut characters);
-                validate_characters(&characters)?;
                 return Ok(AgentOutput {
-                    characters: Some(characters),
+                    characters: Some(routed.value.characters),
                     model: Some(routed.model),
                     prompt_tokens: routed.prompt_tokens,
                     completion_tokens: routed.completion_tokens,
@@ -133,24 +134,76 @@ fn character(
     }
 }
 
-fn validate_characters(characters: &[Character]) -> Result<(), AgentError> {
+fn validate_characters(
+    characters: &[Character],
+    scene_plans: &[crate::story_plan::ScenePlan],
+) -> Result<(), AgentError> {
     let mut ids = std::collections::HashSet::new();
     if characters.len() < 2 {
-        return Err(AgentError(
-            "Character Agent returned fewer than two characters".to_string(),
+        return Err(contract_error(
+            "$.characters",
+            "must contain at least 2 characters",
         ));
     }
-    for character in characters {
-        if character.id.trim().is_empty() || character.name.trim().is_empty() {
-            return Err(AgentError(
-                "Character Agent returned an unnamed character".to_string(),
+    for (index, character) in characters.iter().enumerate() {
+        let path = format!("$.characters[{index}]");
+        if !crate::story_plan::types::is_webgal_flag_value(&character.id) {
+            return Err(contract_error(
+                format!("{path}.id"),
+                "must be a safe WebGAL id",
             ));
         }
+        if character.name.trim().is_empty() {
+            return Err(contract_error(format!("{path}.name"), "must not be empty"));
+        }
         if !ids.insert(character.id.as_str()) {
-            return Err(AgentError(format!(
-                "Character Agent returned duplicate id: {}",
-                character.id
-            )));
+            return Err(contract_error(format!("{path}.id"), "must be unique"));
+        }
+        for (field, value) in [
+            ("description", character.description.as_str()),
+            ("personality", character.personality.as_str()),
+            ("dialogueStyle", character.dialogue_style.as_str()),
+        ] {
+            if value.trim().is_empty() {
+                return Err(contract_error(
+                    format!("{path}.{field}"),
+                    "must not be empty",
+                ));
+            }
+        }
+        if character.keywords.is_empty() {
+            return Err(contract_error(
+                format!("{path}.keywords"),
+                "must not be empty",
+            ));
+        }
+    }
+    for (scene_index, scene) in scene_plans.iter().enumerate() {
+        for (character_index, reference) in scene.character_ids.iter().enumerate() {
+            let matched = characters.iter().any(|character| {
+                reference.eq_ignore_ascii_case(&character.id)
+                    || reference == &character.name
+                    || character
+                        .aliases
+                        .iter()
+                        .any(|alias| reference.eq_ignore_ascii_case(alias))
+            });
+            if !matched {
+                return Err(contract_error(
+                    format!("$.scenePlans[{scene_index}].characterIds[{character_index}]"),
+                    format!("has no matching character or alias: {reference}"),
+                ));
+            }
+        }
+    }
+    for (index, character) in characters.iter().enumerate() {
+        for (relation_index, relation) in character.relations.iter().enumerate() {
+            if !ids.contains(relation.target_id.as_str()) {
+                return Err(contract_error(
+                    format!("$.characters[{index}].relations[{relation_index}].targetId"),
+                    "references unknown character id",
+                ));
+            }
         }
     }
     Ok(())
@@ -193,6 +246,44 @@ mod tests {
         assert_eq!(parsed.characters[0].relations.len(), 1);
         assert_eq!(parsed.characters[0].relations[0].target_id, "heroine");
         assert!(parsed.characters[1].relations.is_empty());
+    }
+
+    #[test]
+    fn uncovered_provisional_character_id_reports_upstream_path() {
+        let characters = vec![
+            character(
+                "hero",
+                "陆川",
+                "主角",
+                "谨慎",
+                "短句",
+                "男",
+                "17",
+                &["主角"],
+                "中立",
+            ),
+            character(
+                "heroine",
+                "林夏",
+                "女主",
+                "冷静",
+                "简洁",
+                "女",
+                "17",
+                &["女主"],
+                "越界",
+            ),
+        ];
+        let scenes = vec![ScenePlan {
+            id: "opening".into(),
+            file: "start.txt".into(),
+            chapter_id: "ch1".into(),
+            title: "开场".into(),
+            summary: "相遇".into(),
+            character_ids: vec!["missing_role".into()],
+        }];
+        let error = validate_characters(&characters, &scenes).unwrap_err();
+        assert!(error.0.contains("$.scenePlans[0].characterIds[0]"));
     }
 
     #[tokio::test]

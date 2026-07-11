@@ -4,7 +4,7 @@ use std::pin::Pin;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
-use super::router::generate_structured;
+use super::router::{contract_error, generate_structured_validated};
 use super::{Agent, AgentContext, AgentError, AgentOutput};
 
 /// Worldbuilder: creates shared canon and terminology for all downstream Agents.
@@ -15,6 +15,27 @@ struct MemoryResponse {
     worldbook: String,
     #[serde(default)]
     glossary: BTreeMap<String, String>,
+}
+
+fn validate_response(response: &mut MemoryResponse) -> Result<(), AgentError> {
+    if response.worldbook.trim().is_empty() {
+        return Err(contract_error("$.worldbook", "must not be empty"));
+    }
+    if response.glossary.len() < 4 {
+        return Err(contract_error(
+            "$.glossary",
+            "must contain at least 4 terms",
+        ));
+    }
+    for (term, definition) in &response.glossary {
+        if term.trim().is_empty() || definition.trim().is_empty() {
+            return Err(contract_error(
+                format!("$.glossary[{term:?}]"),
+                "term and definition must not be empty",
+            ));
+        }
+    }
+    Ok(())
 }
 
 impl Agent for MemoryAgent {
@@ -35,15 +56,13 @@ impl Agent for MemoryAgent {
                 "stepInstruction": ctx.instruction,
                 "requirements": "世界规则、主要舞台、社会日常、核心秘密、冲突边界；glossary 至少 4 项。"
             });
-            if let Some(routed) = generate_structured::<MemoryResponse>(
+            if let Some(routed) = generate_structured_validated::<MemoryResponse, _>(
                 "Worldbuilder / 世界观设计",
                 "建立能约束后续剧情和对白的世界设定。JSON 格式：{\"worldbook\":\"...\",\"glossary\":{\"术语\":\"定义\"}}。",
                 &input,
                 ctx.allow_local_fallback,
+                validate_response,
             ).await? {
-                if routed.value.worldbook.trim().is_empty() {
-                    return Err(AgentError("Worldbuilder returned an empty worldbook".to_string()));
-                }
                 return Ok(AgentOutput {
                     worldbook: Some(routed.value.worldbook),
                     glossary: Some(routed.value.glossary),
@@ -88,6 +107,16 @@ impl Agent for MemoryAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn undersized_glossary_reports_contract_path() {
+        let mut response = MemoryResponse {
+            worldbook: "规则".into(),
+            glossary: BTreeMap::from([("锚点".into(), "定义".into())]),
+        };
+        let error = validate_response(&mut response).unwrap_err();
+        assert!(error.0.contains("$.glossary"));
+    }
 
     #[tokio::test]
     async fn memory_agent_produces_worldbook_from_synopsis() {

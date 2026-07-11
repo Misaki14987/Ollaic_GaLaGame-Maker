@@ -24,6 +24,7 @@ Ollaic 有两条 AI 工作流：FlowBoard 中的 **Production Agent Flow** 负�
 
 - `src-tauri/src/agents/` — P1 多 Agent 内容生成、结构校验与 WebGAL 编译
 - `src-tauri/src/pipeline/` — Agent Flow 编排、恢复、历史与 StoryPlan 更新
+- [`../agent-flow-contracts.md`](../agent-flow-contracts.md) — 节点输入输出、引用、校验与恢复契约
 - `src-tauri/src/asset_queue/` — P2 资产队列、分类限流、Artifact 与自动绑定
 - `design/src/app/hooks/useAiAgent.ts` — AI 状态机与 Agent 循环
 - `design/src/app/hooks/useChatSession.ts` — 会话存储

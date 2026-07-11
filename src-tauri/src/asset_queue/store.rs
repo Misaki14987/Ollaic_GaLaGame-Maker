@@ -20,13 +20,22 @@ pub fn load_queue(project_path: &Path) -> Result<AssetQueue, String> {
     if candidates.is_empty() {
         return Ok(AssetQueue::new("", Vec::new(), 0));
     }
-    candidates
-        .into_iter()
-        .find_map(|source| serde_json::from_str(&source).ok())
-        .ok_or_else(|| format!("failed to parse asset queue {}", path.display()))
+    let mut last_error = String::new();
+    for source in candidates {
+        match parse_queue(&source) {
+            Ok(queue) => return Ok(queue),
+            Err(error) => last_error = error,
+        }
+    }
+    Err(format!(
+        "failed to parse asset queue {}: {}",
+        path.display(),
+        last_error
+    ))
 }
 
 pub fn save_queue(project_path: &Path, queue: &AssetQueue) -> Result<(), String> {
+    validate_queue(queue)?;
     let path = queue_path(project_path);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -35,6 +44,86 @@ pub fn save_queue(project_path: &Path, queue: &AssetQueue) -> Result<(), String>
     let bytes = serde_json::to_vec_pretty(queue).map_err(|error| error.to_string())?;
     crate::json_store::write_crash_safe(&path, &bytes)
         .map_err(|error| format!("failed to write asset queue {}: {error}", path.display()))
+}
+
+fn parse_queue(source: &str) -> Result<AssetQueue, String> {
+    let mut value: serde_json::Value =
+        serde_json::from_str(source).map_err(|error| format!("invalid JSON: {error}"))?;
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| "$: must be an object".to_string())?;
+    object
+        .entry("version")
+        .or_insert(serde_json::Value::from(1));
+    let queue: AssetQueue = serde_json::from_value(value)
+        .map_err(|error| format!("queue schema violation: {error}"))?;
+    validate_queue(&queue)?;
+    Ok(queue)
+}
+
+fn validate_queue(queue: &AssetQueue) -> Result<(), String> {
+    if queue.version != 1 {
+        return Err(format!(
+            "$.version: unsupported AssetQueue version {} (expected 1)",
+            queue.version
+        ));
+    }
+    if !queue.tasks.is_empty() && queue.run_id.trim().is_empty() {
+        return Err("$.runId: must not be empty when tasks exist".to_string());
+    }
+    for (field, value) in [
+        ("image", queue.limits.image),
+        ("tts", queue.limits.tts),
+        ("music", queue.limits.music),
+    ] {
+        if value == 0 {
+            return Err(format!("$.limits.{field}: must be greater than zero"));
+        }
+    }
+    let mut ids = HashSet::new();
+    for (index, task) in queue.tasks.iter().enumerate() {
+        let path = format!("$.tasks[{index}]");
+        if !is_safe_token(&task.id) || !ids.insert(task.id.as_str()) {
+            return Err(format!("{path}.id: must be a unique safe id"));
+        }
+        if !is_safe_token(&task.target_stem) {
+            return Err(format!("{path}.targetStem: must be a safe filename stem"));
+        }
+        if task.prompt.trim().is_empty() {
+            return Err(format!("{path}.prompt: must not be empty"));
+        }
+        if task.kind == AssetKind::Figure {
+            if task.character_ref.as_deref().is_none_or(str::is_empty) {
+                return Err(format!("{path}.characterRef: required for figure tasks"));
+            }
+            if !task.emotion.as_deref().is_some_and(is_safe_token) {
+                return Err(format!(
+                    "{path}.emotion: required and must be safe for figure tasks"
+                ));
+            }
+        } else if task.emotion.is_some() {
+            return Err(format!("{path}.emotion: only allowed for figure tasks"));
+        }
+        if task.kind == AssetKind::Tts {
+            if task.scene_ref.as_deref().is_none_or(str::is_empty) {
+                return Err(format!("{path}.sceneRef: required for TTS tasks"));
+            }
+            if task.dialogue_index.is_none() {
+                return Err(format!("{path}.dialogueIndex: required for TTS tasks"));
+            }
+            if task.text.as_deref().is_none_or(str::is_empty) {
+                return Err(format!("{path}.text: required for TTS tasks"));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn is_safe_token(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
 }
 
 /// Build executable tasks from the planner output and the compiled scene files.
@@ -244,6 +333,7 @@ fn validate_scene_file(value: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::asset_queue::types::QueueLimits;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_project(name: &str) -> PathBuf {
@@ -276,6 +366,68 @@ mod tests {
         assert_eq!(queue.run_id, "run-1");
         save_queue(&project, &queue).unwrap();
         assert_eq!(load_queue(&project).unwrap(), queue);
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn loads_legacy_queue_without_version_limits_or_status() {
+        let project = temp_project("legacy_queue");
+        let path = queue_path(&project);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            r#"{
+            "runId":"run-old",
+            "updatedAt":1,
+            "tasks":[{
+                "id":"bg_opening",
+                "kind":"background",
+                "targetStem":"bg_opening",
+                "prompt":"room"
+            }]
+        }"#,
+        )
+        .unwrap();
+        let queue = load_queue(&project).unwrap();
+        assert_eq!(queue.version, 1);
+        assert_eq!(queue.limits, QueueLimits::default());
+        assert_eq!(queue.tasks[0].status, AssetTaskStatus::Pending);
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn rejects_unknown_queue_version_with_field_path() {
+        let project = temp_project("future_queue");
+        let path = queue_path(&project);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            r#"{"version":2,"runId":"run","updatedAt":1,"tasks":[]}"#,
+        )
+        .unwrap();
+        let error = load_queue(&project).unwrap_err();
+        assert!(error.contains("$.version"));
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn rejects_duplicate_queue_task_id_with_field_path() {
+        let project = temp_project("duplicate_queue_task");
+        let path = queue_path(&project);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            r#"{
+            "version":1,"runId":"run","updatedAt":1,
+            "tasks":[
+                {"id":"same","kind":"background","targetStem":"a","prompt":"a","status":"pending"},
+                {"id":"same","kind":"background","targetStem":"b","prompt":"b","status":"pending"}
+            ]
+        }"#,
+        )
+        .unwrap();
+        let error = load_queue(&project).unwrap_err();
+        assert!(error.contains("$.tasks[1].id"));
         let _ = fs::remove_dir_all(project);
     }
 

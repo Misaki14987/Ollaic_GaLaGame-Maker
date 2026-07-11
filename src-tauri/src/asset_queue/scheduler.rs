@@ -337,6 +337,7 @@ mod tests {
     struct AlwaysGenerate;
     struct TransparentFigure;
     struct AlwaysFail(AtomicUsize);
+    struct CountingGenerate(AtomicUsize);
     struct FailFourThenSucceed(AtomicUsize);
     struct BlockingGenerator {
         started: Arc<tokio::sync::Semaphore>,
@@ -416,6 +417,22 @@ mod tests {
             Box::pin(async move {
                 self.0.fetch_add(1, Ordering::SeqCst);
                 Err("nope".to_string())
+            })
+        }
+    }
+
+    impl AssetGenerator for CountingGenerate {
+        fn generate<'a>(
+            &'a self,
+            _task: &'a AssetTask,
+        ) -> Pin<Box<dyn Future<Output = Result<GeneratedArtifact, String>> + Send + 'a>> {
+            Box::pin(async move {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Ok(GeneratedArtifact {
+                    extension: "wav".to_string(),
+                    bytes: b"asset".to_vec(),
+                    used_local_fallback: false,
+                })
             })
         }
     }
@@ -589,6 +606,50 @@ mod tests {
                 .unwrap()
                 .contains("changeBg:bg_start.png;")
         );
+        let _ = std::fs::remove_dir_all(project);
+    }
+
+    #[tokio::test]
+    async fn resumes_unfinished_queue_tasks_without_rerunning_succeeded_tasks() {
+        let project = std::env::temp_dir().join(format!("ollaic_queue_resume_{}", now_ms()));
+        std::fs::create_dir_all(project.join("game/scene")).unwrap();
+        std::fs::write(project.join("game/scene/start.txt"), "; empty\n").unwrap();
+        let artifact = project.join(".ollaic/artifacts/assets/done/1.wav");
+        std::fs::create_dir_all(artifact.parent().unwrap()).unwrap();
+        std::fs::write(&artifact, b"done").unwrap();
+        std::fs::create_dir_all(project.join("game/background")).unwrap();
+        std::fs::write(project.join("game/background/done.wav"), b"done").unwrap();
+
+        let mut done = task("done".into(), AssetKind::Background, None);
+        done.status = AssetTaskStatus::Succeeded;
+        done.asset_file = Some("done.wav".into());
+        done.attempts.push(AssetAttempt {
+            attempt: 1,
+            started_at: 1,
+            finished_at: 2,
+            artifact: Some(artifact.to_string_lossy().into_owned()),
+            error: None,
+            used_local_fallback: false,
+        });
+        let mut running = task("running".into(), AssetKind::Background, None);
+        running.status = AssetTaskStatus::Running;
+        let mut retrying = task("retrying".into(), AssetKind::Background, None);
+        retrying.status = AssetTaskStatus::Retrying;
+        let queue = AssetQueue::new("run-resume", vec![done, running, retrying], now_ms());
+        let plan = plan_for(&queue, vec!["start.txt".into()]);
+        save_queue(&project, &queue).unwrap();
+        let generator = Arc::new(CountingGenerate(AtomicUsize::new(0)));
+
+        let resumed = run_queue(&project, "run-resume", &plan, generator.clone())
+            .await
+            .unwrap();
+
+        assert_eq!(generator.0.load(Ordering::SeqCst), 2);
+        assert!(resumed
+            .tasks
+            .iter()
+            .all(|task| task.status == AssetTaskStatus::Succeeded));
+        assert_eq!(resumed.tasks[0].attempts.len(), 1);
         let _ = std::fs::remove_dir_all(project);
     }
 
