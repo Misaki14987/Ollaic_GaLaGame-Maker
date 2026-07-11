@@ -34,7 +34,12 @@ fn plan_round_trips_through_disk() {
         ],
         memory: StoryMemory {
             worldbook: "霓虹学园的世界设定。".to_string(),
-            glossary: BTreeMap::from([("余像".to_string(), "被删除后仍会回响的记忆".to_string())]),
+            glossary: BTreeMap::from([
+                ("余像".to_string(), "被删除后仍会回响的记忆".to_string()),
+                ("回声".to_string(), "重复出现的异常信号".to_string()),
+                ("协议".to_string(), "维护遗忘秩序的规则".to_string()),
+                ("锚点".to_string(), "确认真实记忆的人或物".to_string()),
+            ]),
         },
         characters: Vec::new(),
         scene_plans: vec![ScenePlan {
@@ -302,13 +307,14 @@ fn migrates_historical_partial_node_outputs_on_load() {
         &path,
         r#"{
           "prompt":"legacy",
-          "chapters":[{"id":"ch1","title":"Chapter","summary":"Summary"}],
+          "synopsis":"Legacy synopsis",
+          "chapters":[{"id":"ch1","title":"Chapter"}],
           "characters":[
             {"id":"alice","name":"Alice","relations":[{"targetId":"","relationType":""}]}
           ],
           "scenePlans":[{
             "id":"opening","file":"start.txt","chapterId":"ch1","title":"Opening",
-            "summary":"Summary","characterIds":["alice"]
+            "characterIds":["alice"]
           }],
           "branches":{"entryScene":"opening","edges":[]},
           "sceneDrafts":[{
@@ -324,7 +330,17 @@ fn migrates_historical_partial_node_outputs_on_load() {
 
     let plan = load_plan(&project).unwrap().unwrap();
     assert!(plan.characters[0].relations.is_empty());
+    assert!(!plan.chapters[0].summary.is_empty());
+    assert!(!plan.scene_plans[0].summary.is_empty());
     assert_eq!(plan.scene_drafts[0].title, "Opening");
     assert_eq!(plan.asset_plan[0].id, "figure_alice_default");
     assert_eq!(plan.asset_plan[0].emotion.as_deref(), Some("default"));
+}
+
+#[test]
+fn rejects_partial_memory_with_field_path() {
+    let mut plan = StoryPlan::new("brief");
+    plan.memory.worldbook = "World".into();
+    let error = validate(&plan).unwrap_err();
+    assert!(error.to_string().contains("$.memory.glossary"));
 }
