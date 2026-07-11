@@ -52,17 +52,13 @@ pub struct Orchestrator {
 }
 
 impl Orchestrator {
-    pub fn new() -> Self {
+    pub fn new(app: &tauri::AppHandle) -> Self {
         Orchestrator {
-            pipeline: Arc::new(Pipeline::with_default_agents()),
+            pipeline: Arc::new(Pipeline::with_default_agents_and_matting(
+                crate::matting::commands::resolve_model_path(app),
+            )),
             runs: tokio::sync::Mutex::new(HashMap::new()),
         }
-    }
-}
-
-impl Default for Orchestrator {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

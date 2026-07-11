@@ -335,6 +335,7 @@ mod tests {
 
     struct RetryOnce(AtomicUsize);
     struct AlwaysGenerate;
+    struct TransparentFigure;
     struct AlwaysFail(AtomicUsize);
     struct FailFourThenSucceed(AtomicUsize);
     struct BlockingGenerator {
@@ -374,6 +375,33 @@ mod tests {
                 Ok(GeneratedArtifact {
                     extension: "wav".to_string(),
                     bytes: b"audio".to_vec(),
+                    used_local_fallback: false,
+                })
+            })
+        }
+    }
+
+    fn transparent_png() -> Vec<u8> {
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            1,
+            1,
+            image::Rgba([0, 0, 0, 0]),
+        ))
+        .write_to(&mut bytes, image::ImageFormat::Png)
+        .unwrap();
+        bytes.into_inner()
+    }
+
+    impl AssetGenerator for TransparentFigure {
+        fn generate<'a>(
+            &'a self,
+            _task: &'a AssetTask,
+        ) -> Pin<Box<dyn Future<Output = Result<GeneratedArtifact, String>> + Send + 'a>> {
+            Box::pin(async {
+                Ok(GeneratedArtifact {
+                    extension: "png".to_string(),
+                    bytes: transparent_png(),
                     used_local_fallback: false,
                 })
             })
@@ -475,6 +503,7 @@ mod tests {
             prompt: "test".to_string(),
             scene_ref: Some("start.txt".to_string()),
             character_ref: None,
+            emotion: (kind == AssetKind::Figure).then(|| "default".to_string()),
             dialogue_index: index,
             text: index.map(|value| format!("line {value}")),
             id,
@@ -484,6 +513,36 @@ mod tests {
             asset_file: None,
             error: None,
             used_local_fallback: false,
+        }
+    }
+
+    fn plan_for(queue: &AssetQueue, scenes: Vec<String>) -> StoryPlan {
+        let asset_plan = queue
+            .tasks
+            .iter()
+            .filter(|task| task.kind != AssetKind::Tts)
+            .map(|task| crate::story_plan::AssetTaskPlan {
+                id: task.id.clone(),
+                kind: match task.kind {
+                    AssetKind::Background => "background",
+                    AssetKind::Figure => "figure",
+                    AssetKind::Bgm => "bgm",
+                    AssetKind::Sfx => "sfx",
+                    AssetKind::Tts => unreachable!(),
+                }
+                .to_string(),
+                target_stem: task.target_stem.clone(),
+                prompt: task.prompt.clone(),
+                scene_ref: task.scene_ref.clone(),
+                character_ref: task.character_ref.clone(),
+                emotion: task.emotion.clone(),
+                status: "pending".to_string(),
+            })
+            .collect();
+        StoryPlan {
+            scenes,
+            asset_plan,
+            ..StoryPlan::new("test")
         }
     }
 
@@ -501,6 +560,7 @@ mod tests {
                 prompt: "background".to_string(),
                 scene_ref: Some("start.txt".to_string()),
                 character_ref: None,
+                emotion: None,
                 dialogue_index: None,
                 text: None,
                 status: AssetTaskStatus::Pending,
@@ -511,11 +571,8 @@ mod tests {
             }],
             now_ms(),
         );
+        let plan = plan_for(&queue, vec!["start.txt".to_string()]);
         save_queue(&project, &queue).unwrap();
-        let plan = StoryPlan {
-            scenes: vec!["start.txt".to_string()],
-            ..StoryPlan::new("test")
-        };
         let result = run_queue(
             &project,
             "run-1",
@@ -543,14 +600,15 @@ mod tests {
         let queue = AssetQueue::new(
             "run-2",
             vec![AssetTask {
-                id: "tts_start_0".to_string(),
-                kind: AssetKind::Tts,
-                target_stem: "vo_start_0".to_string(),
-                prompt: "narrator".to_string(),
+                id: "figure_alice".to_string(),
+                kind: AssetKind::Figure,
+                target_stem: "alice_default".to_string(),
+                prompt: "Alice".to_string(),
                 scene_ref: Some("start.txt".to_string()),
-                character_ref: None,
-                dialogue_index: Some(99),
-                text: Some("actual".to_string()),
+                character_ref: Some("alice".to_string()),
+                emotion: Some("default".to_string()),
+                dialogue_index: None,
+                text: None,
                 status: AssetTaskStatus::Pending,
                 attempts: Vec::new(),
                 asset_file: None,
@@ -559,18 +617,15 @@ mod tests {
             }],
             now_ms(),
         );
+        let plan = plan_for(&queue, vec!["start.txt".to_string()]);
         save_queue(&project, &queue).unwrap();
-        let plan = StoryPlan {
-            scenes: vec!["start.txt".to_string()],
-            ..StoryPlan::new("test")
-        };
-        let result = run_queue(&project, "run-2", &plan, Arc::new(AlwaysGenerate))
+        let result = run_queue(&project, "run-2", &plan, Arc::new(TransparentFigure))
             .await
             .unwrap();
         assert_eq!(result.tasks[0].status, AssetTaskStatus::Failed);
-        assert!(!project.join("game/vocal/vo_start_0.wav").exists());
+        assert!(!project.join("game/figure/alice_default.png").exists());
         assert!(project
-            .join(".ollaic/artifacts/assets/tts_start_0/1.wav")
+            .join(".ollaic/artifacts/assets/figure_alice/1.png")
             .is_file());
         let _ = std::fs::remove_dir_all(project);
     }
@@ -590,11 +645,9 @@ mod tests {
             (0..8).map(|index| task(format!("tts_start_{index}"), AssetKind::Tts, Some(index))),
         );
         tasks.extend((0..3).map(|index| task(format!("bgm_{index}"), AssetKind::Bgm, None)));
-        save_queue(&project, &AssetQueue::new("run-limits", tasks, now_ms())).unwrap();
-        let plan = StoryPlan {
-            scenes: vec!["start.txt".to_string()],
-            ..StoryPlan::new("test")
-        };
+        let queue = AssetQueue::new("run-limits", tasks, now_ms());
+        let plan = plan_for(&queue, vec!["start.txt".to_string()]);
+        save_queue(&project, &queue).unwrap();
         let probe = Arc::new(ConcurrencyProbe::new());
         let result = run_queue(&project, "run-limits", &plan, probe.clone())
             .await
@@ -614,19 +667,13 @@ mod tests {
         let project = std::env::temp_dir().join(format!("ollaic_queue_fail_{}", now_ms()));
         std::fs::create_dir_all(project.join("game/scene")).unwrap();
         std::fs::write(project.join("game/scene/start.txt"), "; empty\n").unwrap();
-        save_queue(
-            &project,
-            &AssetQueue::new(
-                "run-fail",
-                vec![task("bg_fail".to_string(), AssetKind::Background, None)],
-                now_ms(),
-            ),
-        )
-        .unwrap();
-        let plan = StoryPlan {
-            scenes: vec!["start.txt".to_string()],
-            ..StoryPlan::new("test")
-        };
+        let queue = AssetQueue::new(
+            "run-fail",
+            vec![task("bg_fail".to_string(), AssetKind::Background, None)],
+            now_ms(),
+        );
+        let plan = plan_for(&queue, vec!["start.txt".to_string()]);
+        save_queue(&project, &queue).unwrap();
         let generator = Arc::new(AlwaysFail(AtomicUsize::new(0)));
         let result = run_queue(&project, "run-fail", &plan, generator.clone())
             .await
@@ -642,19 +689,13 @@ mod tests {
         let project = std::env::temp_dir().join(format!("ollaic_queue_rerun_{}", now_ms()));
         std::fs::create_dir_all(project.join("game/scene")).unwrap();
         std::fs::write(project.join("game/scene/start.txt"), "; empty\n").unwrap();
-        save_queue(
-            &project,
-            &AssetQueue::new(
-                "run-rerun",
-                vec![task("bg_rerun".to_string(), AssetKind::Background, None)],
-                now_ms(),
-            ),
-        )
-        .unwrap();
-        let plan = StoryPlan {
-            scenes: vec!["start.txt".to_string()],
-            ..StoryPlan::new("test")
-        };
+        let queue = AssetQueue::new(
+            "run-rerun",
+            vec![task("bg_rerun".to_string(), AssetKind::Background, None)],
+            now_ms(),
+        );
+        let plan = plan_for(&queue, vec!["start.txt".to_string()]);
+        save_queue(&project, &queue).unwrap();
         let generator = Arc::new(FailFourThenSucceed(AtomicUsize::new(0)));
 
         let failed = run_queue(&project, "run-rerun", &plan, generator.clone())
@@ -722,19 +763,13 @@ mod tests {
         let project = std::env::temp_dir().join(format!("ollaic_queue_cancel_bind_{}", now_ms()));
         std::fs::create_dir_all(project.join("game/scene")).unwrap();
         std::fs::write(project.join("game/scene/start.txt"), "; empty\n").unwrap();
-        save_queue(
-            &project,
-            &AssetQueue::new(
-                "run-cancel-bind",
-                vec![task("bg_one".into(), AssetKind::Background, None)],
-                now_ms(),
-            ),
-        )
-        .unwrap();
-        let plan = StoryPlan {
-            scenes: vec!["start.txt".into()],
-            ..StoryPlan::new("test")
-        };
+        let queue = AssetQueue::new(
+            "run-cancel-bind",
+            vec![task("bg_one".into(), AssetKind::Background, None)],
+            now_ms(),
+        );
+        let plan = plan_for(&queue, vec!["start.txt".into()]);
+        save_queue(&project, &queue).unwrap();
         let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let binding_gate = Arc::new(Mutex::new(()));
         let binding_guard = binding_gate.lock().await;
@@ -789,15 +824,13 @@ mod tests {
             error: None,
             used_local_fallback: false,
         });
-        save_queue(
-            &project,
-            &AssetQueue::new(
-                "run-command-race",
-                vec![old, task("new".into(), AssetKind::Background, None)],
-                now_ms(),
-            ),
-        )
-        .unwrap();
+        let queue = AssetQueue::new(
+            "run-command-race",
+            vec![old, task("new".into(), AssetKind::Background, None)],
+            now_ms(),
+        );
+        let plan = plan_for(&queue, vec!["start.txt".into()]);
+        save_queue(&project, &queue).unwrap();
         let started = Arc::new(tokio::sync::Semaphore::new(0));
         let proceed = Arc::new(tokio::sync::Semaphore::new(0));
         let generator = Arc::new(BlockingGenerator {
@@ -806,16 +839,7 @@ mod tests {
         });
         let run_project = project.clone();
         let run = tokio::spawn(async move {
-            run_queue(
-                &run_project,
-                "run-command-race",
-                &StoryPlan {
-                    scenes: vec!["start.txt".into()],
-                    ..StoryPlan::new("test")
-                },
-                generator,
-            )
-            .await
+            run_queue(&run_project, "run-command-race", &plan, generator).await
         });
         tokio::time::timeout(Duration::from_secs(1), started.acquire())
             .await
@@ -859,30 +883,20 @@ mod tests {
             error: None,
             used_local_fallback: true,
         });
-        save_queue(
-            &project,
-            &AssetQueue::new(
-                "run-provenance",
-                vec![
-                    fallback,
-                    task("provider".into(), AssetKind::Background, None),
-                ],
-                now_ms(),
-            ),
-        )
-        .unwrap();
-
-        let recovered = run_queue(
-            &project,
+        let queue = AssetQueue::new(
             "run-provenance",
-            &StoryPlan {
-                scenes: vec!["start.txt".into()],
-                ..StoryPlan::new("test")
-            },
-            Arc::new(AlwaysGenerate),
-        )
-        .await
-        .unwrap();
+            vec![
+                fallback,
+                task("provider".into(), AssetKind::Background, None),
+            ],
+            now_ms(),
+        );
+        let plan = plan_for(&queue, vec!["start.txt".into()]);
+        save_queue(&project, &queue).unwrap();
+
+        let recovered = run_queue(&project, "run-provenance", &plan, Arc::new(AlwaysGenerate))
+            .await
+            .unwrap();
 
         assert!(recovered.tasks[0].used_local_fallback);
         assert!(!recovered.tasks[1].used_local_fallback);
@@ -898,14 +912,18 @@ mod tests {
         std::fs::create_dir_all(project.join("game/config")).unwrap();
         std::fs::create_dir_all(project.join("game/background")).unwrap();
         std::fs::create_dir_all(project.join("game/figure")).unwrap();
-        std::fs::write(project.join("game/scene/start.txt"), "Alice:hello;\n").unwrap();
+        std::fs::write(
+            project.join("game/scene/start.txt"),
+            "; Ollaic Scene Staging\n; ollaic-asset-task:alice\nchangeFigure:none -id=alice -figureCharacter=alice -figureEmotion=default -right;\n",
+        )
+        .unwrap();
         std::fs::write(
             project.join("game/config/characters.json"),
             r#"{"version":1,"characters":[{"id":"alice","name":"Alice"}]}"#,
         )
         .unwrap();
         std::fs::write(project.join("game/background/room.png"), b"background").unwrap();
-        std::fs::write(project.join("game/figure/alice.png"), b"figure").unwrap();
+        std::fs::write(project.join("game/figure/alice.png"), transparent_png()).unwrap();
 
         let mut background = task("room".into(), AssetKind::Background, None);
         background.status = AssetTaskStatus::Succeeded;
@@ -914,24 +932,14 @@ mod tests {
         figure.status = AssetTaskStatus::Succeeded;
         figure.asset_file = Some("alice.png".into());
         figure.character_ref = Some("alice".into());
-        save_queue(
-            &project,
-            &AssetQueue::new("run-rebind", vec![background, figure], now_ms()),
-        )
-        .unwrap();
+        let queue = AssetQueue::new("run-rebind", vec![background, figure], now_ms());
+        let plan = plan_for(&queue, vec!["start.txt".into()]);
+        save_queue(&project, &queue).unwrap();
 
         let generated = Arc::new(AlwaysFail(AtomicUsize::new(0)));
-        let result = run_queue(
-            &project,
-            "run-rebind",
-            &StoryPlan {
-                scenes: vec!["start.txt".into()],
-                ..StoryPlan::new("test")
-            },
-            generated.clone(),
-        )
-        .await
-        .unwrap();
+        let result = run_queue(&project, "run-rebind", &plan, generated.clone())
+            .await
+            .unwrap();
 
         assert!(result
             .tasks
@@ -940,7 +948,9 @@ mod tests {
         assert_eq!(generated.0.load(Ordering::SeqCst), 0);
         let scene = std::fs::read_to_string(project.join("game/scene/start.txt")).unwrap();
         assert!(scene.contains("changeBg:room.png;"));
-        assert!(scene.contains("changeFigure:alice.png;"));
+        assert!(scene.contains(
+            "changeFigure:alice.png -right -id=alice -figureCharacter=alice -figureEmotion=default;"
+        ));
         let _ = std::fs::remove_dir_all(project);
     }
 }

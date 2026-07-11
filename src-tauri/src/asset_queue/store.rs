@@ -94,6 +94,10 @@ pub fn derive_queue(
                 })
                 .map(str::to_string),
             character_ref: task_plan.character_ref.clone(),
+            emotion: task_plan
+                .emotion
+                .clone()
+                .or_else(|| (kind == AssetKind::Figure).then(|| "default".to_string())),
             dialogue_index: None,
             text: None,
             status: AssetTaskStatus::Pending,
@@ -138,6 +142,7 @@ pub fn derive_queue(
                     prompt,
                     scene_ref: Some(scene_file.clone()),
                     character_ref: character,
+                    emotion: None,
                     dialogue_index: Some(this_index),
                     text: Some(node.content),
                     status: AssetTaskStatus::Pending,
@@ -152,43 +157,52 @@ pub fn derive_queue(
     Ok(AssetQueue::new(run_id, tasks, now_ms()))
 }
 
-/// Refresh TTS tasks from the latest compiled scene dialogue while keeping
-/// every other task as-is. An upstream scene re-run can move or rewrite lines;
-/// `bind_tts` rejects a task whose `text` no longer matches the scene, so a
-/// stale queue would leave the assetQueue step stuck failing on every retry.
-/// Non-TTS tasks depend only on scene existence, which retry does not change,
-/// so they keep their succeeded state and bound files.
+/// Rebuild from the current plan and scenes, retaining runtime state only when
+/// every generation and binding input still matches.
 pub fn rederive_queue(
     project_path: &Path,
     run_id: &str,
     plan: &StoryPlan,
     existing: &AssetQueue,
 ) -> Result<AssetQueue, String> {
-    let fresh = derive_queue(project_path, run_id, plan)?;
-    let fresh_tts: HashMap<&str, &AssetTask> = fresh
+    let mut fresh = derive_queue(project_path, run_id, plan)?;
+    let existing_by_id: HashMap<&str, &AssetTask> = existing
         .tasks
         .iter()
-        .filter(|task| task.kind == AssetKind::Tts)
         .map(|task| (task.id.as_str(), task))
         .collect();
-    let mut queue = existing.clone();
-    queue.run_id = run_id.to_string();
-    for task in &mut queue.tasks {
-        if task.kind != AssetKind::Tts {
-            continue;
-        }
-        if let Some(fresh_task) = fresh_tts.get(task.id.as_str()) {
-            if fresh_task.text != task.text {
-                task.status = AssetTaskStatus::Pending;
-                task.text = fresh_task.text.clone();
-                task.error = None;
-                task.asset_file = None;
-                task.used_local_fallback = false;
-                task.attempts.clear();
-            }
+    for task in &mut fresh.tasks {
+        if let Some(previous) = existing_by_id
+            .get(task.id.as_str())
+            .filter(|previous| same_task_semantics(task, previous))
+        {
+            let normalized_emotion = task.emotion.clone();
+            *task = (*previous).clone();
+            task.emotion = normalized_emotion;
         }
     }
-    Ok(queue)
+    fresh.limits = existing.limits;
+    Ok(fresh)
+}
+
+fn same_task_semantics(left: &AssetTask, right: &AssetTask) -> bool {
+    left.id == right.id
+        && left.kind == right.kind
+        && left.target_stem == right.target_stem
+        && left.prompt == right.prompt
+        && left.scene_ref == right.scene_ref
+        && left.character_ref == right.character_ref
+        && normalized_emotion(left) == normalized_emotion(right)
+        && left.dialogue_index == right.dialogue_index
+        && left.text == right.text
+}
+
+fn normalized_emotion(task: &AssetTask) -> Option<&str> {
+    if task.kind == AssetKind::Figure {
+        Some(task.emotion.as_deref().unwrap_or("default"))
+    } else {
+        task.emotion.as_deref()
+    }
 }
 
 fn safe_token(value: &str, fallback: usize) -> String {
@@ -297,6 +311,37 @@ mod tests {
     }
 
     #[test]
+    fn legacy_figure_without_emotion_derives_as_default() {
+        let project = temp_project("legacy_figure_emotion");
+        let plan: StoryPlan = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "prompt": "test",
+            "characters": [{"id": "alice", "name": "Alice"}],
+            "assetPlan": [{
+                "id": "figure_alice", "kind": "figure", "targetStem": "alice_default",
+                "prompt": "Alice", "characterRef": "alice", "status": "pending"
+            }]
+        }))
+        .unwrap();
+
+        crate::story_plan::validate(&plan).unwrap();
+        let mut queue = derive_queue(&project, "run-legacy", &plan).unwrap();
+        assert_eq!(queue.tasks[0].emotion.as_deref(), Some("default"));
+        queue.tasks[0].emotion = None;
+        queue.tasks[0].status = AssetTaskStatus::Succeeded;
+        queue.tasks[0].asset_file = Some("alice_default.png".to_string());
+
+        let recovered = rederive_queue(&project, "run-legacy", &plan, &queue).unwrap();
+        assert_eq!(recovered.tasks[0].status, AssetTaskStatus::Succeeded);
+        assert_eq!(
+            recovered.tasks[0].asset_file.as_deref(),
+            Some("alice_default.png")
+        );
+        assert_eq!(recovered.tasks[0].emotion.as_deref(), Some("default"));
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
     fn rederive_preserves_succeeded_tasks_but_reruns_dialogue_that_moved() {
         let project = temp_project("rederive");
         fs::write(
@@ -343,6 +388,117 @@ mod tests {
             "moved dialogue is rerun"
         );
         assert!(redone.tasks[1].asset_file.is_none());
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn rederive_uses_fresh_membership_and_only_retains_identical_tasks() {
+        use crate::asset_queue::types::{AssetAttempt, QueueLimits};
+        use crate::story_plan::types::AssetTaskPlan;
+
+        fn planned(
+            id: &str,
+            kind: &str,
+            target_stem: &str,
+            prompt: &str,
+            character_ref: Option<&str>,
+        ) -> AssetTaskPlan {
+            AssetTaskPlan {
+                id: id.into(),
+                kind: kind.into(),
+                target_stem: target_stem.into(),
+                prompt: prompt.into(),
+                scene_ref: None,
+                character_ref: character_ref.map(str::to_string),
+                emotion: (kind == "figure").then(|| "default".to_string()),
+                status: "pending".into(),
+            }
+        }
+
+        let project = temp_project("fresh_authority");
+        fs::write(
+            project.join("game/scene/start.txt"),
+            "Alice:Hello -old.wav;\n",
+        )
+        .unwrap();
+        let mut old_plan = StoryPlan::new("test");
+        old_plan.scenes = vec!["start.txt".into()];
+        old_plan.asset_plan = vec![
+            planned("keep", "background", "keep", "same", None),
+            planned("changed_target", "background", "old_target", "same", None),
+            planned(
+                "changed_prompt",
+                "background",
+                "same_target",
+                "old prompt",
+                None,
+            ),
+            planned("stale", "bgm", "stale", "remove me", None),
+        ];
+        let mut existing = derive_queue(&project, "run-1", &old_plan).unwrap();
+        existing.limits = QueueLimits {
+            image: 1,
+            tts: 2,
+            music: 3,
+            max_retries: 5,
+        };
+        for task in &mut existing.tasks {
+            task.status = AssetTaskStatus::Succeeded;
+            task.asset_file = Some(format!("{}.png", task.target_stem));
+            task.attempts.push(AssetAttempt {
+                attempt: 1,
+                started_at: 1,
+                finished_at: 2,
+                artifact: Some(format!("artifact/{}.png", task.id)),
+                error: None,
+                used_local_fallback: false,
+            });
+        }
+        let kept = existing.tasks[0].clone();
+
+        let mut fresh_plan = old_plan;
+        fresh_plan.asset_plan = vec![
+            planned("keep", "background", "keep", "same", None),
+            planned("changed_target", "background", "new_target", "same", None),
+            planned(
+                "changed_prompt",
+                "background",
+                "same_target",
+                "new prompt",
+                None,
+            ),
+            planned(
+                "new_figure",
+                "figure",
+                "alice_default",
+                "Alice",
+                Some("alice"),
+            ),
+        ];
+        let redone = rederive_queue(&project, "run-1", &fresh_plan, &existing).unwrap();
+
+        assert_eq!(redone.limits, existing.limits);
+        assert_eq!(
+            redone
+                .tasks
+                .iter()
+                .map(|task| task.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["keep", "changed_target", "changed_prompt", "new_figure",]
+        );
+        assert_eq!(
+            redone.tasks[0], kept,
+            "unchanged succeeded task is retained whole"
+        );
+        for task in &redone.tasks[1..] {
+            assert_eq!(task.status, AssetTaskStatus::Pending);
+            assert!(task.attempts.is_empty());
+            assert!(task.asset_file.is_none());
+        }
+        assert_eq!(redone.tasks[1].target_stem, "new_target");
+        assert_eq!(redone.tasks[2].prompt, "new prompt");
+        assert_eq!(redone.tasks[3].kind, AssetKind::Figure);
+        assert!(!redone.tasks.iter().any(|task| task.id == "stale"));
         let _ = fs::remove_dir_all(project);
     }
 }

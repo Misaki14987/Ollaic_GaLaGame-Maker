@@ -24,7 +24,7 @@ const MODEL_FILENAME: &str = "birefnet-lite-fp16.onnx";
 
 static SESSION: Mutex<Option<Session>> = Mutex::new(None);
 
-fn resolve_model_path(app: &AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn resolve_model_path(app: &AppHandle) -> Result<PathBuf, String> {
     if let Ok(p) = std::env::var("MATTING_MODEL_PATH") {
         let candidate = PathBuf::from(p);
         if candidate.is_file() {
@@ -72,7 +72,7 @@ pub async fn remove_background(
     .map_err(|e| format!("抠图任务调度失败: {e}"))?
 }
 
-fn matte_image(model_path: &Path, image_bytes: &[u8]) -> Result<Vec<u8>, String> {
+pub(crate) fn matte_image(model_path: &Path, image_bytes: &[u8]) -> Result<Vec<u8>, String> {
     let dynamic =
         image::load_from_memory(image_bytes).map_err(|e| format!("解码待抠图图像失败: {e}"))?;
     let rgba = dynamic.to_rgba8();

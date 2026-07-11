@@ -3,7 +3,9 @@ use std::pin::Pin;
 
 use serde::Deserialize;
 
-use crate::story_plan::types::{DialogueBeat, SceneDraft, ScenePlan};
+use crate::story_plan::types::{
+    DialogueBeat, FigureCue, FigureCueAction, FigureStagePosition, SceneDraft, ScenePlan,
+};
 
 use super::router::generate_structured;
 use super::{Agent, AgentContext, AgentError, AgentOutput};
@@ -46,16 +48,19 @@ impl Agent for DialogistAgent {
                 "scenePlans": ctx.scene_plans,
                 "branches": ctx.branches,
                 "stepInstruction": ctx.instruction,
-                "requirements": "每个 scenePlan 对应一个 sceneDraft，sceneId 必须一致；每场至少 8 个 beat。speaker 为角色 name 或 null（旁白），text 不含 WebGAL 命令。对白要推进冲突、体现人物口吻，避免说明书式复述。"
+                "requirements": "每个 scenePlan 对应一个 sceneDraft，sceneId 必须一致；每场至少 8 个 beat。speaker 为角色 name 或 null（旁白），text 不含 WebGAL 命令。必须用 figureCues 显式决定镜头需要的角色何时 show/hide；show 必须给候选 characterId、left/center/right position 和安全英文 emotion 标签，hide 只需 characterId。不要把 scenePlan 的参与者全部默认上屏。对白要推进冲突、体现人物口吻。"
             });
             if let Some(mut routed) = generate_structured::<DialogistResponse>(
                 "Dialogist / 场景对白",
-                "把场景卡扩写成可编译的结构化旁白和对白。JSON 格式：{\"sceneDrafts\":[{\"sceneId\":\"...\",\"title\":\"...\",\"beats\":[{\"speaker\":null,\"text\":\"...\"}]}]}。",
+                "把场景卡扩写成可编译的结构化旁白、对白和演出。JSON 格式：{\"sceneDrafts\":[{\"sceneId\":\"...\",\"title\":\"...\",\"beats\":[{\"speaker\":null,\"text\":\"...\",\"figureCues\":[{\"action\":\"show\",\"characterId\":\"heroine\",\"position\":\"right\",\"emotion\":\"default\"}]}]}]}。",
                 &input,
                 ctx.allow_local_fallback,
             ).await? {
                 fill_missing_titles(ctx.scene_plans, &mut routed.value.scene_drafts);
-                validate_drafts(ctx.scene_plans, &routed.value.scene_drafts)?;
+                for draft in &mut routed.value.scene_drafts {
+                    draft.stage_managed = true;
+                }
+                validate_drafts(ctx.scene_plans, ctx.characters, &routed.value.scene_drafts)?;
                 return Ok(AgentOutput {
                     scene_drafts: Some(routed.value.scene_drafts),
                     model: Some(routed.model),
@@ -68,7 +73,7 @@ impl Agent for DialogistAgent {
             let drafts = ctx
                 .scene_plans
                 .iter()
-                .map(|scene| local_draft(scene))
+                .map(|scene| local_draft(scene, ctx.characters))
                 .collect();
             Ok(AgentOutput {
                 scene_drafts: Some(drafts),
@@ -79,8 +84,11 @@ impl Agent for DialogistAgent {
     }
 }
 
-fn local_draft(scene: &ScenePlan) -> SceneDraft {
-    let beats = match scene.id.as_str() {
+fn local_draft(
+    scene: &ScenePlan,
+    characters: &[crate::characters::types::Character],
+) -> SceneDraft {
+    let mut beats = match scene.id.as_str() {
         "opening" => vec![
             beat(
                 None,
@@ -158,9 +166,50 @@ fn local_draft(scene: &ScenePlan) -> SceneDraft {
             beat(Some("陆川"), "走吧。答案就在前面。"),
         ],
     };
+    let by_name: std::collections::HashMap<&str, &str> = characters
+        .iter()
+        .map(|character| (character.name.as_str(), character.id.as_str()))
+        .collect();
+    let cast: std::collections::HashSet<&str> =
+        scene.character_ids.iter().map(String::as_str).collect();
+    let mut visible: Vec<String> = Vec::new();
+    for beat in &mut beats {
+        let Some(character_id) = beat
+            .speaker
+            .as_deref()
+            .and_then(|speaker| by_name.get(speaker).copied())
+            .filter(|id| cast.contains(id))
+        else {
+            continue;
+        };
+        if visible.iter().any(|id| id == character_id) {
+            continue;
+        }
+        if visible.len() == 3 {
+            beat.figure_cues.push(FigureCue {
+                action: FigureCueAction::Hide,
+                character_id: visible.remove(0),
+                position: None,
+                emotion: "default".to_string(),
+            });
+        }
+        let position = match visible.len() {
+            0 => FigureStagePosition::Left,
+            1 => FigureStagePosition::Right,
+            _ => FigureStagePosition::Center,
+        };
+        beat.figure_cues.push(FigureCue {
+            action: FigureCueAction::Show,
+            character_id: character_id.to_string(),
+            position: Some(position),
+            emotion: "default".to_string(),
+        });
+        visible.push(character_id.to_string());
+    }
     SceneDraft {
         scene_id: scene.id.clone(),
         title: scene.title.clone(),
+        stage_managed: true,
         beats,
     }
 }
@@ -169,10 +218,15 @@ fn beat(speaker: Option<&str>, text: &str) -> DialogueBeat {
     DialogueBeat {
         speaker: speaker.map(str::to_string),
         text: text.to_string(),
+        figure_cues: Vec::new(),
     }
 }
 
-fn validate_drafts(plans: &[ScenePlan], drafts: &[SceneDraft]) -> Result<(), AgentError> {
+fn validate_drafts(
+    plans: &[ScenePlan],
+    characters: &[crate::characters::types::Character],
+    drafts: &[SceneDraft],
+) -> Result<(), AgentError> {
     let ids: std::collections::HashSet<&str> =
         drafts.iter().map(|draft| draft.scene_id.as_str()).collect();
     if drafts.len() != plans.len() || plans.iter().any(|plan| !ids.contains(plan.id.as_str())) {
@@ -186,6 +240,34 @@ fn validate_drafts(plans: &[ScenePlan], drafts: &[SceneDraft]) -> Result<(), Age
         return Err(AgentError(
             "Dialogist returned an empty or undersized scene".to_string(),
         ));
+    }
+    let character_ids: std::collections::HashSet<&str> = characters
+        .iter()
+        .map(|character| character.id.as_str())
+        .collect();
+    for draft in drafts {
+        let scene_cast: std::collections::HashSet<&str> = plans
+            .iter()
+            .find(|plan| plan.id == draft.scene_id)
+            .map(|plan| plan.character_ids.iter().map(String::as_str).collect())
+            .unwrap_or_default();
+        if draft
+            .beats
+            .iter()
+            .flat_map(|beat| &beat.figure_cues)
+            .any(|cue| {
+                !character_ids.contains(cue.character_id.as_str())
+                    || !scene_cast.contains(cue.character_id.as_str())
+                    || !crate::story_plan::types::is_webgal_flag_value(&cue.character_id)
+                    || (cue.action == crate::story_plan::FigureCueAction::Show
+                        && (cue.position.is_none()
+                            || !crate::story_plan::types::is_webgal_flag_value(&cue.emotion)))
+            })
+        {
+            return Err(AgentError(
+                "Dialogist returned an invalid Figure Cue".to_string(),
+            ));
+        }
     }
     Ok(())
 }
@@ -219,15 +301,26 @@ mod tests {
 
     #[test]
     fn local_opening_is_readable_dialogue() {
-        let draft = local_draft(&ScenePlan {
+        let scene = ScenePlan {
             id: "opening".into(),
             file: "start.txt".into(),
             chapter_id: "ch1".into(),
             title: "开场".into(),
             summary: "相遇".into(),
-            character_ids: Vec::new(),
-        });
+            character_ids: vec!["heroine".into()],
+        };
+        let characters = vec![serde_json::from_value(serde_json::json!({
+            "id": "heroine", "name": "林夏"
+        }))
+        .unwrap()];
+        let draft = local_draft(&scene, &characters);
         assert!(draft.beats.len() >= 8);
+        assert!(draft.stage_managed);
+        assert!(draft
+            .beats
+            .iter()
+            .flat_map(|beat| &beat.figure_cues)
+            .any(|cue| cue.character_id == "heroine"));
         assert!(draft
             .beats
             .iter()

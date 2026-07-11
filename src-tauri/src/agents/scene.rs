@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 
-use crate::story_plan::types::{DialogueBeat, SceneDraft};
+use crate::story_plan::types::{
+    DialogueBeat, FigureCue, FigureCueAction, FigureStagePosition, SceneDraft,
+};
 
 use super::{Agent, AgentContext, AgentError, AgentOutput, SceneScript};
 
@@ -26,9 +28,11 @@ impl Agent for SceneAgent {
                     .map(|scene| SceneDraft {
                         scene_id: scene.id.clone(),
                         title: scene.title.clone(),
+                        stage_managed: false,
                         beats: vec![DialogueBeat {
                             speaker: None,
                             text: scene.summary.clone(),
+                            figure_cues: Vec::new(),
                         }],
                     })
                     .collect();
@@ -44,6 +48,17 @@ impl Agent for SceneAgent {
                 .scene_plans
                 .iter()
                 .map(|scene| (scene.id.as_str(), scene.file.as_str()))
+                .collect();
+            let figure_targets: HashMap<(&str, &str), &str> = ctx
+                .asset_plan
+                .iter()
+                .filter(|task| task.kind == "figure")
+                .filter_map(|task| {
+                    Some((
+                        (task.character_ref.as_deref()?, task.emotion.as_deref()?),
+                        task.id.as_str(),
+                    ))
+                })
                 .collect();
             let mut scripts = Vec::with_capacity(ctx.scene_plans.len());
             for scene in ctx.scene_plans {
@@ -61,7 +76,15 @@ impl Agent for SceneAgent {
                     ),
                     format!("intro:{};", clean(&scene.title)),
                 ];
-                lines.extend(draft.beats.iter().map(compile_beat));
+                if draft.stage_managed {
+                    lines.push("; Ollaic Scene Staging".to_string());
+                }
+                for beat in &draft.beats {
+                    for cue in &beat.figure_cues {
+                        lines.extend(compile_figure_cue(cue, &figure_targets)?);
+                    }
+                    lines.push(compile_beat(beat));
+                }
                 let outgoing: Vec<_> = ctx
                     .branches
                     .edges
@@ -106,6 +129,50 @@ impl Agent for SceneAgent {
             })
         })
     }
+}
+
+fn compile_figure_cue(
+    cue: &FigureCue,
+    figure_targets: &HashMap<(&str, &str), &str>,
+) -> Result<Vec<String>, AgentError> {
+    if !crate::story_plan::types::is_webgal_flag_value(&cue.character_id) {
+        return Err(AgentError(
+            "figure cue has an invalid characterId".to_string(),
+        ));
+    }
+    let character = &cue.character_id;
+    if cue.action == FigureCueAction::Hide {
+        return Ok(vec![format!("changeFigure:none -id={character};")]);
+    }
+    if !crate::story_plan::types::is_webgal_flag_value(&cue.emotion) {
+        return Err(AgentError("figure cue has an invalid emotion".to_string()));
+    }
+    let task_id = figure_targets
+        .get(&(cue.character_id.as_str(), cue.emotion.as_str()))
+        .ok_or_else(|| {
+            AgentError(format!(
+                "figure cue references character/emotion without an asset task: {}/{}",
+                cue.character_id, cue.emotion
+            ))
+        })?;
+    let position = match cue.position {
+        Some(FigureStagePosition::Left) => "left",
+        Some(FigureStagePosition::Center) => "center",
+        Some(FigureStagePosition::Right) => "right",
+        None => {
+            return Err(AgentError(format!(
+                "show figure cue has no position: {}",
+                cue.character_id
+            )))
+        }
+    };
+    Ok(vec![
+        format!("; {}", crate::asset_queue::binder::task_marker(task_id)),
+        format!(
+            "changeFigure:none -id={character} -figureCharacter={character} -figureEmotion={} -{position};",
+            cue.emotion
+        ),
+    ])
 }
 
 fn compile_beat(beat: &DialogueBeat) -> String {
@@ -158,7 +225,10 @@ fn validate_script(name: &str, content: &str) -> Result<(), AgentError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::story_plan::types::{BranchEdge, BranchGraph, ScenePlan};
+    use crate::story_plan::types::{
+        AssetTaskPlan, BranchEdge, BranchGraph, FigureCue, FigureCueAction, FigureStagePosition,
+        ScenePlan,
+    };
 
     #[tokio::test]
     async fn scene_agent_compiles_multiple_linked_webgal_files() {
@@ -184,17 +254,46 @@ mod tests {
             SceneDraft {
                 scene_id: "opening".into(),
                 title: "开场".into(),
-                beats: vec![DialogueBeat {
-                    speaker: Some("林夏".into()),
-                    text: "你终于来了。".into(),
-                }],
+                stage_managed: true,
+                beats: vec![
+                    DialogueBeat {
+                        speaker: Some("林夏".into()),
+                        text: "你终于来了。".into(),
+                        figure_cues: vec![
+                            FigureCue {
+                                action: FigureCueAction::Show,
+                                character_id: "heroine".into(),
+                                position: Some(FigureStagePosition::Right),
+                                emotion: "default".into(),
+                            },
+                            FigureCue {
+                                action: FigureCueAction::Show,
+                                character_id: "friend".into(),
+                                position: Some(FigureStagePosition::Left),
+                                emotion: "surprised".into(),
+                            },
+                        ],
+                    },
+                    DialogueBeat {
+                        speaker: None,
+                        text: "她离开了教室。".into(),
+                        figure_cues: vec![FigureCue {
+                            action: FigureCueAction::Hide,
+                            character_id: "heroine".into(),
+                            position: None,
+                            emotion: "default".into(),
+                        }],
+                    },
+                ],
             },
             SceneDraft {
                 scene_id: "end".into(),
                 title: "结尾".into(),
+                stage_managed: false,
                 beats: vec![DialogueBeat {
                     speaker: None,
                     text: "天亮了。".into(),
+                    figure_cues: Vec::new(),
                 }],
             },
         ];
@@ -218,12 +317,45 @@ mod tests {
             scene_plans: &plans,
             branches: &branches,
             scene_drafts: &drafts,
-            asset_plan: &[],
+            asset_plan: &[
+                AssetTaskPlan {
+                    id: "figure_heroine_default".into(),
+                    kind: "figure".into(),
+                    target_stem: "heroine_default".into(),
+                    prompt: "林夏立绘".into(),
+                    scene_ref: None,
+                    character_ref: Some("heroine".into()),
+                    emotion: Some("default".into()),
+                    status: "pending".into(),
+                },
+                AssetTaskPlan {
+                    id: "figure_friend_surprised".into(),
+                    kind: "figure".into(),
+                    target_stem: "friend_surprised".into(),
+                    prompt: "周遥惊讶立绘".into(),
+                    scene_ref: None,
+                    character_ref: Some("friend".into()),
+                    emotion: Some("surprised".into()),
+                    status: "pending".into(),
+                },
+            ],
             allow_local_fallback: true,
         };
         let scripts = agent.run(&ctx).await.unwrap().scenes.unwrap();
         assert_eq!(scripts.len(), 2);
         assert!(scripts[0].content.contains("林夏:你终于来了。;"));
+        assert!(scripts[0]
+            .content
+            .contains("; ollaic-asset-task:figure_heroine_default"));
+        assert!(scripts[0].content.contains(
+            "changeFigure:none -id=heroine -figureCharacter=heroine -figureEmotion=default -right;"
+        ));
+        assert!(scripts[0].content.contains(
+            "changeFigure:none -id=friend -figureCharacter=friend -figureEmotion=surprised -left;"
+        ));
+        assert!(scripts[0]
+            .content
+            .contains("changeFigure:none -id=heroine;"));
         assert!(scripts[0].content.contains("changeScene:ending.txt;"));
         assert!(scripts[1].content.contains("end;"));
     }

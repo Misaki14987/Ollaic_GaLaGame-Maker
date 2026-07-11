@@ -56,9 +56,11 @@ fn plan_round_trips_through_disk() {
         scene_drafts: vec![SceneDraft {
             scene_id: "opening".to_string(),
             title: "异常信号".to_string(),
+            stage_managed: false,
             beats: vec![DialogueBeat {
                 speaker: None,
                 text: "雨落在窗上。".to_string(),
+                figure_cues: Vec::new(),
             }],
         }],
         asset_plan: vec![AssetTaskPlan {
@@ -68,6 +70,7 @@ fn plan_round_trips_through_disk() {
             prompt: "雨夜教室".to_string(),
             scene_ref: Some("opening".to_string()),
             character_ref: None,
+            emotion: None,
             status: "pending".to_string(),
         }],
         scenes: vec!["start.txt".to_string()],
@@ -111,6 +114,53 @@ fn rejects_plan_with_neither_prompt_nor_synopsis() {
     let mut plan = StoryPlan::new("   \n");
     plan.synopsis = "  ".to_string();
     assert_eq!(validate(&plan), Err(PlanError::EmptyPlan));
+}
+
+#[test]
+fn rejects_figure_cue_for_character_outside_scene_cast() {
+    use crate::characters::types::Character;
+    use crate::story_plan::{FigureCue, FigureCueAction, FigureStagePosition};
+
+    let mut plan = StoryPlan::new("a brief");
+    plan.chapters = vec![ChapterPlan {
+        id: "chapter".into(),
+        title: "Chapter".into(),
+        summary: "Summary".into(),
+    }];
+    plan.characters =
+        vec![
+            serde_json::from_value::<Character>(serde_json::json!({"id":"alice","name":"Alice"}))
+                .unwrap(),
+        ];
+    plan.scene_plans = vec![ScenePlan {
+        id: "opening".into(),
+        file: "start.txt".into(),
+        chapter_id: "chapter".into(),
+        title: "Opening".into(),
+        summary: "Empty room".into(),
+        character_ids: Vec::new(),
+    }];
+    plan.scene_drafts = vec![SceneDraft {
+        scene_id: "opening".into(),
+        title: "Opening".into(),
+        stage_managed: true,
+        beats: vec![DialogueBeat {
+            speaker: None,
+            text: "The room is empty.".into(),
+            figure_cues: vec![FigureCue {
+                action: FigureCueAction::Show,
+                character_id: "alice".into(),
+                position: Some(FigureStagePosition::Center),
+                emotion: "default".into(),
+            }],
+        }],
+    }];
+    plan.branches.entry_scene = "opening".into();
+
+    assert!(matches!(
+        validate(&plan),
+        Err(PlanError::InvalidReference(_))
+    ));
 }
 
 #[test]

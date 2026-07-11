@@ -122,11 +122,20 @@ export interface BranchGraph {
 export interface DialogueBeat {
   speaker?: string | null;
   text: string;
+  figureCues?: FigureCue[];
+}
+
+export interface FigureCue {
+  action: 'show' | 'hide';
+  characterId: string;
+  position?: 'left' | 'center' | 'right' | null;
+  emotion?: string;
 }
 
 export interface SceneDraft {
   sceneId: string;
   title: string;
+  stageManaged?: boolean;
   beats: DialogueBeat[];
 }
 
@@ -137,6 +146,7 @@ export interface AssetTaskPlan {
   prompt: string;
   sceneRef?: string | null;
   characterRef?: string | null;
+  emotion?: string | null;
   status: string;
 }
 
