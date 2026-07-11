@@ -322,7 +322,7 @@ fn migrates_historical_partial_node_outputs_on_load() {
           }],
           "assetPlan":[{
             "kind":"figure","targetStem":"alice_default","prompt":"Alice",
-            "characterRef":"alice"
+            "characterRef":"alice","sceneRef":"start.txt"
           }]
         }"#,
     )
@@ -335,6 +335,7 @@ fn migrates_historical_partial_node_outputs_on_load() {
     assert_eq!(plan.scene_drafts[0].title, "Opening");
     assert_eq!(plan.asset_plan[0].id, "figure_alice_default");
     assert_eq!(plan.asset_plan[0].emotion.as_deref(), Some("default"));
+    assert_eq!(plan.asset_plan[0].scene_ref.as_deref(), Some("opening"));
 }
 
 #[test]
@@ -343,4 +344,18 @@ fn rejects_partial_memory_with_field_path() {
     plan.memory.worldbook = "World".into();
     let error = validate(&plan).unwrap_err();
     assert!(error.to_string().contains("$.memory.glossary"));
+}
+
+#[test]
+fn invalid_glossary_entry_uses_escaped_json_path() {
+    let mut plan = StoryPlan::new("brief");
+    plan.memory.worldbook = "World".into();
+    plan.memory.glossary = BTreeMap::from([
+        ("a.b".into(), String::new()),
+        ("second".into(), "Two".into()),
+        ("third".into(), "Three".into()),
+        ("fourth".into(), "Four".into()),
+    ]);
+    let error = validate(&plan).unwrap_err();
+    assert!(error.to_string().contains(r#"$.memory.glossary["a.b"]"#));
 }

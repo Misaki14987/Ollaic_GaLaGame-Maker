@@ -168,9 +168,7 @@ pub fn derive_queue(
             return Err(format!("duplicate asset task id: {}", task_plan.id));
         }
         if let Some(scene) = task_plan.scene_ref.as_deref() {
-            if !scene_files_by_ref.contains_key(scene)
-                && !scene_files.iter().any(|file| file == scene)
-            {
+            if !scene_files_by_ref.contains_key(scene) {
                 return Err(format!(
                     "$.assetPlan[{index}].sceneRef: references unknown scene: {scene}"
                 ));
@@ -184,7 +182,7 @@ pub fn derive_queue(
             scene_ref: task_plan
                 .scene_ref
                 .as_deref()
-                .and_then(|scene| scene_files_by_ref.get(scene).copied().or(Some(scene)))
+                .and_then(|scene| scene_files_by_ref.get(scene).copied())
                 .or_else(|| {
                     matches!(kind, AssetKind::Bgm | AssetKind::Sfx)
                         .then_some(entry_scene)

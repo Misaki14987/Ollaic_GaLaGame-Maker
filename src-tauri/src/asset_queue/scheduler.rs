@@ -534,6 +534,17 @@ mod tests {
     }
 
     fn plan_for(queue: &AssetQueue, scenes: Vec<String>) -> StoryPlan {
+        let scene_plans = scenes
+            .iter()
+            .map(|file| crate::story_plan::ScenePlan {
+                id: file.trim_end_matches(".txt").to_string(),
+                file: file.clone(),
+                chapter_id: "chapter".into(),
+                title: file.clone(),
+                summary: file.clone(),
+                character_ids: Vec::new(),
+            })
+            .collect::<Vec<_>>();
         let asset_plan = queue
             .tasks
             .iter()
@@ -550,7 +561,10 @@ mod tests {
                 .to_string(),
                 target_stem: task.target_stem.clone(),
                 prompt: task.prompt.clone(),
-                scene_ref: task.scene_ref.clone(),
+                scene_ref: task
+                    .scene_ref
+                    .as_deref()
+                    .map(|file| file.trim_end_matches(".txt").to_string()),
                 character_ref: task.character_ref.clone(),
                 emotion: task.emotion.clone(),
                 status: "pending".to_string(),
@@ -558,6 +572,7 @@ mod tests {
             .collect();
         StoryPlan {
             scenes,
+            scene_plans,
             asset_plan,
             ..StoryPlan::new("test")
         }

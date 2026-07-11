@@ -89,7 +89,17 @@ fn migrate_legacy_plan(plan: &mut StoryPlan) {
             }
         }
     }
+    let scene_ids_by_file: std::collections::HashMap<String, String> = plan
+        .scene_plans
+        .iter()
+        .map(|scene| (scene.file.clone(), scene.id.clone()))
+        .collect();
     for task in &mut plan.asset_plan {
+        if let Some(scene) = task.scene_ref.as_mut() {
+            if let Some(id) = scene_ids_by_file.get(scene) {
+                scene.clone_from(id);
+            }
+        }
         if task.kind == "figure" && task.emotion.is_none() {
             task.emotion = Some("default".to_string());
         }
@@ -114,8 +124,9 @@ pub fn validate(plan: &StoryPlan) -> Result<(), PlanError> {
         }
         for (term, definition) in &plan.memory.glossary {
             if term.trim().is_empty() || definition.trim().is_empty() {
+                let key = serde_json::to_string(term).expect("strings always serialize");
                 return invalid(
-                    format!("$.memory.glossary.{term}"),
+                    format!("$.memory.glossary[{key}]"),
                     "term and definition must not be empty",
                 );
             }
