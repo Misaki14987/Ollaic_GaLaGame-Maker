@@ -41,6 +41,12 @@ pub enum AssetTaskStatus {
     Failed,
 }
 
+impl Default for AssetTaskStatus {
+    fn default() -> Self {
+        Self::Pending
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AssetAttempt {
@@ -72,6 +78,7 @@ pub struct AssetTask {
     pub dialogue_index: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    #[serde(default)]
     pub status: AssetTaskStatus,
     #[serde(default)]
     pub attempts: Vec<AssetAttempt>,

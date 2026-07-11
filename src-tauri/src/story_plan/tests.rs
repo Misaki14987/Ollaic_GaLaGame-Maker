@@ -178,10 +178,8 @@ fn rejects_outline_with_duplicate_chapter_ids() {
             summary: "s".to_string(),
         },
     ];
-    assert_eq!(
-        validate(&plan),
-        Err(PlanError::DuplicateChapterId("ch1".to_string()))
-    );
+    let error = validate(&plan).unwrap_err();
+    assert!(error.to_string().contains("$.chapters[1].id"));
 }
 
 #[test]
@@ -223,10 +221,8 @@ fn rejects_scene_plan_with_path_traversal() {
         summary: "开场".to_string(),
         character_ids: Vec::new(),
     });
-    assert_eq!(
-        validate(&plan),
-        Err(PlanError::InvalidSceneFile("../start.txt".to_string()))
-    );
+    let error = validate(&plan).unwrap_err();
+    assert!(error.to_string().contains("$.scenePlans[0].file"));
 }
 
 #[test]
@@ -243,4 +239,92 @@ fn refuses_to_load_a_plan_with_wrong_version() {
         load_plan(&project).unwrap_err(),
         PlanError::UnsupportedVersion(7)
     );
+}
+
+#[test]
+fn loads_legacy_plan_without_version_as_v1() {
+    let project = fresh_project_dir("legacy_without_version");
+    let path = plan_path(&project);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(
+        &path,
+        r#"{"prompt":"legacy brief","synopsis":"legacy synopsis"}"#,
+    )
+    .unwrap();
+
+    let plan = load_plan(&project).unwrap().unwrap();
+    assert_eq!(plan.version, 1);
+    assert_eq!(plan.synopsis, "legacy synopsis");
+}
+
+#[test]
+fn invalid_cross_node_reference_reports_json_path() {
+    let mut plan = StoryPlan::new("test");
+    plan.chapters.push(ChapterPlan {
+        id: "ch1".into(),
+        title: "Chapter".into(),
+        summary: "Summary".into(),
+    });
+    plan.scene_plans.push(ScenePlan {
+        id: "opening".into(),
+        file: "start.txt".into(),
+        chapter_id: "missing".into(),
+        title: "Opening".into(),
+        summary: "Summary".into(),
+        character_ids: Vec::new(),
+    });
+    let error = validate(&plan).unwrap_err();
+    assert!(error.to_string().contains("$.scenePlans[0].chapterId"));
+}
+
+#[test]
+fn falls_back_to_valid_backup_when_primary_plan_is_semantically_invalid() {
+    let project = fresh_project_dir("semantic_backup");
+    let path = plan_path(&project);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(&path, r#"{"version":99,"prompt":"broken"}"#).unwrap();
+    fs::write(
+        crate::json_store::backup_path(&path),
+        r#"{"prompt":"legacy","synopsis":"recoverable"}"#,
+    )
+    .unwrap();
+
+    let plan = load_plan(&project).unwrap().unwrap();
+    assert_eq!(plan.synopsis, "recoverable");
+}
+
+#[test]
+fn migrates_historical_partial_node_outputs_on_load() {
+    let project = fresh_project_dir("legacy_partial_outputs");
+    let path = plan_path(&project);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(
+        &path,
+        r#"{
+          "prompt":"legacy",
+          "chapters":[{"id":"ch1","title":"Chapter","summary":"Summary"}],
+          "characters":[
+            {"id":"alice","name":"Alice","relations":[{"targetId":"","relationType":""}]}
+          ],
+          "scenePlans":[{
+            "id":"opening","file":"start.txt","chapterId":"ch1","title":"Opening",
+            "summary":"Summary","characterIds":["alice"]
+          }],
+          "branches":{"entryScene":"opening","edges":[]},
+          "sceneDrafts":[{
+            "sceneId":"opening","beats":[{"speaker":"Alice","text":"Hello"}]
+          }],
+          "assetPlan":[{
+            "kind":"figure","targetStem":"alice_default","prompt":"Alice",
+            "characterRef":"alice"
+          }]
+        }"#,
+    )
+    .unwrap();
+
+    let plan = load_plan(&project).unwrap().unwrap();
+    assert!(plan.characters[0].relations.is_empty());
+    assert_eq!(plan.scene_drafts[0].title, "Opening");
+    assert_eq!(plan.asset_plan[0].id, "figure_alice_default");
+    assert_eq!(plan.asset_plan[0].emotion.as_deref(), Some("default"));
 }

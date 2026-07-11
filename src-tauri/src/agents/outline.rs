@@ -5,7 +5,7 @@ use serde::Deserialize;
 
 use crate::story_plan::types::{BranchEdge, BranchGraph, ChapterPlan, ScenePlan};
 
-use super::router::generate_structured;
+use super::router::{contract_error, generate_structured_validated};
 use super::{Agent, AgentContext, AgentError, AgentOutput};
 
 /// Plotter: turns canon into chapters, scene cards, and an explicit branch graph.
@@ -32,6 +32,107 @@ fn fill_missing_summaries(response: &mut OutlineResponse, synopsis: &str) {
     }
 }
 
+fn validate_response(response: &mut OutlineResponse, synopsis: &str) -> Result<(), AgentError> {
+    fill_missing_summaries(response, synopsis);
+    if response.chapters.is_empty() {
+        return Err(contract_error("$.chapters", "must not be empty"));
+    }
+    if response.scene_plans.len() < 2 {
+        return Err(contract_error(
+            "$.scenePlans",
+            "must contain at least 2 scenes",
+        ));
+    }
+    let mut chapter_ids = std::collections::HashSet::new();
+    for (index, chapter) in response.chapters.iter().enumerate() {
+        if chapter.id.trim().is_empty() {
+            return Err(contract_error(
+                format!("$.chapters[{index}].id"),
+                "must not be empty",
+            ));
+        }
+        if !chapter_ids.insert(chapter.id.as_str()) {
+            return Err(contract_error(
+                format!("$.chapters[{index}].id"),
+                "must be unique",
+            ));
+        }
+        if chapter.title.trim().is_empty() {
+            return Err(contract_error(
+                format!("$.chapters[{index}].title"),
+                "must not be empty",
+            ));
+        }
+    }
+    let mut scene_ids = std::collections::HashSet::new();
+    let mut scene_files = std::collections::HashSet::new();
+    for (index, scene) in response.scene_plans.iter().enumerate() {
+        let path = format!("$.scenePlans[{index}]");
+        if scene.id.trim().is_empty() || !scene_ids.insert(scene.id.as_str()) {
+            return Err(contract_error(
+                format!("{path}.id"),
+                "must be non-empty and unique",
+            ));
+        }
+        if !is_safe_scene_file(&scene.file) || !scene_files.insert(scene.file.as_str()) {
+            return Err(contract_error(
+                format!("{path}.file"),
+                "must be a unique safe .txt filename",
+            ));
+        }
+        if !chapter_ids.contains(scene.chapter_id.as_str()) {
+            return Err(contract_error(
+                format!("{path}.chapterId"),
+                "references unknown chapter id",
+            ));
+        }
+        if scene.title.trim().is_empty() {
+            return Err(contract_error(format!("{path}.title"), "must not be empty"));
+        }
+        for (character_index, character) in scene.character_ids.iter().enumerate() {
+            if character.trim().is_empty() {
+                return Err(contract_error(
+                    format!("{path}.characterIds[{character_index}]"),
+                    "must not be empty",
+                ));
+            }
+        }
+    }
+    if !scene_ids.contains(response.branches.entry_scene.as_str()) {
+        return Err(contract_error(
+            "$.branches.entryScene",
+            "references unknown scene id",
+        ));
+    }
+    for (index, edge) in response.branches.edges.iter().enumerate() {
+        if !scene_ids.contains(edge.from.as_str()) {
+            return Err(contract_error(
+                format!("$.branches.edges[{index}].from"),
+                "references unknown scene id",
+            ));
+        }
+        if !scene_ids.contains(edge.to.as_str()) {
+            return Err(contract_error(
+                format!("$.branches.edges[{index}].to"),
+                "references unknown scene id",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn is_safe_scene_file(file: &str) -> bool {
+    let stem = file.strip_suffix(".txt").unwrap_or("");
+    !stem.is_empty()
+        && stem
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
+        && std::path::Path::new(file)
+            .file_name()
+            .and_then(|name| name.to_str())
+            == Some(file)
+}
+
 impl Agent for OutlineAgent {
     fn run<'a>(
         &'a self,
@@ -50,7 +151,7 @@ impl Agent for OutlineAgent {
                 "stepInstruction": ctx.instruction,
                 "requirements": "生成 3 章、至少 5 个 scene。入口 scene 的 file 必须是 start.txt；其他 file 只能是无路径的 .txt 文件名。scene id 唯一，chapterId 必须引用章节 id。branches.entryScene 和每条 edge 的 from/to 使用 scene id，至少包含一次有 choice 文本的分支。"
             });
-            if let Some(mut routed) = generate_structured::<OutlineResponse>(
+            if let Some(routed) = generate_structured_validated::<OutlineResponse, _>(
                 "Plotter / 剧情结构",
                 concat!(
                     "输出可执行的章节、场景卡和分支拓扑。严格使用 JSON：",
@@ -59,15 +160,10 @@ impl Agent for OutlineAgent {
                 ),
                 &input,
                 ctx.allow_local_fallback,
+                |response| validate_response(response, synopsis),
             )
             .await?
             {
-                fill_missing_summaries(&mut routed.value, synopsis);
-                if routed.value.chapters.is_empty() || routed.value.scene_plans.len() < 2 {
-                    return Err(AgentError(
-                        "Plotter returned too little story structure".to_string(),
-                    ));
-                }
                 return Ok(AgentOutput {
                     chapters: Some(routed.value.chapters),
                     scene_plans: Some(routed.value.scene_plans),
@@ -214,6 +310,20 @@ mod tests {
         fill_missing_summaries(&mut parsed, "校园悬疑");
         assert!(!parsed.chapters[0].summary.is_empty());
         assert!(!parsed.scene_plans[0].summary.is_empty());
+    }
+
+    #[test]
+    fn unknown_chapter_reference_reports_scene_field_path() {
+        let mut response: OutlineResponse = serde_json::from_str(r#"{
+            "chapters":[{"id":"ch1","title":"序章","summary":"开始"}],
+            "scenePlans":[
+                {"id":"opening","file":"start.txt","chapterId":"missing","title":"相遇","summary":"开始"},
+                {"id":"ending","file":"ending.txt","chapterId":"ch1","title":"结束","summary":"结束"}
+            ],
+            "branches":{"entryScene":"opening","edges":[{"from":"opening","to":"ending"}]}
+        }"#).unwrap();
+        let error = validate_response(&mut response, "主线").unwrap_err();
+        assert!(error.0.contains("$.scenePlans[0].chapterId"));
     }
 
     #[tokio::test]

@@ -10,6 +10,7 @@ use crate::characters::types::Character;
 #[serde(rename_all = "camelCase")]
 pub struct StoryPlan {
     /// StoryPlan IR schema version. Bump on breaking changes; see `validate`.
+    #[serde(default = "current_plan_version")]
     pub version: u32,
     /// The user's original Production Brief / prompt that started this flow.
     pub prompt: String,
@@ -45,11 +46,17 @@ pub struct StoryPlan {
     pub pipeline_runs: Vec<PipelineRunSummary>,
 }
 
+pub const STORY_PLAN_VERSION: u32 = 1;
+
+fn current_plan_version() -> u32 {
+    STORY_PLAN_VERSION
+}
+
 impl StoryPlan {
     /// Create a fresh plan from a Production Brief, before any step has run.
     pub fn new(prompt: impl Into<String>) -> Self {
         StoryPlan {
-            version: 1,
+            version: STORY_PLAN_VERSION,
             prompt: prompt.into(),
             synopsis: String::new(),
             memory: StoryMemory::default(),

@@ -5,7 +5,7 @@ use serde::Deserialize;
 
 use crate::story_plan::types::AssetTaskPlan;
 
-use super::router::generate_structured;
+use super::router::{contract_error, generate_structured_validated};
 use super::{Agent, AgentContext, AgentError, AgentOutput};
 
 pub struct AssetPlannerAgent;
@@ -67,6 +67,111 @@ fn ensure_staged_figure_tasks(
     }
 }
 
+fn validate_asset_plan(
+    tasks: &[AssetTaskPlan],
+    scenes: &[crate::story_plan::ScenePlan],
+    characters: &[crate::characters::types::Character],
+) -> Result<(), AgentError> {
+    if tasks.is_empty() {
+        return Err(contract_error("$.assetPlan", "must not be empty"));
+    }
+    let scene_ids: std::collections::HashSet<&str> =
+        scenes.iter().map(|scene| scene.id.as_str()).collect();
+    let character_ids: std::collections::HashSet<&str> = characters
+        .iter()
+        .map(|character| character.id.as_str())
+        .collect();
+    let mut ids = std::collections::HashSet::new();
+    let mut figure_variants = std::collections::HashSet::new();
+    for (index, task) in tasks.iter().enumerate() {
+        let path = format!("$.assetPlan[{index}]");
+        if !crate::story_plan::types::is_webgal_flag_value(&task.id)
+            || !ids.insert(task.id.as_str())
+        {
+            return Err(contract_error(
+                format!("{path}.id"),
+                "must be a unique safe id",
+            ));
+        }
+        if !matches!(task.kind.as_str(), "background" | "figure" | "bgm" | "sfx") {
+            return Err(contract_error(
+                format!("{path}.kind"),
+                "must be background, figure, bgm, or sfx",
+            ));
+        }
+        if !crate::story_plan::types::is_webgal_flag_value(&task.target_stem) {
+            return Err(contract_error(
+                format!("{path}.targetStem"),
+                "must be a safe filename stem",
+            ));
+        }
+        if task.prompt.trim().is_empty() {
+            return Err(contract_error(
+                format!("{path}.prompt"),
+                "must not be empty",
+            ));
+        }
+        if task.status != "pending" {
+            return Err(contract_error(
+                format!("{path}.status"),
+                "must equal pending",
+            ));
+        }
+        if let Some(scene) = &task.scene_ref {
+            if !scene_ids.contains(scene.as_str()) {
+                return Err(contract_error(
+                    format!("{path}.sceneRef"),
+                    "references unknown scene id",
+                ));
+            }
+        }
+        if let Some(character) = &task.character_ref {
+            if !character_ids.contains(character.as_str()) {
+                return Err(contract_error(
+                    format!("{path}.characterRef"),
+                    "references unknown character id",
+                ));
+            }
+        }
+        if task.kind == "figure" {
+            if task.character_ref.as_deref().is_none_or(str::is_empty) {
+                return Err(contract_error(
+                    format!("{path}.characterRef"),
+                    "is required for figure tasks",
+                ));
+            }
+            if !task
+                .emotion
+                .as_deref()
+                .is_some_and(crate::story_plan::types::is_webgal_flag_value)
+            {
+                return Err(contract_error(
+                    format!("{path}.emotion"),
+                    "is required and must be safe for figure tasks",
+                ));
+            }
+            let variant = (
+                task.character_ref
+                    .as_deref()
+                    .expect("validated characterRef"),
+                task.emotion.as_deref().expect("validated emotion"),
+            );
+            if !figure_variants.insert(variant) {
+                return Err(contract_error(
+                    format!("{path}.emotion"),
+                    "duplicates an existing character/emotion figure variant",
+                ));
+            }
+        } else if task.emotion.is_some() {
+            return Err(contract_error(
+                format!("{path}.emotion"),
+                "is only allowed for figure tasks",
+            ));
+        }
+    }
+    Ok(())
+}
+
 impl Agent for AssetPlannerAgent {
     fn run<'a>(
         &'a self,
@@ -87,7 +192,7 @@ impl Agent for AssetPlannerAgent {
                 "stepInstruction": ctx.instruction,
                 "requirements": "仅规划需求，不生成或绑定素材。kind 使用 background、figure、bgm、sfx 之一；targetStem 使用安全英文/数字/下划线；sceneRef/characterRef 引用已有 id；status 固定 pending。覆盖每个场景的背景、Scene Staging 每个 show cue 的角色与 emotion 立绘，以及全局 BGM。figure 任务必须包含 emotion，prompt 必须要求单人、完整身体、纯色背景和对应表情，不得生成多人合照或全幅 CG。"
             });
-            if let Some(mut routed) = generate_structured::<AssetPlanResponse>(
+            if let Some(routed) = generate_structured_validated::<AssetPlanResponse, _>(
                 "AssetPlanner / 资产规划",
                 concat!(
                     "把故事内容转成 P2 可消费的结构化资产任务。严格使用 JSON：",
@@ -96,16 +201,16 @@ impl Agent for AssetPlannerAgent {
                 ),
                 &input,
                 ctx.allow_local_fallback,
+                |response| {
+                    fill_missing_task_ids(&mut response.asset_plan);
+                    ensure_staged_figure_tasks(
+                        &mut response.asset_plan,
+                        ctx.characters,
+                        ctx.scene_drafts,
+                    );
+                    validate_asset_plan(&response.asset_plan, ctx.scene_plans, ctx.characters)
+                },
             ).await? {
-                fill_missing_task_ids(&mut routed.value.asset_plan);
-                ensure_staged_figure_tasks(
-                    &mut routed.value.asset_plan,
-                    ctx.characters,
-                    ctx.scene_drafts,
-                );
-                if routed.value.asset_plan.is_empty() {
-                    return Err(AgentError("AssetPlanner returned no tasks".to_string()));
-                }
                 return Ok(AgentOutput {
                     asset_plan: Some(routed.value.asset_plan),
                     model: Some(routed.model),
@@ -192,6 +297,38 @@ mod tests {
             status: "pending".into(),
         };
         assert_eq!(task.status, "pending");
+    }
+
+    #[test]
+    fn unknown_scene_reference_reports_asset_field_path() {
+        let tasks = vec![AssetTaskPlan {
+            id: "bg_opening".into(),
+            kind: "background".into(),
+            target_stem: "bg_opening".into(),
+            prompt: "教室".into(),
+            scene_ref: Some("missing".into()),
+            character_ref: None,
+            emotion: None,
+            status: "pending".into(),
+        }];
+        let error = validate_asset_plan(&tasks, &[], &[]).unwrap_err();
+        assert!(error.0.contains("$.assetPlan[0].sceneRef"));
+    }
+
+    #[test]
+    fn duplicate_figure_variant_reports_asset_field_path() {
+        let tasks = ["first", "second"].map(|id| AssetTaskPlan {
+            id: id.into(),
+            kind: "figure".into(),
+            target_stem: id.into(),
+            prompt: "Alice".into(),
+            scene_ref: None,
+            character_ref: Some("alice".into()),
+            emotion: Some("default".into()),
+            status: "pending".into(),
+        });
+        let error = validate_asset_plan(&tasks, &[], &[character("alice")]).unwrap_err();
+        assert!(error.0.contains("$.assetPlan[1].emotion"));
     }
 
     #[test]

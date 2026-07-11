@@ -3,7 +3,7 @@ use std::pin::Pin;
 
 use serde::Deserialize;
 
-use super::router::generate_structured;
+use super::router::{contract_error, generate_structured_validated};
 use super::{Agent, AgentContext, AgentError, AgentOutput};
 
 /// Turns the Production Brief into a concise dramatic premise.
@@ -12,6 +12,13 @@ pub struct PlanAgent;
 #[derive(Deserialize)]
 struct PlanResponse {
     synopsis: String,
+}
+
+fn validate_response(response: &mut PlanResponse) -> Result<(), AgentError> {
+    if response.synopsis.trim().is_empty() {
+        return Err(contract_error("$.synopsis", "must not be empty"));
+    }
+    Ok(())
 }
 
 impl Agent for PlanAgent {
@@ -29,15 +36,13 @@ impl Agent for PlanAgent {
                 "stepInstruction": ctx.instruction,
                 "requirements": "用中文写 120-220 字梗概，明确主人公、核心关系、冲突、选择与结局悬念。"
             });
-            if let Some(routed) = generate_structured::<PlanResponse>(
+            if let Some(routed) = generate_structured_validated::<PlanResponse, _>(
                 "Plan / 制片策划",
                 "把生产简报转成可供后续世界观、剧情和角色 Agent 共同使用的单段故事梗概。JSON 格式：{\"synopsis\":\"...\"}。",
                 &input,
                 ctx.allow_local_fallback,
+                validate_response,
             ).await? {
-                if routed.value.synopsis.trim().is_empty() {
-                    return Err(AgentError("Plan Agent returned an empty synopsis".to_string()));
-                }
                 return Ok(AgentOutput {
                     synopsis: Some(routed.value.synopsis),
                     model: Some(routed.model),
@@ -62,6 +67,15 @@ impl Agent for PlanAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_model_synopsis_reports_contract_path() {
+        let mut response = PlanResponse {
+            synopsis: " ".into(),
+        };
+        let error = validate_response(&mut response).unwrap_err();
+        assert!(error.0.contains("$.synopsis"));
+    }
 
     #[tokio::test]
     async fn plan_agent_produces_synopsis_from_prompt() {

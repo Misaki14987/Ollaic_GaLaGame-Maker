@@ -13,12 +13,17 @@ pub struct Routed<T> {
     pub completion_tokens: Option<u32>,
 }
 
-pub async fn generate_structured<T: DeserializeOwned>(
+pub async fn generate_structured_validated<T, V>(
     role: &str,
     task: &str,
     context: &serde_json::Value,
     allow_local_fallback: bool,
-) -> Result<Option<Routed<T>>, AgentError> {
+    validate: V,
+) -> Result<Option<Routed<T>>, AgentError>
+where
+    T: DeserializeOwned,
+    V: Fn(&mut T) -> Result<(), AgentError>,
+{
     if cfg!(test) {
         return Ok(None);
     }
@@ -39,11 +44,12 @@ pub async fn generate_structured<T: DeserializeOwned>(
             )))
         };
     };
-    let (value, (_, model, prompt_tokens, completion_tokens)) = repair_once(
+    let (value, (_, model, prompt_tokens, completion_tokens)) = repair_once_validated(
         role,
         task,
         &user,
         first,
+        &validate,
         |repair_system, repair_user| async move {
             crate::ai::commands::complete_agent_text(&repair_system, &repair_user).await
         },
@@ -69,7 +75,24 @@ where
     F: FnOnce(String, String) -> Fut,
     Fut: Future<Output = Result<Option<ModelCompletion>, String>>,
 {
-    let first_error = match parse_structured::<T>(role, &first.0) {
+    repair_once_validated(role, task, original_context, first, &|_| Ok(()), repair).await
+}
+
+async fn repair_once_validated<T, F, Fut, V>(
+    role: &str,
+    task: &str,
+    original_context: &str,
+    first: ModelCompletion,
+    validate: &V,
+    repair: F,
+) -> Result<(T, ModelCompletion), AgentError>
+where
+    T: DeserializeOwned,
+    F: FnOnce(String, String) -> Fut,
+    Fut: Future<Output = Result<Option<ModelCompletion>, String>>,
+    V: Fn(&mut T) -> Result<(), AgentError>,
+{
+    let first_error = match parse_and_validate::<T, V>(role, &first.0, validate) {
         Ok(value) => return Ok((value, first)),
         Err(error) => error,
     };
@@ -86,7 +109,7 @@ where
     else {
         return Err(first_error);
     };
-    let value = parse_structured::<T>(role, &second.0).map_err(|second_error| {
+    let value = parse_and_validate::<T, V>(role, &second.0, validate).map_err(|second_error| {
         AgentError(format!(
             "{}; automatic repair also failed: {}",
             first_error.0, second_error.0
@@ -95,6 +118,24 @@ where
     second.2 = first.2.zip(second.2).map(|(a, b)| a.saturating_add(b));
     second.3 = first.3.zip(second.3).map(|(a, b)| a.saturating_add(b));
     Ok((value, second))
+}
+
+fn parse_and_validate<T, V>(role: &str, text: &str, validate: &V) -> Result<T, AgentError>
+where
+    T: DeserializeOwned,
+    V: Fn(&mut T) -> Result<(), AgentError>,
+{
+    let mut value = parse_structured(role, text)?;
+    validate(&mut value)?;
+    Ok(value)
+}
+
+pub fn contract_error(path: impl AsRef<str>, message: impl AsRef<str>) -> AgentError {
+    AgentError(format!(
+        "contract violation at {}: {}",
+        path.as_ref(),
+        message.as_ref()
+    ))
 }
 
 fn parse_structured<T: DeserializeOwned>(role: &str, text: &str) -> Result<T, AgentError> {
@@ -180,7 +221,7 @@ mod tests {
         assert_eq!(parsed.id, "line one\nline two");
     }
 
-    #[derive(Deserialize)]
+    #[derive(Debug, Deserialize)]
     struct RequiredResponse {
         id: String,
     }
@@ -210,5 +251,65 @@ mod tests {
         assert_eq!(value.id, "fixed");
         assert_eq!(completion.2, Some(7));
         assert_eq!(completion.3, Some(10));
+    }
+
+    #[tokio::test]
+    async fn semantic_failure_uses_the_same_repair_loop_and_field_path() {
+        let first = (
+            r#"{"id":""}"#.to_string(),
+            "model-a".to_string(),
+            Some(2),
+            Some(3),
+        );
+        let (value, _) = repair_once_validated::<RequiredResponse, _, _, _>(
+            "Test Agent",
+            "返回非空 id",
+            "{}",
+            first,
+            &|value| {
+                (!value.id.trim().is_empty())
+                    .then_some(())
+                    .ok_or_else(|| contract_error("$.id", "must not be empty"))
+            },
+            |_, repair_user| async move {
+                assert!(repair_user.contains("$.id"));
+                Ok(Some((
+                    r#"{"id":"fixed"}"#.to_string(),
+                    "model-a".to_string(),
+                    None,
+                    None,
+                )))
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(value.id, "fixed");
+    }
+
+    #[tokio::test]
+    async fn semantic_failure_after_repair_keeps_both_field_paths() {
+        let error = repair_once_validated::<RequiredResponse, _, _, _>(
+            "Test Agent",
+            "返回非空 id",
+            "{}",
+            (r#"{"id":""}"#.into(), "model-a".into(), None, None),
+            &|value| {
+                (!value.id.trim().is_empty())
+                    .then_some(())
+                    .ok_or_else(|| contract_error("$.id", "must not be empty"))
+            },
+            |_, _| async {
+                Ok(Some((
+                    r#"{"id":""}"#.to_string(),
+                    "model-a".to_string(),
+                    None,
+                    None,
+                )))
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(error.0.contains("$.id"));
+        assert!(error.0.contains("automatic repair also failed"));
     }
 }
