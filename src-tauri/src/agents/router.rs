@@ -1,4 +1,5 @@
 use serde::de::DeserializeOwned;
+use std::fmt::Write as _;
 use std::future::Future;
 
 use super::AgentError;
@@ -99,11 +100,45 @@ where
 fn parse_structured<T: DeserializeOwned>(role: &str, text: &str) -> Result<T, AgentError> {
     let json =
         extract_json(text).ok_or_else(|| AgentError(format!("{role} returned no JSON object")))?;
-    serde_json::from_str(json).map_err(|error| {
-        AgentError(format!(
-            "{role} returned JSON with an invalid structure: {error}"
-        ))
-    })
+    serde_json::from_str(json)
+        .or_else(|_| serde_json::from_str(&escape_string_control_characters(json)))
+        .map_err(|error| {
+            AgentError(format!(
+                "{role} returned JSON with an invalid structure: {error}"
+            ))
+        })
+}
+
+fn escape_string_control_characters(json: &str) -> String {
+    let mut escaped_json = String::with_capacity(json.len());
+    let mut in_string = false;
+    let mut after_escape = false;
+
+    for character in json.chars() {
+        if !in_string {
+            escaped_json.push(character);
+            in_string = character == '"';
+        } else if after_escape {
+            escaped_json.push(character);
+            after_escape = false;
+        } else {
+            match character {
+                '\\' => {
+                    escaped_json.push(character);
+                    after_escape = true;
+                }
+                '"' => {
+                    escaped_json.push(character);
+                    in_string = false;
+                }
+                '\u{0000}'..='\u{001f}' => {
+                    write!(escaped_json, "\\u{:04x}", character as u32).unwrap();
+                }
+                _ => escaped_json.push(character),
+            }
+        }
+    }
+    escaped_json
 }
 
 fn extract_json(text: &str) -> Option<&str> {
@@ -123,6 +158,26 @@ mod tests {
             extract_json("```json\n{\"ok\":true}\n```"),
             Some("{\"ok\":true}")
         );
+    }
+
+    #[tokio::test]
+    async fn parses_unescaped_control_characters_without_model_repair() {
+        let first = (
+            "{\"id\":\"line one\nline two\"}".to_string(),
+            "model-a".to_string(),
+            Some(2),
+            Some(3),
+        );
+        let (parsed, _) = repair_once::<RequiredResponse, _, _>(
+            "Dialogist",
+            "write dialogue",
+            "{}",
+            first,
+            |_, _| async { Err("model repair should not be called".to_string()) },
+        )
+        .await
+        .unwrap();
+        assert_eq!(parsed.id, "line one\nline two");
     }
 
     #[derive(Deserialize)]
