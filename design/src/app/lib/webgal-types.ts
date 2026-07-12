@@ -111,9 +111,23 @@ export interface WebGalNode {
 
 export const commandCategories = {
   story: ['dialogue', 'narrator', 'intro', 'choose'] as WebGalCommandType[],
-  scene: ['changeBg', 'changeFigure', 'miniAvatar', 'changeScene', 'callScene', 'end'] as WebGalCommandType[],
+  scene: [
+    'changeBg',
+    'changeFigure',
+    'miniAvatar',
+    'changeScene',
+    'callScene',
+    'end',
+  ] as WebGalCommandType[],
   audio: ['bgm', 'playEffect', 'playVideo'] as WebGalCommandType[],
-  control: ['label', 'jumpLabel', 'setVar', 'setTextbox', 'getUserInput', 'comment'] as WebGalCommandType[],
+  control: [
+    'label',
+    'jumpLabel',
+    'setVar',
+    'setTextbox',
+    'getUserInput',
+    'comment',
+  ] as WebGalCommandType[],
   effects: ['setAnimation', 'setTransform', 'unlockCg', 'unlockBgm'] as WebGalCommandType[],
 };
 
@@ -155,8 +169,12 @@ export type CommandCategory = keyof typeof commandCategories;
 
 const commandToCategory: Record<WebGalCommandType, CommandCategory> = (() => {
   const map = {} as Record<WebGalCommandType, CommandCategory>;
-  (Object.entries(commandCategories) as [CommandCategory, readonly WebGalCommandType[]][])
-    .forEach(([cat, types]) => types.forEach((t) => { map[t] = cat; }));
+  (Object.entries(commandCategories) as [CommandCategory, readonly WebGalCommandType[]][]).forEach(
+    ([cat, types]) =>
+      types.forEach((t) => {
+        map[t] = cat;
+      }),
+  );
   return map;
 })();
 
@@ -166,26 +184,24 @@ export function getCommandCategory(type: WebGalCommandType): CommandCategory {
 
 // 'control' uses text-on-surface because amber (L=75%) is too light for white text to meet WCAG contrast.
 export const categoryTagClass: Record<CommandCategory, string> = {
-  story:   'bg-story text-primary-foreground',
-  scene:   'bg-scene text-primary-foreground',
-  audio:   'bg-audio text-primary-foreground',
+  story: 'bg-story text-primary-foreground',
+  scene: 'bg-scene text-primary-foreground',
+  audio: 'bg-audio text-primary-foreground',
   control: 'bg-control text-on-surface',
   effects: 'bg-effects text-primary-foreground',
 };
 
 export const categoryBorderClass: Record<CommandCategory, string> = {
-  story:   'border-story bg-story-soft',
-  scene:   'border-scene bg-scene-soft',
-  audio:   'border-audio bg-audio-soft',
+  story: 'border-story bg-story-soft',
+  scene: 'border-scene bg-scene-soft',
+  audio: 'border-audio bg-audio-soft',
   control: 'border-control bg-control-soft',
   effects: 'border-effects bg-effects-soft',
 };
 
-export const typeBorderClass: Record<WebGalCommandType, string> =
-  Object.fromEntries(
-    Object.entries(commandToCategory).map(([type, cat]) =>
-      [type, categoryBorderClass[cat]]),
-  ) as Record<WebGalCommandType, string>;
+export const typeBorderClass: Record<WebGalCommandType, string> = Object.fromEntries(
+  Object.entries(commandToCategory).map(([type, cat]) => [type, categoryBorderClass[cat]]),
+) as Record<WebGalCommandType, string>;
 
 const METADATA_KEYS = new Set(['章节', 'chapter', '大纲', 'outline', '描述', 'desc']);
 

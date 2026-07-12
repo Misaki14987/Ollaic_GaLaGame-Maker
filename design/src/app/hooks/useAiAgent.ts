@@ -52,19 +52,27 @@ import {
   truncateContextMessages,
   type MissingAssetIssue,
 } from '../lib/story-agent';
-import { createScene, getScenePath, listScenes, parseScene, readFileText, saveScene, sceneDisplayName, updateSceneHeader, type SceneHeader } from '../lib/webgal-ipc';
+import {
+  createScene,
+  getScenePath,
+  listScenes,
+  parseScene,
+  readFileText,
+  saveScene,
+  sceneDisplayName,
+  updateSceneHeader,
+  type SceneHeader,
+} from '../lib/webgal-ipc';
 import type { WebGalNode } from '../lib/webgal-types';
-import { useChatSession, type AssistantStep, type ChatMessage, type StepToolCall } from './useChatSession';
+import {
+  useChatSession,
+  type AssistantStep,
+  type ChatMessage,
+  type StepToolCall,
+} from './useChatSession';
 
 export type AiPanelStatus =
-  | 'idle'
-  | 'generating'
-  | 'tooling'
-  | 'pending'
-  | 'accepted'
-  | 'reverted'
-  | 'conflict'
-  | 'error';
+  'idle' | 'generating' | 'tooling' | 'pending' | 'accepted' | 'reverted' | 'conflict' | 'error';
 
 export interface AiErrorState {
   message: string;
@@ -73,7 +81,15 @@ export interface AiErrorState {
 }
 
 /** Providers with reliable native function-calling support. Others fall back. */
-const FC_PROVIDERS = new Set(['openai', 'anthropic', 'gemini', 'deepseek', 'groq', 'xai', 'cohere']);
+const FC_PROVIDERS = new Set([
+  'openai',
+  'anthropic',
+  'gemini',
+  'deepseek',
+  'groq',
+  'xai',
+  'cohere',
+]);
 const MAX_TURNS = 6;
 
 interface AiAgentTraceTool {
@@ -112,7 +128,8 @@ interface AiAgentTrace {
 export const INITIAL_AI_MESSAGE: ChatMessage = {
   id: '1',
   role: 'assistant',
-  content: '你好，我是故事编辑助手。你可以告诉我想续写剧情、调整对白、删除片段，或一起讨论场景节奏和人物表现。我可以查阅其他场景、素材库和角色设定，并跨场景/角色提出修改。',
+  content:
+    '你好，我是故事编辑助手。你可以告诉我想续写剧情、调整对白、删除片段，或一起讨论场景节奏和人物表现。我可以查阅其他场景、素材库和角色设定，并跨场景/角色提出修改。',
 };
 
 interface UseAiAgentParams {
@@ -140,25 +157,44 @@ interface UseAiAgentParams {
 
 function buildCharacterContext(chars: Character[]): string {
   if (chars.length === 0) return '';
-  return chars.map(c => {
-    const parts: string[] = [`- ${c.name}（id: ${c.id}）`];
-    if (c.aliases.length > 0) parts.push(`  别名: ${c.aliases.join(', ')}`);
-    if (c.personality) parts.push(`  性格: ${c.personality}`);
-    if (c.dialogueStyle) parts.push(`  对话风格: ${c.dialogueStyle}`);
-    return parts.join('\n');
-  }).join('\n');
+  return chars
+    .map((c) => {
+      const parts: string[] = [`- ${c.name}（id: ${c.id}）`];
+      if (c.aliases.length > 0) parts.push(`  别名: ${c.aliases.join(', ')}`);
+      if (c.personality) parts.push(`  性格: ${c.personality}`);
+      if (c.dialogueStyle) parts.push(`  对话风格: ${c.dialogueStyle}`);
+      return parts.join('\n');
+    })
+    .join('\n');
 }
 
 function classifyAiError(raw: string): AiErrorState {
   const lower = raw.toLowerCase();
-  if (lower.includes('401') || lower.includes('unauthorized') || lower.includes('invalid api key')) {
-    return { kind: 'auth', retryable: false, message: 'API Key 无效，请前往设置重新配置' };
+  if (
+    lower.includes('401') ||
+    lower.includes('unauthorized') ||
+    lower.includes('invalid api key')
+  ) {
+    return {
+      kind: 'auth',
+      retryable: false,
+      message: 'API Key 无效，请前往设置重新配置',
+    };
   }
   if (lower.includes('429') || lower.includes('rate limit')) {
-    return { kind: 'rate_limit', retryable: true, message: '上游 AI 服务返回 429 限流，请稍后再试。这通常是 API 厂商、模型服务或中转平台的速率/并发限制，不是本项目里的 AI 设置限制。' };
+    return {
+      kind: 'rate_limit',
+      retryable: true,
+      message:
+        '上游 AI 服务返回 429 限流，请稍后再试。这通常是 API 厂商、模型服务或中转平台的速率/并发限制，不是本项目里的 AI 设置限制。',
+    };
   }
   if (lower.includes('timeout') || lower.includes('connection refused')) {
-    return { kind: 'timeout', retryable: true, message: '连接超时，请检查网络' };
+    return {
+      kind: 'timeout',
+      retryable: true,
+      message: '连接超时，请检查网络',
+    };
   }
   return { kind: 'other', retryable: true, message: `AI 服务出错：${raw}` };
 }
@@ -178,32 +214,57 @@ function searchAssetsLabel(args: Record<string, unknown>): string {
   return query ? `正在查询${scope}中的「${query}」…` : `正在查询素材库（${scope}）…`;
 }
 
-function stepLabelForTool(name: string, args: Record<string, unknown>, headers: Record<string, SceneHeader>): string {
-  const sceneName = (file: unknown) => sceneDisplayName(String(file ?? ''), headers[String(file ?? '')]);
+function stepLabelForTool(
+  name: string,
+  args: Record<string, unknown>,
+  headers: Record<string, SceneHeader>,
+): string {
+  const sceneName = (file: unknown) =>
+    sceneDisplayName(String(file ?? ''), headers[String(file ?? '')]);
   switch (name) {
-    case 'list_scenes': return '正在列出场景…';
-    case 'read_scene': return `正在读取场景「${sceneName(args.name)}」…`;
-    case 'search_assets': return searchAssetsLabel(args);
-    case 'list_characters': return '正在列出角色…';
-    case 'get_character': return '正在读取角色设定…';
-    case 'read_memory': return '正在读取项目记忆…';
-    case 'edit_scene': return `正在准备修改场景「${sceneName(args.file)}」…`;
-    case 'set_scene_header': return `正在整理场景「${sceneName(args.file)}」的章节信息…`;
-    case 'insert_dialogue_block': return `正在写入场景「${sceneName(args.file)}」…`;
-    case 'create_branch': return `正在创建分支场景「${sceneName(args.file)}」…`;
-    case 'insert_figure': return `正在插入立绘「${String(args.character || '')} / ${String(args.emotion || '')}」…`;
-    case 'create_character': return `正在准备新建角色「${String(args.name || '')}」…`;
-    case 'plan_character_sprites': return `正在规划角色「${String(args.character || '')}」的表情槽…`;
-    case 'plan_assets': return '正在规划待生成素材…';
-    case 'edit_character': return '正在准备修改角色设定…';
-    case 'edit_memory': return '正在准备更新项目记忆…';
-    case 'create_scene': return `正在新建场景「${String(args.chapter || args.name || '')}」…`;
-    default: return `正在执行 ${name}…`;
+    case 'list_scenes':
+      return '正在列出场景…';
+    case 'read_scene':
+      return `正在读取场景「${sceneName(args.name)}」…`;
+    case 'search_assets':
+      return searchAssetsLabel(args);
+    case 'list_characters':
+      return '正在列出角色…';
+    case 'get_character':
+      return '正在读取角色设定…';
+    case 'read_memory':
+      return '正在读取项目记忆…';
+    case 'edit_scene':
+      return `正在准备修改场景「${sceneName(args.file)}」…`;
+    case 'set_scene_header':
+      return `正在整理场景「${sceneName(args.file)}」的章节信息…`;
+    case 'insert_dialogue_block':
+      return `正在写入场景「${sceneName(args.file)}」…`;
+    case 'create_branch':
+      return `正在创建分支场景「${sceneName(args.file)}」…`;
+    case 'insert_figure':
+      return `正在插入立绘「${String(args.character || '')} / ${String(args.emotion || '')}」…`;
+    case 'create_character':
+      return `正在准备新建角色「${String(args.name || '')}」…`;
+    case 'plan_character_sprites':
+      return `正在规划角色「${String(args.character || '')}」的表情槽…`;
+    case 'plan_assets':
+      return '正在规划待生成素材…';
+    case 'edit_character':
+      return '正在准备修改角色设定…';
+    case 'edit_memory':
+      return '正在准备更新项目记忆…';
+    case 'create_scene':
+      return `正在新建场景「${String(args.chapter || args.name || '')}」…`;
+    default:
+      return `正在执行 ${name}…`;
   }
 }
 
 function isStageError(value: unknown): value is StageError {
-  return typeof value === 'object' && value !== null && typeof (value as StageError).message === 'string';
+  return (
+    typeof value === 'object' && value !== null && typeof (value as StageError).message === 'string'
+  );
 }
 
 function applyAssetPlanEdit(metadata: AssetMetadata, edit: AssetPlanEdit): AssetMetadata {
@@ -306,9 +367,23 @@ export function useAiAgent(params: UseAiAgentParams) {
       return;
     }
     let cancelled = false;
-    listAllAssets(projectPath).then((list) => { if (!cancelled) setAssets(list); }).catch(() => { if (!cancelled) setAssets([]); });
-    readProjectMemory(projectPath).then((value) => { if (!cancelled) setMemory(value); }).catch(() => { if (!cancelled) setMemory(null); });
-    return () => { cancelled = true; };
+    listAllAssets(projectPath)
+      .then((list) => {
+        if (!cancelled) setAssets(list);
+      })
+      .catch(() => {
+        if (!cancelled) setAssets([]);
+      });
+    readProjectMemory(projectPath)
+      .then((value) => {
+        if (!cancelled) setMemory(value);
+      })
+      .catch(() => {
+        if (!cancelled) setMemory(null);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [projectPath]);
 
   useEffect(() => {
@@ -317,9 +392,16 @@ export function useAiAgent(params: UseAiAgentParams) {
     return () => clearTimeout(timer);
   }, [cooldown]);
 
-  const replaceAssistantMessage = useCallback((messageId: string, content: string, extra?: Partial<ChatMessage>) => {
-    setMessages(prev => prev.map(message => (message.id === messageId ? { ...message, content, ...extra } : message)));
-  }, [setMessages]);
+  const replaceAssistantMessage = useCallback(
+    (messageId: string, content: string, extra?: Partial<ChatMessage>) => {
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === messageId ? { ...message, content, ...extra } : message,
+        ),
+      );
+    },
+    [setMessages],
+  );
 
   // Slim system prompt for the tool-calling loop: current scene + "fetch on demand".
   const buildAgentSystemContext = useCallback((): string => {
@@ -386,412 +468,548 @@ export function useAiAgent(params: UseAiAgentParams) {
       buildMemoryContext(memory),
       `当前场景：${sceneDisplayName(currentSceneName, sceneHeaders[currentSceneName])}（文件名 ${currentSceneName}）`,
       `当前脚本（左侧数字是 txt 行号）：\n${buildNumberedScriptContext(scriptSource)}`,
-    ].filter(Boolean).join('\n\n');
+    ]
+      .filter(Boolean)
+      .join('\n\n');
   }, [assets, characters, currentSceneName, sceneHeaders, memory, scriptSource]);
 
-  const buildStagingContext = useCallback((assetOverride?: AssetInfo[]): StagingContext => ({
-    currentSceneName,
-    currentScriptSource: scriptSource,
-    currentNodes: nodes,
-    assets: assetOverride ?? assets,
-    characters,
-    readSceneContent: async (file: string) => {
-      if (!projectPath) throw new Error('当前没有打开的项目。');
-      const path = await getScenePath(projectPath, file);
-      return readFileText(path);
-    },
-    listSceneFiles: async () => {
-      if (!projectPath) return [];
-      return listScenes(`${projectPath}/game/scene`);
-    },
-    getCharacter: (id: string) => characters.find((c) => c.id === id),
-    memory: memory ?? emptyProjectMemory(),
-  }), [assets, characters, currentSceneName, memory, nodes, projectPath, scriptSource]);
+  const buildStagingContext = useCallback(
+    (assetOverride?: AssetInfo[]): StagingContext => ({
+      currentSceneName,
+      currentScriptSource: scriptSource,
+      currentNodes: nodes,
+      assets: assetOverride ?? assets,
+      characters,
+      readSceneContent: async (file: string) => {
+        if (!projectPath) throw new Error('当前没有打开的项目。');
+        const path = await getScenePath(projectPath, file);
+        return readFileText(path);
+      },
+      listSceneFiles: async () => {
+        if (!projectPath) return [];
+        return listScenes(`${projectPath}/game/scene`);
+      },
+      getCharacter: (id: string) => characters.find((c) => c.id === id),
+      memory: memory ?? emptyProjectMemory(),
+    }),
+    [assets, characters, currentSceneName, memory, nodes, projectPath, scriptSource],
+  );
 
   // Turn a finished set of staged edits into a pending change set + live preview.
-  const finalizeChangeSet = useCallback((edits: ChangeEdit[], sourceMessageId: string) => {
-    if (edits.length === 0) return false;
-    const changeSet: PendingChangeSet = {
-      id: `cs-${Date.now()}`,
-      createdAt: new Date().toISOString(),
-      sourceMessageId,
-      status: 'pending',
-      edits,
-    };
-    const liveSceneName = currentSceneNameRef.current;
-    const currentSceneEdit = edits.find((e): e is SceneEdit => e.kind === 'scene' && e.file === liveSceneName);
-    if (currentSceneEdit) {
-      setNodes(currentSceneEdit.afterNodes);
-      setScriptSource(currentSceneEdit.afterContent);
-      setSelectedNode(null);
-      setShowScript(false);
-      dirtyBeforePreviewRef.current = dirty;
-      setDirty(true);
-      setSaveStatus('idle');
-    }
-    replaceAssistantMessage(sourceMessageId, `已生成修改预览：${summarizeChangeSet(changeSet, sceneHeaders)}`);
-    setPendingChangeSet(changeSet);
-    setStatus('pending');
-    setError(null);
-    return true;
-  }, [dirty, sceneHeaders, replaceAssistantMessage, setDirty, setNodes, setSaveStatus, setScriptSource, setSelectedNode, setShowScript]);
+  const finalizeChangeSet = useCallback(
+    (edits: ChangeEdit[], sourceMessageId: string) => {
+      if (edits.length === 0) return false;
+      const changeSet: PendingChangeSet = {
+        id: `cs-${Date.now()}`,
+        createdAt: new Date().toISOString(),
+        sourceMessageId,
+        status: 'pending',
+        edits,
+      };
+      const liveSceneName = currentSceneNameRef.current;
+      const currentSceneEdit = edits.find(
+        (e): e is SceneEdit => e.kind === 'scene' && e.file === liveSceneName,
+      );
+      if (currentSceneEdit) {
+        setNodes(currentSceneEdit.afterNodes);
+        setScriptSource(currentSceneEdit.afterContent);
+        setSelectedNode(null);
+        setShowScript(false);
+        dirtyBeforePreviewRef.current = dirty;
+        setDirty(true);
+        setSaveStatus('idle');
+      }
+      replaceAssistantMessage(
+        sourceMessageId,
+        `已生成修改预览：${summarizeChangeSet(changeSet, sceneHeaders)}`,
+      );
+      setPendingChangeSet(changeSet);
+      setStatus('pending');
+      setError(null);
+      return true;
+    },
+    [
+      dirty,
+      sceneHeaders,
+      replaceAssistantMessage,
+      setDirty,
+      setNodes,
+      setSaveStatus,
+      setScriptSource,
+      setSelectedNode,
+      setShowScript,
+    ],
+  );
 
   // --- Function-calling agent loop ----------------------------------------
-  const runAgentLoop = useCallback(async (text: string, assistantId: string) => {
-    const trace: AiAgentTrace = {
-      traceId: `trace-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      createdAt: new Date().toISOString(),
-      projectId,
-      currentSceneName,
-      assistantId,
-      prompt: text,
-      mode: 'function_calling',
-      turns: [],
-    };
-    const freshAssets = projectPath ? await listAllAssets(projectPath).catch(() => assets) : assets;
-    if (freshAssets !== assets) setAssets(freshAssets);
-    trace.assetCount = freshAssets.length;
-    const plannedAssetKeys = new Set<string>();
-    const stagingCtx = { ...buildStagingContext(freshAssets), plannedAssetKeys };
-    const sceneEdits = new Map<string, SceneEdit>();
-    const charEdits = new Map<string, CharacterEdit>();
-    const createCharEdits = new Map<string, CreateCharacterEdit>();
-    const createSceneEdits = new Map<string, CreateSceneEdit>();
-    const assetPlanEdits: ReturnType<typeof stageAssetPlanEdit>[] = [];
-    let memEdit: MemoryEdit | undefined;
+  const runAgentLoop = useCallback(
+    async (text: string, assistantId: string) => {
+      const trace: AiAgentTrace = {
+        traceId: `trace-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        createdAt: new Date().toISOString(),
+        projectId,
+        currentSceneName,
+        assistantId,
+        prompt: text,
+        mode: 'function_calling',
+        turns: [],
+      };
+      const freshAssets = projectPath
+        ? await listAllAssets(projectPath).catch(() => assets)
+        : assets;
+      if (freshAssets !== assets) setAssets(freshAssets);
+      trace.assetCount = freshAssets.length;
+      const plannedAssetKeys = new Set<string>();
+      const stagingCtx = {
+        ...buildStagingContext(freshAssets),
+        plannedAssetKeys,
+      };
+      const sceneEdits = new Map<string, SceneEdit>();
+      const charEdits = new Map<string, CharacterEdit>();
+      const createCharEdits = new Map<string, CreateCharacterEdit>();
+      const createSceneEdits = new Map<string, CreateSceneEdit>();
+      const assetPlanEdits: ReturnType<typeof stageAssetPlanEdit>[] = [];
+      let memEdit: MemoryEdit | undefined;
 
-    const stage = async (staged: StagedWrite): Promise<{ content: string; ok: boolean; error?: string }> => {
-      try {
-        if (staged.tool === 'edit_scene') {
-          sceneEdits.set(staged.file, await stageSceneEdit(sceneEdits.get(staged.file), staged, stagingCtx));
-        } else if (staged.tool === 'set_scene_header') {
-          sceneEdits.set(staged.file, await stageSceneHeaderEdit(sceneEdits.get(staged.file), staged, stagingCtx));
-        } else if (staged.tool === 'insert_dialogue_block') {
-          sceneEdits.set(staged.file, await stageDialogueBlockInsert(sceneEdits.get(staged.file), staged, stagingCtx));
-        } else if (staged.tool === 'create_branch') {
-          const result = await stageBranchEdit(sceneEdits.get(staged.file), staged, stagingCtx);
-          sceneEdits.set(staged.file, result.sourceEdit);
-          for (const edit of result.createSceneEdits) createSceneEdits.set(edit.file, edit);
-        } else if (staged.tool === 'insert_figure') {
-          sceneEdits.set(staged.file, await stageFigureInsert(sceneEdits.get(staged.file), staged, stagingCtx));
-        } else if (staged.tool === 'create_character') {
-          const edit = stageCreateCharacterEdit(staged, stagingCtx);
-          createCharEdits.set(edit.draft.name, edit);
-        } else if (staged.tool === 'plan_character_sprites') {
-          const base = characters.find((c) =>
-            c.id === staged.character
-            || c.name === staged.character
-            || (c.aliases ?? []).includes(staged.character),
-          );
-          const edit = stageCharacterSpritesPlan(base ? charEdits.get(base.id) : undefined, staged, stagingCtx);
-          charEdits.set(edit.id, edit);
-        } else if (staged.tool === 'edit_character') {
-          charEdits.set(staged.id, stageCharacterEdit(charEdits.get(staged.id), staged, stagingCtx));
-        } else if (staged.tool === 'create_scene') {
-          const edit = await stageCreateSceneEdit(staged, stagingCtx);
-          createSceneEdits.set(edit.file, edit);
-        } else if (staged.tool === 'plan_assets') {
-          const edit = stageAssetPlanEdit(staged);
-          assetPlanEdits.push(edit);
-          for (const card of edit.cards) {
-            if (card.category !== 'background') continue;
-            const filename = `${card.targetStem}.png`;
-            plannedAssetKeys.add(`background/${filename}`);
+      const stage = async (
+        staged: StagedWrite,
+      ): Promise<{ content: string; ok: boolean; error?: string }> => {
+        try {
+          if (staged.tool === 'edit_scene') {
+            sceneEdits.set(
+              staged.file,
+              await stageSceneEdit(sceneEdits.get(staged.file), staged, stagingCtx),
+            );
+          } else if (staged.tool === 'set_scene_header') {
+            sceneEdits.set(
+              staged.file,
+              await stageSceneHeaderEdit(sceneEdits.get(staged.file), staged, stagingCtx),
+            );
+          } else if (staged.tool === 'insert_dialogue_block') {
+            sceneEdits.set(
+              staged.file,
+              await stageDialogueBlockInsert(sceneEdits.get(staged.file), staged, stagingCtx),
+            );
+          } else if (staged.tool === 'create_branch') {
+            const result = await stageBranchEdit(sceneEdits.get(staged.file), staged, stagingCtx);
+            sceneEdits.set(staged.file, result.sourceEdit);
+            for (const edit of result.createSceneEdits) createSceneEdits.set(edit.file, edit);
+          } else if (staged.tool === 'insert_figure') {
+            sceneEdits.set(
+              staged.file,
+              await stageFigureInsert(sceneEdits.get(staged.file), staged, stagingCtx),
+            );
+          } else if (staged.tool === 'create_character') {
+            const edit = stageCreateCharacterEdit(staged, stagingCtx);
+            createCharEdits.set(edit.draft.name, edit);
+          } else if (staged.tool === 'plan_character_sprites') {
+            const base = characters.find(
+              (c) =>
+                c.id === staged.character ||
+                c.name === staged.character ||
+                (c.aliases ?? []).includes(staged.character),
+            );
+            const edit = stageCharacterSpritesPlan(
+              base ? charEdits.get(base.id) : undefined,
+              staged,
+              stagingCtx,
+            );
+            charEdits.set(edit.id, edit);
+          } else if (staged.tool === 'edit_character') {
+            charEdits.set(
+              staged.id,
+              stageCharacterEdit(charEdits.get(staged.id), staged, stagingCtx),
+            );
+          } else if (staged.tool === 'create_scene') {
+            const edit = await stageCreateSceneEdit(staged, stagingCtx);
+            createSceneEdits.set(edit.file, edit);
+          } else if (staged.tool === 'plan_assets') {
+            const edit = stageAssetPlanEdit(staged);
+            assetPlanEdits.push(edit);
+            for (const card of edit.cards) {
+              if (card.category !== 'background') continue;
+              const filename = `${card.targetStem}.png`;
+              plannedAssetKeys.add(`background/${filename}`);
+            }
+            return {
+              content: JSON.stringify({
+                staged: true,
+                message:
+                  '已暂存素材规划。需要把该背景放进脚本时，使用 returned scriptAsset 写 changeBg。',
+                plannedAssets: edit.cards.map((card) => ({
+                  category: card.category,
+                  title: card.title,
+                  sceneFile: card.sceneFile,
+                  targetStem: card.targetStem,
+                  scriptAsset:
+                    card.category === 'background' ? `${card.targetStem}.png` : undefined,
+                })),
+              }),
+              ok: true,
+            };
+          } else {
+            memEdit = stageMemoryEdit(memEdit, staged, stagingCtx);
           }
           return {
             content: JSON.stringify({
               staged: true,
-              message: '已暂存素材规划。需要把该背景放进脚本时，使用 returned scriptAsset 写 changeBg。',
-              plannedAssets: edit.cards.map((card) => ({
-                category: card.category,
-                title: card.title,
-                sceneFile: card.sceneFile,
-                targetStem: card.targetStem,
-                scriptAsset: card.category === 'background' ? `${card.targetStem}.png` : undefined,
-              })),
+              message: '已暂存，等待用户确认。',
             }),
             ok: true,
           };
-        } else {
-          memEdit = stageMemoryEdit(memEdit, staged, stagingCtx);
+        } catch (e) {
+          const msg = isStageError(e) ? e.message : String(e);
+          return {
+            content: JSON.stringify({ staged: false, error: msg }),
+            ok: false,
+            error: msg,
+          };
         }
-        return { content: JSON.stringify({ staged: true, message: '已暂存，等待用户确认。' }), ok: true };
-      } catch (e) {
-        const msg = isStageError(e) ? e.message : String(e);
-        return { content: JSON.stringify({ staged: false, error: msg }), ok: false, error: msg };
+      };
+
+      const convo: AiChatMessage[] = [
+        { role: 'system', content: buildAgentSystemContext() },
+        ...truncateContextMessages(messages, 8),
+        { role: 'user', content: text },
+      ];
+
+      // Append a finished turn (its text + tool calls) as a step on the assistant
+      // message so text is never discarded and tool activity is shown inline.
+      const pushStep = (step: AssistantStep) => {
+        setMessages((prev) =>
+          prev.map((m) => {
+            if (m.id !== assistantId) return m;
+            const steps = [...(m.steps ?? []), step];
+            const lastText = [...steps].reverse().find((s) => s.text)?.text ?? '';
+            return { ...m, steps, content: lastText };
+          }),
+        );
+      };
+
+      let finalText = '';
+      const traceSummary: string[] = [];
+      for (let turn = 0; turn < MAX_TURNS; turn += 1) {
+        if (cancelledRef.current) return;
+        setStatus(turn === 0 ? 'generating' : 'tooling');
+        setStepLabel(turn === 0 ? '思考中…' : '继续分析…');
+        const res = await aiChatTurn(convo, toolDefs()).catch((e) => {
+          trace.outcome = 'error';
+          trace.error = String(e);
+          void writeAgentTrace(trace);
+          throw e;
+        });
+        if (cancelledRef.current) return;
+        const turnText = res.text ?? '';
+        const turnTrace: AiAgentTraceTurn = {
+          turn,
+          modelText: turnText,
+          toolCalls: [],
+        };
+        trace.turns.push(turnTrace);
+
+        // No tool calls → this turn's text is the final answer.
+        if (res.toolCalls.length === 0) {
+          if (turnText) pushStep({ text: turnText });
+          finalText = turnText;
+          break;
+        }
+
+        // Execute this turn's tool calls, recording each on the step for display.
+        convo.push({
+          role: 'assistant',
+          content: turnText,
+          toolCalls: res.toolCalls,
+        });
+        const stepCalls: StepToolCall[] = [];
+        for (const call of res.toolCalls) {
+          const label = stepLabelForTool(call.name, call.arguments, sceneHeaders);
+          setStepLabel(label);
+          const tool = getTool(call.name);
+          let content: string;
+          let ok = true;
+          let errMsg: string | undefined;
+          let resultPayload: unknown;
+          if (!tool) {
+            resultPayload = { error: `未知工具：${call.name}` };
+            content = JSON.stringify(resultPayload);
+            ok = false;
+            errMsg = '未知工具';
+          } else if (tool.kind === 'write') {
+            try {
+              const staged = (await tool.run(call.arguments, {
+                projectPath,
+                currentSceneName,
+              })) as StagedWrite;
+              const result = await stage(staged);
+              resultPayload = JSON.parse(result.content) as unknown;
+              content = result.content;
+              ok = result.ok;
+              errMsg = result.error;
+            } catch (e) {
+              // Arg validation failure — feed the explicit message back so the
+              // model can fix its patch instead of aborting the whole loop.
+              resultPayload = { staged: false, error: String(e) };
+              content = JSON.stringify(resultPayload);
+              ok = false;
+              errMsg = String(e);
+            }
+          } else {
+            try {
+              resultPayload = await tool.run(call.arguments, {
+                projectPath,
+                currentSceneName,
+              });
+              content = JSON.stringify(resultPayload);
+            } catch (e) {
+              resultPayload = { error: String(e) };
+              content = JSON.stringify(resultPayload);
+              ok = false;
+              errMsg = String(e);
+            }
+          }
+          turnTrace.toolCalls.push({
+            id: call.id,
+            name: call.name,
+            arguments: call.arguments,
+            kind: tool?.kind,
+            label,
+            ok,
+            result: resultPayload,
+            error: errMsg,
+          });
+          stepCalls.push({ name: call.name, label, ok, error: errMsg });
+          traceSummary.push(`${call.name}: ${ok ? 'ok' : `失败（${errMsg}）`}`);
+          convo.push({ role: 'tool', content, toolCallId: call.id });
+        }
+        pushStep({ text: turnText || undefined, toolCalls: stepCalls });
+
+        if (turn === MAX_TURNS - 1) {
+          // Loop exhausted while still calling tools. Surface what happened.
+          const recent = traceSummary.slice(-8).join('；');
+          finalText =
+            turnText ||
+            `已达到最大工具调用轮数（${MAX_TURNS}）仍未生成可确认的修改。工具调用轨迹：${recent || '无'}。`;
+        }
       }
-    };
 
-    const convo: AiChatMessage[] = [
-      { role: 'system', content: buildAgentSystemContext() },
-      ...truncateContextMessages(messages, 8),
-      { role: 'user', content: text },
-    ];
+      const edits: ChangeEdit[] = [
+        ...sceneEdits.values(),
+        ...createCharEdits.values(),
+        ...charEdits.values(),
+        ...assetPlanEdits,
+        ...(memEdit ? [memEdit] : []),
+        ...createSceneEdits.values(),
+      ];
+      setStepLabel('');
+      trace.finalText = finalText;
+      trace.edits = edits.map((edit) => describeEdit(edit, sceneHeaders));
+      if (!finalizeChangeSet(edits, assistantId)) {
+        // No change set: ensure a closing text is visible. If the loop produced
+        // no terminal text at all, fall back to a short note (steps still shown).
+        // Read the latest messages via the functional updater — the assistant
+        // placeholder was added this turn, so the captured `messages` closure
+        // does not contain it and must not be used to test for steps.
+        trace.outcome = finalText ? 'final_text_without_changes' : 'no_executable_changes';
+        if (finalText) {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === assistantId ? { ...m, content: finalText } : m)),
+          );
+        } else {
+          setMessages((prev) =>
+            prev.map((m) => {
+              if (m.id !== assistantId) return m;
+              if (m.steps?.length) return m;
+              return { ...m, content: '（无可执行的修改）' };
+            }),
+          );
+        }
+        setStatus('idle');
+      } else {
+        trace.outcome = 'pending_preview';
+      }
+      void writeAgentTrace(trace);
+    },
+    [
+      assets,
+      buildAgentSystemContext,
+      buildStagingContext,
+      currentSceneName,
+      projectId,
+      sceneHeaders,
+      finalizeChangeSet,
+      messages,
+      projectPath,
+      setMessages,
+    ],
+  );
 
-    // Append a finished turn (its text + tool calls) as a step on the assistant
-    // message so text is never discarded and tool activity is shown inline.
-    const pushStep = (step: AssistantStep) => {
-      setMessages((prev) => prev.map((m) => {
-        if (m.id !== assistantId) return m;
-        const steps = [...(m.steps ?? []), step];
-        const lastText = [...steps].reverse().find((s) => s.text)?.text ?? '';
-        return { ...m, steps, content: lastText };
-      }));
-    };
-
-    let finalText = '';
-    const traceSummary: string[] = [];
-    for (let turn = 0; turn < MAX_TURNS; turn += 1) {
-      if (cancelledRef.current) return;
-      setStatus(turn === 0 ? 'generating' : 'tooling');
-      setStepLabel(turn === 0 ? '思考中…' : '继续分析…');
-      const res = await aiChatTurn(convo, toolDefs()).catch((e) => {
+  // --- Legacy single-shot for providers without function calling ----------
+  const runLegacyTurn = useCallback(
+    async (text: string, assistantId: string) => {
+      const trace: AiAgentTrace = {
+        traceId: `trace-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        createdAt: new Date().toISOString(),
+        projectId,
+        currentSceneName,
+        assistantId,
+        prompt: text,
+        mode: 'legacy',
+        turns: [],
+      };
+      setStatus('generating');
+      setStepLabel('思考中…');
+      const convo: AiChatMessage[] = [
+        { role: 'system', content: buildLegacySystemContext() },
+        ...truncateContextMessages(messages, 8),
+        { role: 'user', content: text },
+      ];
+      const res = await aiChatTurn(convo, []).catch((e) => {
         trace.outcome = 'error';
         trace.error = String(e);
         void writeAgentTrace(trace);
         throw e;
       });
       if (cancelledRef.current) return;
-      const turnText = res.text ?? '';
-      const turnTrace: AiAgentTraceTurn = {
-        turn,
-        modelText: turnText,
-        toolCalls: [],
-      };
-      trace.turns.push(turnTrace);
-
-      // No tool calls → this turn's text is the final answer.
-      if (res.toolCalls.length === 0) {
-        if (turnText) pushStep({ text: turnText });
-        finalText = turnText;
-        break;
-      }
-
-      // Execute this turn's tool calls, recording each on the step for display.
-      convo.push({ role: 'assistant', content: turnText, toolCalls: res.toolCalls });
-      const stepCalls: StepToolCall[] = [];
-      for (const call of res.toolCalls) {
-        const label = stepLabelForTool(call.name, call.arguments, sceneHeaders);
-        setStepLabel(label);
-        const tool = getTool(call.name);
-        let content: string;
-        let ok = true;
-        let errMsg: string | undefined;
-        let resultPayload: unknown;
-        if (!tool) {
-          resultPayload = { error: `未知工具：${call.name}` };
-          content = JSON.stringify(resultPayload);
-          ok = false;
-          errMsg = '未知工具';
-        } else if (tool.kind === 'write') {
-          try {
-            const staged = (await tool.run(call.arguments, { projectPath, currentSceneName })) as StagedWrite;
-            const result = await stage(staged);
-            resultPayload = JSON.parse(result.content) as unknown;
-            content = result.content;
-            ok = result.ok;
-            errMsg = result.error;
-          } catch (e) {
-            // Arg validation failure — feed the explicit message back so the
-            // model can fix its patch instead of aborting the whole loop.
-            resultPayload = { staged: false, error: String(e) };
-            content = JSON.stringify(resultPayload);
-            ok = false;
-            errMsg = String(e);
-          }
-        } else {
-          try {
-            resultPayload = await tool.run(call.arguments, { projectPath, currentSceneName });
-            content = JSON.stringify(resultPayload);
-          } catch (e) {
-            resultPayload = { error: String(e) };
-            content = JSON.stringify(resultPayload);
-            ok = false;
-            errMsg = String(e);
-          }
-        }
-        turnTrace.toolCalls.push({
-          id: call.id,
-          name: call.name,
-          arguments: call.arguments,
-          kind: tool?.kind,
-          label,
-          ok,
-          result: resultPayload,
-          error: errMsg,
-        });
-        stepCalls.push({ name: call.name, label, ok, error: errMsg });
-        traceSummary.push(`${call.name}: ${ok ? 'ok' : `失败（${errMsg}）`}`);
-        convo.push({ role: 'tool', content, toolCallId: call.id });
-      }
-      pushStep({ text: turnText || undefined, toolCalls: stepCalls });
-
-      if (turn === MAX_TURNS - 1) {
-        // Loop exhausted while still calling tools. Surface what happened.
-        const recent = traceSummary.slice(-8).join('；');
-        finalText = turnText
-          || `已达到最大工具调用轮数（${MAX_TURNS}）仍未生成可确认的修改。工具调用轨迹：${recent || '无'}。`;
-      }
-    }
-
-    const edits: ChangeEdit[] = [
-      ...sceneEdits.values(),
-      ...createCharEdits.values(),
-      ...charEdits.values(),
-      ...assetPlanEdits,
-      ...(memEdit ? [memEdit] : []),
-      ...createSceneEdits.values(),
-    ];
-    setStepLabel('');
-    trace.finalText = finalText;
-    trace.edits = edits.map((edit) => describeEdit(edit, sceneHeaders));
-    if (!finalizeChangeSet(edits, assistantId)) {
-      // No change set: ensure a closing text is visible. If the loop produced
-      // no terminal text at all, fall back to a short note (steps still shown).
-      // Read the latest messages via the functional updater — the assistant
-      // placeholder was added this turn, so the captured `messages` closure
-      // does not contain it and must not be used to test for steps.
-      trace.outcome = finalText ? 'final_text_without_changes' : 'no_executable_changes';
-      if (finalText) {
-        setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: finalText } : m)));
-      } else {
-        setMessages((prev) => prev.map((m) => {
-          if (m.id !== assistantId) return m;
-          if (m.steps?.length) return m;
-          return { ...m, content: '（无可执行的修改）' };
-        }));
-      }
-      setStatus('idle');
-    } else {
-      trace.outcome = 'pending_preview';
-    }
-    void writeAgentTrace(trace);
-  }, [assets, buildAgentSystemContext, buildStagingContext, currentSceneName, projectId, sceneHeaders, finalizeChangeSet, messages, projectPath, setMessages]);
-
-  // --- Legacy single-shot for providers without function calling ----------
-  const runLegacyTurn = useCallback(async (text: string, assistantId: string) => {
-    const trace: AiAgentTrace = {
-      traceId: `trace-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      createdAt: new Date().toISOString(),
-      projectId,
-      currentSceneName,
-      assistantId,
-      prompt: text,
-      mode: 'legacy',
-      turns: [],
-    };
-    setStatus('generating');
-    setStepLabel('思考中…');
-    const convo: AiChatMessage[] = [
-      { role: 'system', content: buildLegacySystemContext() },
-      ...truncateContextMessages(messages, 8),
-      { role: 'user', content: text },
-    ];
-    const res = await aiChatTurn(convo, []).catch((e) => {
-      trace.outcome = 'error';
-      trace.error = String(e);
-      void writeAgentTrace(trace);
-      throw e;
-    });
-    if (cancelledRef.current) return;
-    setStepLabel('');
-    trace.turns.push({ turn: 0, modelText: res.text ?? '', toolCalls: [] });
-    const parsed = res.text ? extractEditorResponse(res.text) : null;
-    if (!parsed) {
-      trace.outcome = 'invalid_legacy_response';
-      trace.finalText = res.text ?? '';
-      trace.error = 'AI 没有返回可执行方案';
-      void writeAgentTrace(trace);
-      replaceAssistantMessage(assistantId, res.text || 'AI 没有返回可执行方案，请重新描述你的需求。');
-      setStatus('idle');
-      return;
-    }
-    if (parsed.type === 'chat') {
-      trace.outcome = 'final_text_without_changes';
-      trace.finalText = parsed.message;
-      void writeAgentTrace(trace);
-      replaceAssistantMessage(assistantId, parsed.message);
-      setStatus('idle');
-      return;
-    }
-    try {
-      const freshAssets = projectPath ? await listAllAssets(projectPath).catch(() => assets) : assets;
-      if (freshAssets !== assets) setAssets(freshAssets);
-      trace.assetCount = freshAssets.length;
-      const edit = await stageSceneEdit(
-        undefined,
-        { tool: 'edit_scene', file: currentSceneName, patches: parsed.patches },
-        buildStagingContext(freshAssets),
-      );
-      trace.edits = [describeEdit(edit, sceneHeaders)];
-      if (!finalizeChangeSet([edit], assistantId)) {
-        trace.outcome = 'no_executable_changes';
+      setStepLabel('');
+      trace.turns.push({ turn: 0, modelText: res.text ?? '', toolCalls: [] });
+      const parsed = res.text ? extractEditorResponse(res.text) : null;
+      if (!parsed) {
+        trace.outcome = 'invalid_legacy_response';
+        trace.finalText = res.text ?? '';
+        trace.error = 'AI 没有返回可执行方案';
         void writeAgentTrace(trace);
-        replaceAssistantMessage(assistantId, '（patch 应用后没有变化）');
+        replaceAssistantMessage(
+          assistantId,
+          res.text || 'AI 没有返回可执行方案，请重新描述你的需求。',
+        );
         setStatus('idle');
-      } else {
-        trace.outcome = 'pending_preview';
+        return;
+      }
+      if (parsed.type === 'chat') {
+        trace.outcome = 'final_text_without_changes';
+        trace.finalText = parsed.message;
         void writeAgentTrace(trace);
+        replaceAssistantMessage(assistantId, parsed.message);
+        setStatus('idle');
+        return;
       }
-    } catch (e) {
-      const msg = isStageError(e) ? e.message : String(e);
-      trace.outcome = 'stage_error';
-      trace.error = msg;
-      void writeAgentTrace(trace);
-      setStatus('error');
-      setError({ kind: 'other', retryable: true, message: msg });
-    }
-  }, [assets, buildLegacySystemContext, buildStagingContext, currentSceneName, projectId, projectPath, sceneHeaders, finalizeChangeSet, messages, replaceAssistantMessage]);
-
-  const sendPrompt = useCallback(async (prompt: string) => {
-    const text = prompt.trim();
-    if (!text || busy || inFlightRef.current) return;
-    if (pendingChangeSet?.status === 'pending') {
-      setError({ kind: 'other', retryable: false, message: '当前还有 AI 修改方案待确认。请先同意或拒绝后再继续对话。' });
-      return;
-    }
-    inFlightRef.current = true;
-    cancelledRef.current = false;
-    const myToken = requestTokenRef.current + 1;
-    requestTokenRef.current = myToken;
-    setLastPrompt(text);
-    setError(null);
-    setPendingChangeSet(null);
-    setStatus('generating');
-
-    const userId = `u-${Date.now()}`;
-    const assistantId = `a-${Date.now() + 1}`;
-    streamingIdRef.current = assistantId;
-    setMessages([...messages, { id: userId, role: 'user', content: text }, { id: assistantId, role: 'assistant', content: '' }]);
-    ensureTitleFromFirstMessage(text);
-    setInput('');
-    setBusy(true);
-
-    try {
-      const cfg = await getAiConfig();
-      const useFc = FC_PROVIDERS.has(cfg.provider);
-      if (useFc) await runAgentLoop(text, assistantId);
-      else await runLegacyTurn(text, assistantId);
-      setRetryCount(0);
-    } catch (e) {
-      if (!cancelledRef.current) {
+      try {
+        const freshAssets = projectPath
+          ? await listAllAssets(projectPath).catch(() => assets)
+          : assets;
+        if (freshAssets !== assets) setAssets(freshAssets);
+        trace.assetCount = freshAssets.length;
+        const edit = await stageSceneEdit(
+          undefined,
+          {
+            tool: 'edit_scene',
+            file: currentSceneName,
+            patches: parsed.patches,
+          },
+          buildStagingContext(freshAssets),
+        );
+        trace.edits = [describeEdit(edit, sceneHeaders)];
+        if (!finalizeChangeSet([edit], assistantId)) {
+          trace.outcome = 'no_executable_changes';
+          void writeAgentTrace(trace);
+          replaceAssistantMessage(assistantId, '（patch 应用后没有变化）');
+          setStatus('idle');
+        } else {
+          trace.outcome = 'pending_preview';
+          void writeAgentTrace(trace);
+        }
+      } catch (e) {
+        const msg = isStageError(e) ? e.message : String(e);
+        trace.outcome = 'stage_error';
+        trace.error = msg;
+        void writeAgentTrace(trace);
         setStatus('error');
-        const classified = classifyAiError(String(e));
-        setError(classified);
-        if (classified.kind === 'rate_limit') setCooldown(30);
-        replaceAssistantMessage(assistantId, `（错误：${classified.message}）`);
+        setError({ kind: 'other', retryable: true, message: msg });
       }
-    } finally {
-      // A newer request may have superseded us while we were awaiting. Only the
-      // current owner of the token resets the shared UI state.
-      if (requestTokenRef.current === myToken) {
-        inFlightRef.current = false;
-        streamingIdRef.current = null;
-        setBusy(false);
-        setStepLabel('');
+    },
+    [
+      assets,
+      buildLegacySystemContext,
+      buildStagingContext,
+      currentSceneName,
+      projectId,
+      projectPath,
+      sceneHeaders,
+      finalizeChangeSet,
+      messages,
+      replaceAssistantMessage,
+    ],
+  );
+
+  const sendPrompt = useCallback(
+    async (prompt: string) => {
+      const text = prompt.trim();
+      if (!text || busy || inFlightRef.current) return;
+      if (pendingChangeSet?.status === 'pending') {
+        setError({
+          kind: 'other',
+          retryable: false,
+          message: '当前还有 AI 修改方案待确认。请先同意或拒绝后再继续对话。',
+        });
+        return;
       }
-    }
-  }, [busy, ensureTitleFromFirstMessage, messages, pendingChangeSet, replaceAssistantMessage, runAgentLoop, runLegacyTurn, setMessages]);
+      inFlightRef.current = true;
+      cancelledRef.current = false;
+      const myToken = requestTokenRef.current + 1;
+      requestTokenRef.current = myToken;
+      setLastPrompt(text);
+      setError(null);
+      setPendingChangeSet(null);
+      setStatus('generating');
+
+      const userId = `u-${Date.now()}`;
+      const assistantId = `a-${Date.now() + 1}`;
+      streamingIdRef.current = assistantId;
+      setMessages([
+        ...messages,
+        { id: userId, role: 'user', content: text },
+        { id: assistantId, role: 'assistant', content: '' },
+      ]);
+      ensureTitleFromFirstMessage(text);
+      setInput('');
+      setBusy(true);
+
+      try {
+        const cfg = await getAiConfig();
+        const useFc = FC_PROVIDERS.has(cfg.provider);
+        if (useFc) await runAgentLoop(text, assistantId);
+        else await runLegacyTurn(text, assistantId);
+        setRetryCount(0);
+      } catch (e) {
+        if (!cancelledRef.current) {
+          setStatus('error');
+          const classified = classifyAiError(String(e));
+          setError(classified);
+          if (classified.kind === 'rate_limit') setCooldown(30);
+          replaceAssistantMessage(assistantId, `（错误：${classified.message}）`);
+        }
+      } finally {
+        // A newer request may have superseded us while we were awaiting. Only the
+        // current owner of the token resets the shared UI state.
+        if (requestTokenRef.current === myToken) {
+          inFlightRef.current = false;
+          streamingIdRef.current = null;
+          setBusy(false);
+          setStepLabel('');
+        }
+      }
+    },
+    [
+      busy,
+      ensureTitleFromFirstMessage,
+      messages,
+      pendingChangeSet,
+      replaceAssistantMessage,
+      runAgentLoop,
+      runLegacyTurn,
+      setMessages,
+    ],
+  );
 
   const retry = useCallback(() => {
     if (!lastPrompt || busy || cooldown > 0) return;
@@ -802,135 +1020,160 @@ export function useAiAgent(params: UseAiAgentParams) {
     void sendPrompt(lastPrompt);
   }, [busy, cooldown, lastPrompt, retryCount, sendPrompt]);
 
-  const syncSceneBackgroundCard = useCallback(async (sceneFile: string, sceneNodes: WebGalNode[]) => {
-    if (!projectPath) return;
-    try {
-      const backgroundAssets = (await listAllAssets(projectPath)).filter((asset) => asset.category === 'background');
-      const availableBackgrounds = new Set(backgroundAssets.map((asset) => asset.name));
-      const backgroundFilenames = extractSceneBackgroundAssets(sceneNodes);
-      if (backgroundFilenames.length === 0) return;
-      const metadata = await loadAssetMetadata(projectPath, projectId);
-      const next = syncSceneCardsFromBackgrounds(
-        metadata,
-        sceneFile,
-        backgroundFilenames,
-        availableBackgrounds,
-      );
-      if (next !== metadata) await saveAssetMetadata(projectPath, next);
-    } catch (e) {
-      console.warn('[asset] sync scene background card failed:', e);
-    }
-  }, [projectId, projectPath]);
+  const syncSceneBackgroundCard = useCallback(
+    async (sceneFile: string, sceneNodes: WebGalNode[]) => {
+      if (!projectPath) return;
+      try {
+        const backgroundAssets = (await listAllAssets(projectPath)).filter(
+          (asset) => asset.category === 'background',
+        );
+        const availableBackgrounds = new Set(backgroundAssets.map((asset) => asset.name));
+        const backgroundFilenames = extractSceneBackgroundAssets(sceneNodes);
+        if (backgroundFilenames.length === 0) return;
+        const metadata = await loadAssetMetadata(projectPath, projectId);
+        const next = syncSceneCardsFromBackgrounds(
+          metadata,
+          sceneFile,
+          backgroundFilenames,
+          availableBackgrounds,
+        );
+        if (next !== metadata) await saveAssetMetadata(projectPath, next);
+      } catch (e) {
+        console.warn('[asset] sync scene background card failed:', e);
+      }
+    },
+    [projectId, projectPath],
+  );
 
   // Persist all edits atomically (all-or-rollback). No conflict guard — callers
   // decide whether the current scene's live buffer is allowed to differ.
-  const persistChangeSet = useCallback(async (set: PendingChangeSet) => {
-    if (!projectPath) return;
-    const currentSceneEdit = set.edits.find((e): e is SceneEdit => e.kind === 'scene' && e.file === currentSceneName);
-    // Create scenes last so a failure in earlier edits never leaves an orphan
-    // file (no delete_scene IPC to roll it back with). New characters can be
-    // deleted during rollback, so they do not need special ordering.
-    const ordered = [...set.edits].sort((a, b) => (a.kind === 'create_scene' ? 1 : 0) - (b.kind === 'create_scene' ? 1 : 0));
-    let createdScene = false;
-    let changedCharacters = false;
-    const applied: ChangeEdit[] = [];
-    const createdCharacterIds = new Map<CreateCharacterEdit, string>();
-    const assetMetadataBefore = new Map<AssetPlanEdit, AssetMetadata>();
-    try {
-      for (const edit of ordered) {
-        if (edit.kind === 'scene') {
-          const path = await getScenePath(projectPath, edit.file);
-          await saveScene(path, edit.afterNodes);
-          await syncSceneBackgroundCard(edit.file, edit.afterNodes);
-        } else if (edit.kind === 'create_character') {
-          const saved = await createCharacter(projectPath, edit.draft);
-          createdCharacterIds.set(edit, saved.id);
-          changedCharacters = true;
-        } else if (edit.kind === 'character') {
-          await updateCharacter(projectPath, edit.after);
-          changedCharacters = true;
-        } else if (edit.kind === 'memory') {
-          await saveProjectMemory(projectPath, edit.after);
-          setMemory(edit.after);
-        } else if (edit.kind === 'asset_plan') {
-          const before = await loadAssetMetadata(projectPath, projectId);
-          const after = applyAssetPlanEdit(before, edit);
-          assetMetadataBefore.set(edit, before);
-          if (after !== before) await saveAssetMetadata(projectPath, after);
-        } else {
-          // create_scene: make the file, then set its header if provided.
-          await createScene(projectPath, edit.file);
-          if (edit.chapter || edit.outline) {
-            const path = await getScenePath(projectPath, edit.file);
-            await updateSceneHeader(path, { chapter: edit.chapter, outline: edit.outline });
-          }
-          if (edit.initialNodes) {
-            const path = await getScenePath(projectPath, edit.file);
-            await saveScene(path, edit.initialNodes);
-            await syncSceneBackgroundCard(edit.file, edit.initialNodes);
-          }
-          createdScene = true;
-        }
-        applied.push(edit);
-      }
-    } catch (e) {
-      // Roll back everything already written, in reverse order. create_scene runs
-      // last, so if we're here it never succeeded — nothing to delete.
-      for (const edit of applied.reverse()) {
-        try {
+  const persistChangeSet = useCallback(
+    async (set: PendingChangeSet) => {
+      if (!projectPath) return;
+      const currentSceneEdit = set.edits.find(
+        (e): e is SceneEdit => e.kind === 'scene' && e.file === currentSceneName,
+      );
+      // Create scenes last so a failure in earlier edits never leaves an orphan
+      // file (no delete_scene IPC to roll it back with). New characters can be
+      // deleted during rollback, so they do not need special ordering.
+      const ordered = [...set.edits].sort(
+        (a, b) => (a.kind === 'create_scene' ? 1 : 0) - (b.kind === 'create_scene' ? 1 : 0),
+      );
+      let createdScene = false;
+      let changedCharacters = false;
+      const applied: ChangeEdit[] = [];
+      const createdCharacterIds = new Map<CreateCharacterEdit, string>();
+      const assetMetadataBefore = new Map<AssetPlanEdit, AssetMetadata>();
+      try {
+        for (const edit of ordered) {
           if (edit.kind === 'scene') {
             const path = await getScenePath(projectPath, edit.file);
-            await saveScene(path, edit.beforeNodes);
+            await saveScene(path, edit.afterNodes);
+            await syncSceneBackgroundCard(edit.file, edit.afterNodes);
           } else if (edit.kind === 'create_character') {
-            const savedId = createdCharacterIds.get(edit);
-            if (savedId) await deleteCharacter(projectPath, savedId);
+            const saved = await createCharacter(projectPath, edit.draft);
+            createdCharacterIds.set(edit, saved.id);
+            changedCharacters = true;
           } else if (edit.kind === 'character') {
-            await updateCharacter(projectPath, edit.before);
+            await updateCharacter(projectPath, edit.after);
+            changedCharacters = true;
           } else if (edit.kind === 'memory') {
-            await saveProjectMemory(projectPath, edit.before);
-            setMemory(edit.before);
+            await saveProjectMemory(projectPath, edit.after);
+            setMemory(edit.after);
           } else if (edit.kind === 'asset_plan') {
-            const before = assetMetadataBefore.get(edit);
-            if (before) await saveAssetMetadata(projectPath, before);
+            const before = await loadAssetMetadata(projectPath, projectId);
+            const after = applyAssetPlanEdit(before, edit);
+            assetMetadataBefore.set(edit, before);
+            if (after !== before) await saveAssetMetadata(projectPath, after);
+          } else {
+            // create_scene: make the file, then set its header if provided.
+            await createScene(projectPath, edit.file);
+            if (edit.chapter || edit.outline) {
+              const path = await getScenePath(projectPath, edit.file);
+              await updateSceneHeader(path, {
+                chapter: edit.chapter,
+                outline: edit.outline,
+              });
+            }
+            if (edit.initialNodes) {
+              const path = await getScenePath(projectPath, edit.file);
+              await saveScene(path, edit.initialNodes);
+              await syncSceneBackgroundCard(edit.file, edit.initialNodes);
+            }
+            createdScene = true;
           }
-        } catch { /* best-effort rollback */ }
+          applied.push(edit);
+        }
+      } catch (e) {
+        // Roll back everything already written, in reverse order. create_scene runs
+        // last, so if we're here it never succeeded — nothing to delete.
+        for (const edit of applied.reverse()) {
+          try {
+            if (edit.kind === 'scene') {
+              const path = await getScenePath(projectPath, edit.file);
+              await saveScene(path, edit.beforeNodes);
+            } else if (edit.kind === 'create_character') {
+              const savedId = createdCharacterIds.get(edit);
+              if (savedId) await deleteCharacter(projectPath, savedId);
+            } else if (edit.kind === 'character') {
+              await updateCharacter(projectPath, edit.before);
+            } else if (edit.kind === 'memory') {
+              await saveProjectMemory(projectPath, edit.before);
+              setMemory(edit.before);
+            } else if (edit.kind === 'asset_plan') {
+              const before = assetMetadataBefore.get(edit);
+              if (before) await saveAssetMetadata(projectPath, before);
+            }
+          } catch {
+            /* best-effort rollback */
+          }
+        }
+        setStatus('error');
+        setError({
+          kind: 'other',
+          retryable: false,
+          message: `落盘失败，已回滚全部修改：${String(e)}`,
+        });
+        setPendingChangeSet({ ...set, status: 'failed' });
+        return;
       }
-      setStatus('error');
-      setError({ kind: 'other', retryable: false, message: `落盘失败，已回滚全部修改：${String(e)}` });
-      setPendingChangeSet({ ...set, status: 'failed' });
-      return;
-    }
 
-    if (currentSceneEdit) {
-      pushHistory(currentSceneEdit.beforeNodes);
-      setNodes(currentSceneEdit.afterNodes);
-      setScriptSource(currentSceneEdit.afterContent);
-      setSelectedNode(null);
-      setDirty(false);
-      setSaveStatus('saved');
-    }
-    if (createdScene) onScenesChanged?.();
-    if (changedCharacters) onCharactersChanged?.();
-    replaceAssistantMessage(set.sourceMessageId, `已同意修改：${summarizeChangeSet(set, sceneHeaders)}`, {
-      diff: currentSceneEdit?.diff,
-    });
-    setPendingChangeSet({ ...set, status: 'accepted' });
-    setStatus('accepted');
-  }, [
-    currentSceneName,
-    sceneHeaders,
-    onScenesChanged,
-    onCharactersChanged,
-    projectPath,
-    pushHistory,
-    replaceAssistantMessage,
-    setDirty,
-    setNodes,
-    setSaveStatus,
-    setScriptSource,
-    setSelectedNode,
-    syncSceneBackgroundCard,
-  ]);
+      if (currentSceneEdit) {
+        pushHistory(currentSceneEdit.beforeNodes);
+        setNodes(currentSceneEdit.afterNodes);
+        setScriptSource(currentSceneEdit.afterContent);
+        setSelectedNode(null);
+        setDirty(false);
+        setSaveStatus('saved');
+      }
+      if (createdScene) onScenesChanged?.();
+      if (changedCharacters) onCharactersChanged?.();
+      replaceAssistantMessage(
+        set.sourceMessageId,
+        `已同意修改：${summarizeChangeSet(set, sceneHeaders)}`,
+        {
+          diff: currentSceneEdit?.diff,
+        },
+      );
+      setPendingChangeSet({ ...set, status: 'accepted' });
+      setStatus('accepted');
+    },
+    [
+      currentSceneName,
+      sceneHeaders,
+      onScenesChanged,
+      onCharactersChanged,
+      projectPath,
+      pushHistory,
+      replaceAssistantMessage,
+      setDirty,
+      setNodes,
+      setSaveStatus,
+      setScriptSource,
+      setSelectedNode,
+      syncSceneBackgroundCard,
+    ],
+  );
 
   const acceptChange = useCallback(async () => {
     if (!pendingChangeSet || pendingChangeSet.status !== 'pending' || !projectPath) return;
@@ -938,7 +1181,9 @@ export function useAiAgent(params: UseAiAgentParams) {
     // If the request finished while the user was on another scene, the buffer
     // may still be the original content; accepting should still apply the
     // preview. Anything else means the user changed the scene after staging.
-    const currentSceneEdit = pendingChangeSet.edits.find((e): e is SceneEdit => e.kind === 'scene' && e.file === currentSceneName);
+    const currentSceneEdit = pendingChangeSet.edits.find(
+      (e): e is SceneEdit => e.kind === 'scene' && e.file === currentSceneName,
+    );
     if (
       currentSceneEdit &&
       scriptSource !== currentSceneEdit.afterContent &&
@@ -953,7 +1198,9 @@ export function useAiAgent(params: UseAiAgentParams) {
   const revertChange = useCallback(() => {
     if (!pendingChangeSet) return;
     // Only restore the live canvas if the edited scene is the one open now.
-    const currentSceneEdit = pendingChangeSet.edits.find((e): e is SceneEdit => e.kind === 'scene' && e.file === currentSceneName);
+    const currentSceneEdit = pendingChangeSet.edits.find(
+      (e): e is SceneEdit => e.kind === 'scene' && e.file === currentSceneName,
+    );
     if (currentSceneEdit) {
       setNodes(currentSceneEdit.beforeNodes);
       setScriptSource(currentSceneEdit.beforeContent);
@@ -961,22 +1208,45 @@ export function useAiAgent(params: UseAiAgentParams) {
       setDirty(dirtyBeforePreviewRef.current);
       setSaveStatus('idle');
     }
-    replaceAssistantMessage(pendingChangeSet.sourceMessageId, `已拒绝：${summarizeChangeSet(pendingChangeSet, sceneHeaders)}`);
+    replaceAssistantMessage(
+      pendingChangeSet.sourceMessageId,
+      `已拒绝：${summarizeChangeSet(pendingChangeSet, sceneHeaders)}`,
+    );
     setPendingChangeSet({ ...pendingChangeSet, status: 'reverted' });
     setStatus('reverted');
-  }, [currentSceneName, sceneHeaders, pendingChangeSet, replaceAssistantMessage, setDirty, setNodes, setSaveStatus, setScriptSource, setSelectedNode]);
+  }, [
+    currentSceneName,
+    sceneHeaders,
+    pendingChangeSet,
+    replaceAssistantMessage,
+    setDirty,
+    setNodes,
+    setSaveStatus,
+    setScriptSource,
+    setSelectedNode,
+  ]);
 
   const forceApplyChange = useCallback(async () => {
     if (!pendingChangeSet) return;
     // User chose to overwrite their manual edits with the AI preview.
-    const currentSceneEdit = pendingChangeSet.edits.find((e): e is SceneEdit => e.kind === 'scene' && e.file === currentSceneName);
+    const currentSceneEdit = pendingChangeSet.edits.find(
+      (e): e is SceneEdit => e.kind === 'scene' && e.file === currentSceneName,
+    );
     if (currentSceneEdit) {
       pushHistory(nodes);
       setNodes(currentSceneEdit.afterNodes);
       setScriptSource(currentSceneEdit.afterContent);
     }
     await persistChangeSet(pendingChangeSet);
-  }, [currentSceneName, nodes, pendingChangeSet, persistChangeSet, pushHistory, setNodes, setScriptSource]);
+  }, [
+    currentSceneName,
+    nodes,
+    pendingChangeSet,
+    persistChangeSet,
+    pushHistory,
+    setNodes,
+    setScriptSource,
+  ]);
 
   const regenerateAfterConflict = useCallback(() => {
     if (!pendingChangeSet) return;
@@ -1004,26 +1274,35 @@ export function useAiAgent(params: UseAiAgentParams) {
     newSession();
   }, [busy, newSession, resetTransient]);
 
-  const selectSession = useCallback((id: string) => {
-    if (busy) return;
-    resetTransient();
-    switchSession(id);
-  }, [busy, resetTransient, switchSession]);
+  const selectSession = useCallback(
+    (id: string) => {
+      if (busy) return;
+      resetTransient();
+      switchSession(id);
+    },
+    [busy, resetTransient, switchSession],
+  );
 
   // Deletion confirmation and rename input are handled by in-app dialogs in the
   // UI layer (Tauri has no native prompt/confirm command). These just apply.
-  const removeSession = useCallback((id: string) => {
-    if (busy) return;
-    if (id === activeId) resetTransient();
-    deleteSession(id);
-  }, [activeId, busy, deleteSession, resetTransient]);
+  const removeSession = useCallback(
+    (id: string) => {
+      if (busy) return;
+      if (id === activeId) resetTransient();
+      deleteSession(id);
+    },
+    [activeId, busy, deleteSession, resetTransient],
+  );
 
-  const saveMemory = useCallback(async (next: ProjectMemory) => {
-    if (!projectPath) return;
-    const payload = next ?? emptyProjectMemory();
-    await saveProjectMemory(projectPath, payload);
-    setMemory(payload);
-  }, [projectPath]);
+  const saveMemory = useCallback(
+    async (next: ProjectMemory) => {
+      if (!projectPath) return;
+      const payload = next ?? emptyProjectMemory();
+      await saveProjectMemory(projectPath, payload);
+      setMemory(payload);
+    },
+    [projectPath],
+  );
 
   const stop = useCallback(() => {
     cancelledRef.current = true;
@@ -1031,7 +1310,9 @@ export function useAiAgent(params: UseAiAgentParams) {
     streamingIdRef.current = null;
     inFlightRef.current = false;
     if (stoppedId) {
-      setMessages(prev => prev.map(message => (message.id === stoppedId ? { ...message, stopped: true } : message)));
+      setMessages((prev) =>
+        prev.map((message) => (message.id === stoppedId ? { ...message, stopped: true } : message)),
+      );
     }
     setBusy(false);
     setStatus('idle');

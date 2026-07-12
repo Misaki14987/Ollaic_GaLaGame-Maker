@@ -81,7 +81,10 @@ export function appendCharacterSprite(
 ): Character[] {
   return characters.map((character) =>
     character.id === characterId
-      ? { ...character, sprites: [...character.sprites, { emotion, file: '', prompt: prompt || undefined }] }
+      ? {
+          ...character,
+          sprites: [...character.sprites, { emotion, file: '', prompt: prompt || undefined }],
+        }
       : character,
   );
 }
@@ -97,7 +100,10 @@ export function appendEmotionPreset(
   return characters.map((character) => {
     if (character.id !== characterId) return character;
     if (character.sprites.some((sprite) => sprite.emotion === trimmed)) return character;
-    return { ...character, sprites: [...character.sprites, { emotion: trimmed, file: '', prompt: prompt || undefined }] };
+    return {
+      ...character,
+      sprites: [...character.sprites, { emotion: trimmed, file: '', prompt: prompt || undefined }],
+    };
   });
 }
 
@@ -119,7 +125,10 @@ export function removeCharacterSprite(
 ): Character[] {
   return characters.map((character) =>
     character.id === characterId
-      ? { ...character, sprites: character.sprites.filter((_, i) => i !== index) }
+      ? {
+          ...character,
+          sprites: character.sprites.filter((_, i) => i !== index),
+        }
       : character,
   );
 }
@@ -144,10 +153,7 @@ export function appendCharacterRelation(characters: Character[], characterId: st
     character.id === characterId
       ? {
           ...character,
-          relations: [
-            ...character.relations,
-            { targetId: '', relationType: '', description: '' },
-          ],
+          relations: [...character.relations, { targetId: '', relationType: '', description: '' }],
         }
       : character,
   );
@@ -160,7 +166,10 @@ export function removeCharacterRelation(
 ): Character[] {
   return characters.map((character) =>
     character.id === characterId
-      ? { ...character, relations: character.relations.filter((_, i) => i !== index) }
+      ? {
+          ...character,
+          relations: character.relations.filter((_, i) => i !== index),
+        }
       : character,
   );
 }

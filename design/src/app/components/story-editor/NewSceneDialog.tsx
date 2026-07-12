@@ -71,7 +71,9 @@ export function NewSceneDialog({
               <FolderOpen className="h-4 w-4" />
             </div>
             <div className="min-w-0">
-              <DialogTitle className="font-display-family text-base text-on-surface">新建场景</DialogTitle>
+              <DialogTitle className="font-display-family text-base text-on-surface">
+                新建场景
+              </DialogTitle>
               <DialogDescription className="mt-1 text-xs text-muted-foreground">
                 在 game/scene 下创建新的 WebGAL 场景脚本。
               </DialogDescription>
@@ -103,12 +105,16 @@ export function NewSceneDialog({
                 disabled={creating}
               />
               {!name.trim().toLowerCase().endsWith('.txt') && (
-                <span className="border-l border-border px-3 font-mono-family text-xs text-muted-foreground">.txt</span>
+                <span className="border-l border-border px-3 font-mono-family text-xs text-muted-foreground">
+                  .txt
+                </span>
               )}
             </div>
           </label>
           <div className="rounded border border-outline-variant/30 bg-surface-container px-3 py-2">
-            <div className="font-mono-family text-[10px] uppercase tracking-widest text-muted-foreground">预览</div>
+            <div className="font-mono-family text-[10px] uppercase tracking-widest text-muted-foreground">
+              预览
+            </div>
             <div className="mt-1 truncate text-xs text-on-surface-variant">
               game/scene/{sceneName || 'chapter_02.txt'}
             </div>

@@ -18,12 +18,7 @@ export type StepKind =
   | 'userInput';
 
 export type StepStatus =
-  | 'pending'
-  | 'running'
-  | 'succeeded'
-  | 'failed'
-  | 'awaitingInput'
-  | 'skipped';
+  'pending' | 'running' | 'succeeded' | 'failed' | 'awaitingInput' | 'skipped';
 
 export type RunStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
 

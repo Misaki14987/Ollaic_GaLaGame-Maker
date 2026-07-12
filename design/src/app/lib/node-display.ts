@@ -5,8 +5,21 @@
  */
 
 import {
-  MessageCircle, GitBranch, Image as ImageIcon, User, Music, Film, Tag,
-  ArrowRight, Type, Monitor, Variable, Keyboard, Wand2, Move, Award,
+  MessageCircle,
+  GitBranch,
+  Image as ImageIcon,
+  User,
+  Music,
+  Film,
+  Tag,
+  ArrowRight,
+  Type,
+  Monitor,
+  Variable,
+  Keyboard,
+  Wand2,
+  Move,
+  Award,
 } from 'lucide-react';
 import type { WebGalNode, WebGalCommandType } from './webgal-types';
 import { typeBorderClass } from './webgal-types';
@@ -103,7 +116,7 @@ export function getNodeSummary(node: WebGalNode): string {
     case 'changeFigure':
       return figureSummary(node);
     case 'choose':
-      return node.choices?.map(c => c.text).join(' / ') || node.content;
+      return node.choices?.map((c) => c.text).join(' / ') || node.content;
     case 'changeScene':
     case 'callScene':
       return node.targetScene || node.content;

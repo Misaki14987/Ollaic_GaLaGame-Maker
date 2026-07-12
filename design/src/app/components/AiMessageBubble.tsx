@@ -2,10 +2,22 @@ import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
-  ChevronRight, FileEdit, Wrench, AlertCircle,
-  List, FileText, Search, Users, UserRound, Brain,
-  PencilLine, UserCog, BookMarked, FilePlus,
-  UserPlus, ImageIcon,
+  ChevronRight,
+  FileEdit,
+  Wrench,
+  AlertCircle,
+  List,
+  FileText,
+  Search,
+  Users,
+  UserRound,
+  Brain,
+  PencilLine,
+  UserCog,
+  BookMarked,
+  FilePlus,
+  UserPlus,
+  ImageIcon,
   type LucideIcon,
 } from 'lucide-react';
 import type { AssistantStep, ChatDiffLine } from '../hooks/useChatSession';
@@ -41,36 +53,62 @@ interface AiMessageBubbleProps {
 
 function DiffBlock({ diff }: { diff: ChatDiffLine[] }) {
   const [open, setOpen] = useState(false);
-  const added = diff.filter(l => l.kind === 'added').length;
-  const removed = diff.filter(l => l.kind === 'removed').length;
+  const added = diff.filter((l) => l.kind === 'added').length;
+  const removed = diff.filter((l) => l.kind === 'removed').length;
   const label = [added > 0 && `+${added}`, removed > 0 && `-${removed}`].filter(Boolean).join(' ');
 
   return (
     <div className="mt-2 text-xs">
       <button
         type="button"
-        onClick={() => setOpen(v => !v)}
+        onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center gap-2 rounded-md border border-border/50 bg-background/35 px-2 py-1.5 text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground"
         aria-expanded={open}
       >
         <FileEdit className="h-3.5 w-3.5 shrink-0 text-chart-2" />
         <span className="flex-1 text-left">查看修改内容</span>
-        {label && <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{label}</span>}
-        <ChevronRight className={`h-3.5 w-3.5 shrink-0 transition-transform ${open ? 'rotate-90' : ''}`} />
+        {label && (
+          <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{label}</span>
+        )}
+        <ChevronRight
+          className={`h-3.5 w-3.5 shrink-0 transition-transform ${open ? 'rotate-90' : ''}`}
+        />
       </button>
       {open && (
         <div className="mt-1 max-h-52 overflow-auto rounded-md border border-border/50 bg-background/35 p-1.5 font-mono text-[11px] leading-relaxed">
           {diff.map((line, i) => {
             if (line.kind === 'added') {
-              return <div key={i} className="text-green-400 whitespace-pre-wrap"><span className="select-none text-green-600">+ </span>{line.text}</div>;
+              return (
+                <div key={i} className="text-green-400 whitespace-pre-wrap">
+                  <span className="select-none text-green-600">+ </span>
+                  {line.text}
+                </div>
+              );
             }
             if (line.kind === 'removed') {
-              return <div key={i} className="text-red-400 whitespace-pre-wrap line-through decoration-red-600/50"><span className="select-none no-underline text-red-600">- </span>{line.text}</div>;
+              return (
+                <div
+                  key={i}
+                  className="text-red-400 whitespace-pre-wrap line-through decoration-red-600/50"
+                >
+                  <span className="select-none no-underline text-red-600">- </span>
+                  {line.text}
+                </div>
+              );
             }
             if (line.text === '...') {
-              return <div key={i} className="text-muted-foreground/50 select-none text-center">···</div>;
+              return (
+                <div key={i} className="text-muted-foreground/50 select-none text-center">
+                  ···
+                </div>
+              );
             }
-            return <div key={i} className="text-muted-foreground/70 whitespace-pre-wrap"><span className="select-none">  </span>{line.text}</div>;
+            return (
+              <div key={i} className="text-muted-foreground/70 whitespace-pre-wrap">
+                <span className="select-none"> </span>
+                {line.text}
+              </div>
+            );
           })}
         </div>
       )}
@@ -94,8 +132,16 @@ function Markdown({ children }: { children: string }) {
           li: ({ children }) => <li>{children}</li>,
           strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
           em: ({ children }) => <em className="italic">{children}</em>,
-          a: ({ children, href }) => <a href={href} target="_blank" rel="noreferrer" className="text-primary underline">{children}</a>,
-          blockquote: ({ children }) => <blockquote className="my-1 border-l-2 border-border pl-3 text-muted-foreground">{children}</blockquote>,
+          a: ({ children, href }) => (
+            <a href={href} target="_blank" rel="noreferrer" className="text-primary underline">
+              {children}
+            </a>
+          ),
+          blockquote: ({ children }) => (
+            <blockquote className="my-1 border-l-2 border-border pl-3 text-muted-foreground">
+              {children}
+            </blockquote>
+          ),
           hr: () => <hr className="my-2 border-border" />,
           // Override `pre` itself (react-markdown wraps fenced code in pre>code):
           // without this the default <pre> has no overflow handling and long
@@ -108,7 +154,12 @@ function Markdown({ children }: { children: string }) {
           ),
           code: ({ className, children }) => {
             const inline = !className;
-            if (inline) return <code className="rounded bg-background/70 px-1 py-0.5 text-[0.92em] break-words">{children}</code>;
+            if (inline)
+              return (
+                <code className="rounded bg-background/70 px-1 py-0.5 text-[0.92em] break-words">
+                  {children}
+                </code>
+              );
             return <code className={className}>{children}</code>;
           },
           table: ({ children }) => (
@@ -117,8 +168,14 @@ function Markdown({ children }: { children: string }) {
             </div>
           ),
           thead: ({ children }) => <thead className="bg-background/40">{children}</thead>,
-          th: ({ children }) => <th className="border border-border/60 px-2 py-1 text-left font-semibold">{children}</th>,
-          td: ({ children }) => <td className="border border-border/60 px-2 py-1 align-top">{children}</td>,
+          th: ({ children }) => (
+            <th className="border border-border/60 px-2 py-1 text-left font-semibold">
+              {children}
+            </th>
+          ),
+          td: ({ children }) => (
+            <td className="border border-border/60 px-2 py-1 align-top">{children}</td>
+          ),
         }}
       >
         {children}
@@ -146,9 +203,11 @@ function StepsView({ steps }: { steps: AssistantStep[] }) {
                 }`}
                 title={call.error}
               >
-                {call.ok === false
-                  ? <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                  : <ToolIcon className="h-3.5 w-3.5 shrink-0 text-chart-2" />}
+                {call.ok === false ? (
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                ) : (
+                  <ToolIcon className="h-3.5 w-3.5 shrink-0 text-chart-2" />
+                )}
                 <span className="min-w-0 flex-1 truncate">{call.label}</span>
                 {call.ok === false && <span className="shrink-0">失败</span>}
               </div>
@@ -160,13 +219,18 @@ function StepsView({ steps }: { steps: AssistantStep[] }) {
   );
 }
 
-export function AiMessageBubble({ role, content, steps, isStreaming = false, stopped = false, diff }: AiMessageBubbleProps) {
+export function AiMessageBubble({
+  role,
+  content,
+  steps,
+  isStreaming = false,
+  stopped = false,
+  diff,
+}: AiMessageBubbleProps) {
   return (
     <div
       className={`min-w-0 max-w-[85%] rounded-lg px-3 py-2 text-sm break-words ${
-        role === 'user'
-          ? 'bg-primary text-primary-foreground'
-          : 'bg-secondary border border-border'
+        role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-secondary border border-border'
       } ${role === 'assistant' ? 'font-mono-family' : 'font-body-family'}`}
     >
       {steps && steps.length > 0 ? (
@@ -177,7 +241,9 @@ export function AiMessageBubble({ role, content, steps, isStreaming = false, sto
         <div className="whitespace-pre-wrap">{content}</div>
       )}
       {!content && (!steps || steps.length === 0) && isStreaming && '思考中...'}
-      {isStreaming && content && <span className="inline-block w-2 h-3 ml-1 bg-current align-middle animate-pulse" />}
+      {isStreaming && content && (
+        <span className="inline-block w-2 h-3 ml-1 bg-current align-middle animate-pulse" />
+      )}
       {diff && diff.length > 0 && !isStreaming && <DiffBlock diff={diff} />}
       {stopped && <div className="mt-1 text-[11px] text-muted-foreground">已停止</div>}
     </div>

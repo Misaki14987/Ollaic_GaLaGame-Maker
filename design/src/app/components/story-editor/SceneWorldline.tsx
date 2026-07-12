@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react';
 import {
-  ArrowRight, BookOpen, FileText, FolderOpen, GitBranch, Play, Plus, Trash2,
+  ArrowRight,
+  BookOpen,
+  FileText,
+  FolderOpen,
+  GitBranch,
+  Play,
+  Plus,
+  Trash2,
 } from 'lucide-react';
 import type { SceneHeader } from '../../lib/webgal-ipc';
 import type { SceneLink, WebGalNode } from '../../lib/webgal-types';
@@ -60,8 +67,14 @@ export function FullScreenWorldline({
   onDeleteNode,
   onJumpToIndex,
 }: FullScreenWorldlineProps) {
-  const visibleNodes = nodes.filter((node) => !isMetadataComment(node) && (node.type !== 'comment' || node.content?.trim()));
-  const [ctxMenu, setCtxMenu] = useState<{ sceneName: string; x: number; y: number } | null>(null);
+  const visibleNodes = nodes.filter(
+    (node) => !isMetadataComment(node) && (node.type !== 'comment' || node.content?.trim()),
+  );
+  const [ctxMenu, setCtxMenu] = useState<{
+    sceneName: string;
+    x: number;
+    y: number;
+  } | null>(null);
 
   // Close context menu on click outside
   useEffect(() => {
@@ -127,7 +140,9 @@ export function FullScreenWorldline({
             sceneLinkMap={sceneLinkMap}
             sceneHeaders={sceneHeaders}
             onSwitchScene={onOpenScene}
-            onNodeContextMenu={(name, e) => setCtxMenu({ sceneName: name, x: e.clientX, y: e.clientY })}
+            onNodeContextMenu={(name, e) =>
+              setCtxMenu({ sceneName: name, x: e.clientX, y: e.clientY })
+            }
             graphWidth={480}
             className="relative z-10 w-full px-8 py-8"
           />
@@ -140,43 +155,52 @@ export function FullScreenWorldline({
                 className="fixed z-50 min-w-[160px] rounded border border-border bg-surface-container-high p-1 shadow-lg"
                 style={{ left: ctxMenu.x, top: ctxMenu.y }}
               >
-              <button
-                type="button"
-                className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-xs hover:bg-surface-container-low"
-                onClick={() => { onOpenScene(ctxMenu.sceneName); setCtxMenu(null); }}
-              >
-                <BookOpen className="h-3.5 w-3.5" />
-                切换到此场景
-              </button>
-              {onRenameScene && (
                 <button
                   type="button"
                   className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-xs hover:bg-surface-container-low"
-                  onClick={() => { onRenameScene(ctxMenu.sceneName); setCtxMenu(null); }}
+                  onClick={() => {
+                    onOpenScene(ctxMenu.sceneName);
+                    setCtxMenu(null);
+                  }}
                 >
-                  <FileText className="h-3.5 w-3.5" />
-                  重命名
+                  <BookOpen className="h-3.5 w-3.5" />
+                  切换到此场景
                 </button>
-              )}
-              {onDeleteScene && ctxMenu.sceneName !== currentSceneName && (
+                {onRenameScene && (
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-xs hover:bg-surface-container-low"
+                    onClick={() => {
+                      onRenameScene(ctxMenu.sceneName);
+                      setCtxMenu(null);
+                    }}
+                  >
+                    <FileText className="h-3.5 w-3.5" />
+                    重命名
+                  </button>
+                )}
+                {onDeleteScene && ctxMenu.sceneName !== currentSceneName && (
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-xs text-error hover:bg-error/10"
+                    onClick={() => {
+                      onDeleteScene(ctxMenu.sceneName);
+                      setCtxMenu(null);
+                    }}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    删除场景
+                  </button>
+                )}
+                <div className="my-0.5 h-px bg-border/50" />
                 <button
                   type="button"
-                  className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-xs text-error hover:bg-error/10"
-                  onClick={() => { onDeleteScene(ctxMenu.sceneName); setCtxMenu(null); }}
+                  className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-xs text-muted-foreground hover:bg-surface-container-low"
+                  onClick={() => setCtxMenu(null)}
                 >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  删除场景
+                  关闭
                 </button>
-              )}
-              <div className="my-0.5 h-px bg-border/50" />
-              <button
-                type="button"
-                className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-xs text-muted-foreground hover:bg-surface-container-low"
-                onClick={() => setCtxMenu(null)}
-              >
-                关闭
-              </button>
-            </div>
+              </div>
             </>
           )}
         </div>
@@ -184,22 +208,29 @@ export function FullScreenWorldline({
         {/* Right sidebar: node index */}
         <div className="flex w-72 shrink-0 flex-col border-l border-border bg-surface-container-lowest">
           <div className="flex h-10 shrink-0 items-center justify-between border-b border-border px-3">
-            <span className="font-mono-family text-[10px] font-semibold uppercase tracking-widest text-on-surface-variant">当前场景索引</span>
-            <span className="font-mono-family text-[10px] text-muted-foreground">{visibleNodes.length}</span>
+            <span className="font-mono-family text-[10px] font-semibold uppercase tracking-widest text-on-surface-variant">
+              当前场景索引
+            </span>
+            <span className="font-mono-family text-[10px] text-muted-foreground">
+              {visibleNodes.length}
+            </span>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
             {visibleNodes.map((node, index) => {
               const Icon = commandIconFor(node.type);
               const sel = selectedNode?.id === node.id;
-              const charColor = node.type === 'dialogue' && node.character && characterColors?.[node.character]
-                ? characterColors[node.character]
-                : undefined;
+              const charColor =
+                node.type === 'dialogue' && node.character && characterColors?.[node.character]
+                  ? characterColors[node.character]
+                  : undefined;
               const nodeIndex = nodes.indexOf(node);
               return (
                 <div
                   key={node.id}
                   className="group flex items-start border-l-2 transition-colors hover:bg-surface-container-low"
-                  style={{ borderColor: sel ? 'var(--color-secondary)' : 'transparent' }}
+                  style={{
+                    borderColor: sel ? 'var(--color-secondary)' : 'transparent',
+                  }}
                 >
                   <button
                     type="button"
@@ -208,11 +239,18 @@ export function FullScreenWorldline({
                   >
                     <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${commandToneFor(node.type)}`} />
                     <span className="min-w-0 flex-1">
-                      <span className="block font-mono-family text-[10px] text-muted-foreground">{index + 1} {node.type}</span>
-                      <span className="block truncate text-xs text-on-surface">{getCommandSummary(node)}</span>
+                      <span className="block font-mono-family text-[10px] text-muted-foreground">
+                        {index + 1} {node.type}
+                      </span>
+                      <span className="block truncate text-xs text-on-surface">
+                        {getCommandSummary(node)}
+                      </span>
                     </span>
                     {charColor && (
-                      <span className="ml-auto mt-1 h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: charColor }} />
+                      <span
+                        className="ml-auto mt-1 h-2 w-2 shrink-0 rounded-full"
+                        style={{ backgroundColor: charColor }}
+                      />
                     )}
                   </button>
                   <div className="flex shrink-0 items-center gap-0.5 pr-1 pt-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -263,7 +301,9 @@ export function SceneWorldlinePanel({
   onDeleteNode,
   onJumpToIndex,
 }: SceneWorldlinePanelProps) {
-  const visibleNodes = nodes.filter((node) => !isMetadataComment(node) && (node.type !== 'comment' || node.content?.trim()));
+  const visibleNodes = nodes.filter(
+    (node) => !isMetadataComment(node) && (node.type !== 'comment' || node.content?.trim()),
+  );
 
   return (
     <aside className="flex w-80 shrink-0 flex-col border-r border-border bg-surface-container-lowest">
@@ -295,22 +335,29 @@ export function SceneWorldlinePanel({
       />
 
       <div className="flex h-10 items-center justify-between border-b border-border px-3">
-        <span className="font-mono-family text-[10px] font-semibold uppercase tracking-widest text-on-surface-variant">当前场景索引</span>
-        <span className="font-mono-family text-[10px] text-muted-foreground">{visibleNodes.length}</span>
+        <span className="font-mono-family text-[10px] font-semibold uppercase tracking-widest text-on-surface-variant">
+          当前场景索引
+        </span>
+        <span className="font-mono-family text-[10px] text-muted-foreground">
+          {visibleNodes.length}
+        </span>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {visibleNodes.map((node, index) => {
           const Icon = commandIconFor(node.type);
           const selected = selectedNode?.id === node.id;
-          const charColor = node.type === 'dialogue' && node.character && characterColors?.[node.character]
-            ? characterColors[node.character]
-            : undefined;
+          const charColor =
+            node.type === 'dialogue' && node.character && characterColors?.[node.character]
+              ? characterColors[node.character]
+              : undefined;
           const nodeIndex = nodes.indexOf(node);
           return (
             <div
               key={node.id}
               className="group flex items-start border-l-2 transition-colors hover:bg-surface-container-low"
-              style={{ borderColor: selected ? 'var(--color-secondary)' : 'transparent' }}
+              style={{
+                borderColor: selected ? 'var(--color-secondary)' : 'transparent',
+              }}
             >
               <button
                 type="button"
@@ -321,11 +368,18 @@ export function SceneWorldlinePanel({
               >
                 <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${commandToneFor(node.type)}`} />
                 <span className="min-w-0 flex-1">
-                  <span className="block font-mono-family text-[10px] text-muted-foreground">{index + 1} {node.type}</span>
-                  <span className="block truncate text-xs text-on-surface">{getCommandSummary(node)}</span>
+                  <span className="block font-mono-family text-[10px] text-muted-foreground">
+                    {index + 1} {node.type}
+                  </span>
+                  <span className="block truncate text-xs text-on-surface">
+                    {getCommandSummary(node)}
+                  </span>
                 </span>
                 {charColor && (
-                  <span className="ml-auto mt-1 h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: charColor }} />
+                  <span
+                    className="ml-auto mt-1 h-2 w-2 shrink-0 rounded-full"
+                    style={{ backgroundColor: charColor }}
+                  />
                 )}
               </button>
               <div className="flex shrink-0 items-center gap-0.5 pr-1 pt-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -359,4 +413,3 @@ export function SceneWorldlinePanel({
     </aside>
   );
 }
-

@@ -4,7 +4,7 @@
 
 export interface CharacterSprite {
   emotion: string; // "default", "happy", "sad", "angry", etc.
-  file: string;    // filename in game/figure/
+  file: string; // filename in game/figure/
   prompt?: string; // custom generation prompt for this sprite
 }
 
@@ -16,22 +16,22 @@ export interface CharacterRelation {
 
 export interface Character {
   id: string;
-  name: string;            // primary name used in script dialogue
-  aliases: string[];       // nicknames / alternative names
-  description: string;     // visual appearance description for sprite generation
-  personality: string;     // personality traits
+  name: string; // primary name used in script dialogue
+  aliases: string[]; // nicknames / alternative names
+  description: string; // visual appearance description for sprite generation
+  personality: string; // personality traits
   referenceImages?: string[]; // filenames in game/reference/<characterId>/
-  stance: string;          // moral/faction stance: "正义", "混沌", "中立", "邪恶"
-  keywords: string[];      // searchable tags: ["学生", "傲娇", "学生会"]
-  dialogueStyle: string;   // character voice / speech style guide for AI
-  gender: string;          // "男", "女", "其他"
-  age: string;             // age group or specific age
+  stance: string; // moral/faction stance: "正义", "混沌", "中立", "邪恶"
+  keywords: string[]; // searchable tags: ["学生", "傲娇", "学生会"]
+  dialogueStyle: string; // character voice / speech style guide for AI
+  gender: string; // "男", "女", "其他"
+  age: string; // age group or specific age
   sprites: CharacterSprite[];
-  defaultVoice?: string;   // default voice file path
-  voiceTimbre?: string;    // TTS voice type (for future)
+  defaultVoice?: string; // default voice file path
+  voiceTimbre?: string; // TTS voice type (for future)
   relations: CharacterRelation[];
-  colorTheme?: string;     // accent color
-  notes: string;           // free-form notes
+  colorTheme?: string; // accent color
+  notes: string; // free-form notes
 }
 
 export interface CharacterRef {

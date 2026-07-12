@@ -1,16 +1,29 @@
 import {
-  ArrowRight, FileText, GitBranch, Image, MessageCircle, Music, Users, Wand2,
+  ArrowRight,
+  FileText,
+  GitBranch,
+  Image,
+  MessageCircle,
+  Music,
+  Users,
+  Wand2,
 } from 'lucide-react';
 import type { WebGalCommandType, WebGalNode } from '../../lib/webgal-types';
 
 export function getCommandSummary(node: WebGalNode): string {
   switch (node.type) {
     case 'dialogue':
-      return node.character ? `${node.character}: ${node.content || '(空对白)'}` : node.content || '(空对白)';
+      return node.character
+        ? `${node.character}: ${node.content || '(空对白)'}`
+        : node.content || '(空对白)';
     case 'narrator':
       return node.content || '(空旁白)';
     case 'choose':
-      return node.choices?.map((choice) => `${choice.text} -> ${choice.target}`).join(' / ') || node.content || '(空选项)';
+      return (
+        node.choices?.map((choice) => `${choice.text} -> ${choice.target}`).join(' / ') ||
+        node.content ||
+        '(空选项)'
+      );
     case 'changeBg':
     case 'changeFigure':
     case 'miniAvatar':
@@ -25,7 +38,9 @@ export function getCommandSummary(node: WebGalNode): string {
     case 'jumpLabel':
       return node.labelName || node.content || '未命名标签';
     case 'setVar':
-      return node.varName ? `${node.varName} = ${node.varValue ?? ''}` : node.content || '未设置变量';
+      return node.varName
+        ? `${node.varName} = ${node.varValue ?? ''}`
+        : node.content || '未设置变量';
     case 'setAnimation':
       return `${node.animationName || node.content || '未设置动画'}${node.animationTarget ? ` -> ${node.animationTarget}` : ''}`;
     case 'intro':

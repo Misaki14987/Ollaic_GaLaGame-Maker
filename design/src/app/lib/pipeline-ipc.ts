@@ -10,7 +10,11 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { AssetQueueState, PipelineEvent, RunState, StoryPlan } from './pipeline-types';
 
 /** Start an Agent Flow for a project. Returns the new run id. */
-export async function pipelineStart(projectPath: string, prompt: string, allowLocalFallback: boolean): Promise<string> {
+export async function pipelineStart(
+  projectPath: string,
+  prompt: string,
+  allowLocalFallback: boolean,
+): Promise<string> {
   return invoke<string>('pipeline_start', { projectPath, prompt, allowLocalFallback });
 }
 
@@ -41,7 +45,11 @@ export async function pipelineResumeRun(projectPath: string, runId: string): Pro
 }
 
 /** Re-run a step (resets it to pending and, if the run was failed, restarts it). */
-export async function pipelineRetryStep(runId: string, stepId: string, projectPath: string): Promise<void> {
+export async function pipelineRetryStep(
+  runId: string,
+  stepId: string,
+  projectPath: string,
+): Promise<void> {
   return invoke<void>('pipeline_retry_step', { runId, stepId, projectPath });
 }
 
@@ -79,7 +87,10 @@ export async function pipelineClearRunHistory(runId: string, projectPath: string
   return invoke<void>('pipeline_clear_run_history', { runId, projectPath });
 }
 
-export async function pipelineExportRunHistory(runId: string, projectPath: string): Promise<string> {
+export async function pipelineExportRunHistory(
+  runId: string,
+  projectPath: string,
+): Promise<string> {
   return invoke<string>('pipeline_export_run_history', { runId, projectPath });
 }
 

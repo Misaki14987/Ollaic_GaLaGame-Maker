@@ -21,7 +21,12 @@ import {
 } from './editor-patch';
 import { characterColor } from './character-editing';
 import { backgroundCardId } from './asset-metadata';
-import { figureFileTail, findCharacter, findSprite, resolveFigureByEmotion } from './figure-resolve';
+import {
+  figureFileTail,
+  findCharacter,
+  findSprite,
+  resolveFigureByEmotion,
+} from './figure-resolve';
 import { emptyProjectMemory, type ProjectMemory } from './project-memory';
 import { createLineDiff, type DiffLine, type MissingAssetIssue } from './story-agent';
 import { parseScene, serializeScene, sceneDisplayName, type SceneHeader } from './webgal-ipc';
@@ -68,7 +73,7 @@ export interface MemoryEdit {
 
 export interface CreateSceneEdit {
   kind: 'create_scene';
-  file: string;          // filename with .txt suffix
+  file: string; // filename with .txt suffix
   chapter?: string;
   outline?: string;
   initialContent?: string;
@@ -80,7 +85,8 @@ export interface AssetPlanEdit {
   cards: Array<SceneAssetCard & { category: 'background' | 'cg' }>;
 }
 
-export type ChangeEdit = SceneEdit | CharacterEdit | CreateCharacterEdit | MemoryEdit | CreateSceneEdit | AssetPlanEdit;
+export type ChangeEdit =
+  SceneEdit | CharacterEdit | CreateCharacterEdit | MemoryEdit | CreateSceneEdit | AssetPlanEdit;
 
 export interface PendingChangeSet {
   id: string;
@@ -225,7 +231,10 @@ export function resolveFigurePatchText(
 function resolveFigurePatches(patches: EditorPatch[], ctx: StagingContext): EditorPatch[] {
   return patches.map((p) =>
     p.type === 'insert' || p.type === 'replace'
-      ? { ...p, text: resolveFigurePatchText(p.text, ctx.characters, ctx.assets) }
+      ? {
+          ...p,
+          text: resolveFigurePatchText(p.text, ctx.characters, ctx.assets),
+        }
       : p,
   );
 }
@@ -236,14 +245,24 @@ function figurePositionFlag(position?: 'left' | 'center' | 'right'): string {
   return '';
 }
 
-function figureInsertLine(staged: Extract<StagedWrite, { tool: 'insert_figure' }>, ctx: StagingContext): string {
-  const resolved = resolveFigureByEmotion(ctx.characters, staged.character, staged.emotion, ctx.assets);
+function figureInsertLine(
+  staged: Extract<StagedWrite, { tool: 'insert_figure' }>,
+  ctx: StagingContext,
+): string {
+  const resolved = resolveFigureByEmotion(
+    ctx.characters,
+    staged.character,
+    staged.emotion,
+    ctx.assets,
+  );
   if (!resolved) {
     const character = findCharacter(ctx.characters, staged.character);
     if (!character) throw new StageError(`找不到角色「${staged.character}」，无法插入立绘。`);
     const sprite = findSprite(character, staged.emotion);
     if (!sprite) throw new StageError(`角色「${character.name}」没有表情「${staged.emotion}」。`);
-    throw new StageError(`角色「${character.name}」的表情「${sprite.emotion}」还没有可用立绘文件。`);
+    throw new StageError(
+      `角色「${character.name}」的表情「${sprite.emotion}」还没有可用立绘文件。`,
+    );
   }
   const id = staged.figureId ? ` -id=${staged.figureId}` : '';
   const next = staged.next === false ? '' : ' -next';
@@ -290,7 +309,8 @@ function sceneBlockLine(input: DialogueLineInput, ctx: StagingContext): string {
       return `:${text};`;
     case 'dialogue': {
       const character = stringField(input, 'character');
-      if (!character || !text) throw new StageError('insert_dialogue_block 的 dialogue 行需要 character 和 text。');
+      if (!character || !text)
+        throw new StageError('insert_dialogue_block 的 dialogue 行需要 character 和 text。');
       return `${character}:${text};`;
     }
     case 'intro':
@@ -311,16 +331,22 @@ function sceneBlockLine(input: DialogueLineInput, ctx: StagingContext): string {
         ].join('');
         return `changeFigure:${asset}${flags};`;
       }
-      if (!character || !emotion) throw new StageError('insert_dialogue_block 的 figure 行需要 asset，或 character + emotion。');
-      return figureInsertLine({
-        tool: 'insert_figure',
-        file: '',
-        afterLine: 'end',
-        character,
-        emotion,
-        position: stringField(input, 'position') as 'left' | 'center' | 'right' | undefined,
-        next: boolField(input, 'next', true),
-      }, ctx);
+      if (!character || !emotion)
+        throw new StageError(
+          'insert_dialogue_block 的 figure 行需要 asset，或 character + emotion。',
+        );
+      return figureInsertLine(
+        {
+          tool: 'insert_figure',
+          file: '',
+          afterLine: 'end',
+          character,
+          emotion,
+          position: stringField(input, 'position') as 'left' | 'center' | 'right' | undefined,
+          next: boolField(input, 'next', true),
+        },
+        ctx,
+      );
     }
     case 'bgm':
       if (!asset) throw new StageError('insert_dialogue_block 的 bgm 行缺少 asset。');
@@ -388,14 +414,16 @@ function headerPatches(
   ].filter((line): line is string => Boolean(line));
   const nextText = [...prefix, ...next].join('\n');
   if (nextText === normalized) return [];
-  return [{
-    type: 'replace',
-    file,
-    startLine: 1,
-    endLine: Math.max(1, lines.length),
-    anchorText: lines[0] ?? '',
-    text: nextText,
-  }];
+  return [
+    {
+      type: 'replace',
+      file,
+      startLine: 1,
+      endLine: Math.max(1, lines.length),
+      anchorText: lines[0] ?? '',
+      text: nextText,
+    },
+  ];
 }
 
 export async function stageSceneHeaderEdit(
@@ -404,7 +432,9 @@ export async function stageSceneHeaderEdit(
   ctx: StagingContext,
 ): Promise<SceneEdit> {
   const isCurrent = staged.file === ctx.currentSceneName;
-  const content = existing?.afterContent ?? (isCurrent ? ctx.currentScriptSource : await ctx.readSceneContent(staged.file));
+  const content =
+    existing?.afterContent ??
+    (isCurrent ? ctx.currentScriptSource : await ctx.readSceneContent(staged.file));
   const patches = headerPatches(staged.file, content, staged.chapter, staged.outline);
   if (patches.length === 0) throw new StageError('章节/大纲没有变化。');
   return stageSceneEdit(existing, { tool: 'edit_scene', file: staged.file, patches }, ctx);
@@ -426,7 +456,10 @@ export async function stageDialogueBlockInsert(
 }
 
 function choiceTarget(choice: Record<string, unknown>): string {
-  const target = stringField(choice, 'targetScene') || stringField(choice, 'target') || stringField(choice, 'file');
+  const target =
+    stringField(choice, 'targetScene') ||
+    stringField(choice, 'target') ||
+    stringField(choice, 'file');
   if (!target) throw new StageError('create_branch 的 choice 缺少 targetScene。');
   return normalizeSceneFilename(target);
 }
@@ -449,7 +482,10 @@ export async function stageBranchEdit(
       throw new StageError(`create_branch 中重复的目标场景：${target}`);
     }
     const contentLines = Array.isArray(choice.contentLines)
-      ? choice.contentLines.filter((line): line is DialogueLineInput => typeof line === 'object' && line !== null && !Array.isArray(line))
+      ? choice.contentLines.filter(
+          (line): line is DialogueLineInput =>
+            typeof line === 'object' && line !== null && !Array.isArray(line),
+        )
       : [];
     createSceneEdits.push({
       kind: 'create_scene',
@@ -467,11 +503,17 @@ export async function stageBranchEdit(
     anchorText: staged.anchorText,
     text: `choose:${choices.join('|')};`,
   };
-  const sourceEdit = await stageSceneEdit(existing, { tool: 'edit_scene', file: staged.file, patches: [patch] }, ctx);
-  const withNodes = await Promise.all(createSceneEdits.map(async (edit) => ({
-    ...edit,
-    initialNodes: edit.initialContent ? await parseScene(edit.initialContent) : undefined,
-  })));
+  const sourceEdit = await stageSceneEdit(
+    existing,
+    { tool: 'edit_scene', file: staged.file, patches: [patch] },
+    ctx,
+  );
+  const withNodes = await Promise.all(
+    createSceneEdits.map(async (edit) => ({
+      ...edit,
+      initialNodes: edit.initialContent ? await parseScene(edit.initialContent) : undefined,
+    })),
+  );
   return { sourceEdit, createSceneEdits: withNodes };
 }
 
@@ -532,7 +574,8 @@ export async function stageSceneEdit(
     throw new StageError('patch 应用后脚本没有任何变化。');
   }
 
-  const beforeNodes = existing?.beforeNodes ?? (isCurrent ? ctx.currentNodes : await parseScene(originalBefore));
+  const beforeNodes =
+    existing?.beforeNodes ?? (isCurrent ? ctx.currentNodes : await parseScene(originalBefore));
 
   return {
     kind: 'scene',
@@ -548,7 +591,10 @@ export async function stageSceneEdit(
   };
 }
 
-function diffObjectFields(before: Record<string, unknown>, after: Record<string, unknown>): string[] {
+function diffObjectFields(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+): string[] {
   const changed: string[] = [];
   const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
   for (const key of keys) {
@@ -561,18 +607,43 @@ function diffObjectFields(before: Record<string, unknown>, after: Record<string,
 // a model can never repoint an edit at a different character; complex fields
 // (sprites/relations) are edited through dedicated flows, not free-form partials.
 const CHARACTER_STRING_FIELDS = [
-  'name', 'description', 'personality', 'stance', 'dialogueStyle',
-  'gender', 'age', 'defaultVoice', 'voiceTimbre', 'colorTheme', 'notes',
+  'name',
+  'description',
+  'personality',
+  'stance',
+  'dialogueStyle',
+  'gender',
+  'age',
+  'defaultVoice',
+  'voiceTimbre',
+  'colorTheme',
+  'notes',
 ] as const;
 const CHARACTER_STRING_ARRAY_FIELDS = ['aliases', 'keywords', 'referenceImages'] as const;
 const CREATE_CHARACTER_STRING_FIELDS = [
-  'name', 'description', 'personality', 'stance', 'dialogueStyle',
-  'gender', 'age', 'voiceTimbre', 'colorTheme', 'notes',
+  'name',
+  'description',
+  'personality',
+  'stance',
+  'dialogueStyle',
+  'gender',
+  'age',
+  'voiceTimbre',
+  'colorTheme',
+  'notes',
 ] as const;
 const CREATE_CHARACTER_STRING_ARRAY_FIELDS = ['aliases', 'keywords'] as const;
 const MEMORY_STRING_FIELDS = ['worldSetting', 'writingStyle', 'userPreferences'] as const;
 const CHARACTER_SPRITE_FIELDS = ['emotion', 'prompt'] as const;
-const ASSET_PLAN_STRING_FIELDS = ['category', 'title', 'sceneFile', 'targetStem', 'prompt', 'style', 'negativePrompt'] as const;
+const ASSET_PLAN_STRING_FIELDS = [
+  'category',
+  'title',
+  'sceneFile',
+  'targetStem',
+  'prompt',
+  'style',
+  'negativePrompt',
+] as const;
 
 /** Keep only known fields with the expected type from a model-supplied partial. */
 function sanitizePartial(
@@ -613,7 +684,11 @@ function sanitizeSprites(value: unknown): Character['sprites'] {
 }
 
 function makeDraftCharacter(draft: Record<string, unknown>, index: number): Character {
-  const safe = sanitizePartial(draft, CREATE_CHARACTER_STRING_FIELDS, CREATE_CHARACTER_STRING_ARRAY_FIELDS);
+  const safe = sanitizePartial(
+    draft,
+    CREATE_CHARACTER_STRING_FIELDS,
+    CREATE_CHARACTER_STRING_ARRAY_FIELDS,
+  );
   const name = typeof safe.name === 'string' ? safe.name.trim() : '';
   if (!name) throw new StageError('create_character 需要角色名称。');
   const character: Character = {
@@ -637,7 +712,9 @@ function makeDraftCharacter(draft: Record<string, unknown>, index: number): Char
     ...safe,
   };
   if (!character.colorTheme) character.colorTheme = characterColor(index);
-  if (!character.sprites.some((sprite) => sprite.emotion === '默认' || sprite.emotion === 'default')) {
+  if (
+    !character.sprites.some((sprite) => sprite.emotion === '默认' || sprite.emotion === 'default')
+  ) {
     character.sprites = [{ emotion: '默认', file: '' }, ...character.sprites];
   }
   return character;
@@ -649,9 +726,10 @@ export function stageCreateCharacterEdit(
   ctx: StagingContext,
 ): CreateCharacterEdit {
   const draft = makeDraftCharacter(staged.draft, ctx.characters.length);
-  const duplicate = ctx.characters.some((character) =>
-    character.name.trim().toLowerCase() === draft.name.trim().toLowerCase()
-    || character.id === draft.id,
+  const duplicate = ctx.characters.some(
+    (character) =>
+      character.name.trim().toLowerCase() === draft.name.trim().toLowerCase() ||
+      character.id === draft.id,
   );
   if (duplicate) throw new StageError(`角色「${draft.name}」已存在，使用 edit_character 修改它。`);
   const baseline = {
@@ -683,7 +761,9 @@ export function stageCharacterSpritesPlan(
     const emotion = stringField(input, 'emotion');
     const prompt = stringField(input, 'prompt');
     if (!emotion) continue;
-    const index = sprites.findIndex((sprite) => sprite.emotion.trim().toLowerCase() === emotion.toLowerCase());
+    const index = sprites.findIndex(
+      (sprite) => sprite.emotion.trim().toLowerCase() === emotion.toLowerCase(),
+    );
     if (index >= 0) {
       sprites[index] = {
         ...sprites[index],
@@ -700,7 +780,10 @@ export function stageCharacterSpritesPlan(
     name: before.name,
     before,
     after,
-    changedFields: diffObjectFields(before as unknown as Record<string, unknown>, after as unknown as Record<string, unknown>),
+    changedFields: diffObjectFields(
+      before as unknown as Record<string, unknown>,
+      after as unknown as Record<string, unknown>,
+    ),
   };
 }
 
@@ -726,14 +809,20 @@ function uniqueAssetValue(base: string, fallback: string, used: Set<string>): st
   return candidate;
 }
 
-export function stageAssetPlanEdit(staged: Extract<StagedWrite, { tool: 'plan_assets' }>): AssetPlanEdit {
+export function stageAssetPlanEdit(
+  staged: Extract<StagedWrite, { tool: 'plan_assets' }>,
+): AssetPlanEdit {
   const cards: AssetPlanEdit['cards'] = [];
   const usedIds = new Set<string>();
   const usedTargetStems = new Set<string>();
   staged.assets.forEach((input, index) => {
     const safe = sanitizePartial(input, ASSET_PLAN_STRING_FIELDS);
-    const category = safe.category === 'cg' ? 'cg' : safe.category === 'background' ? 'background' : undefined;
-    if (!category) throw new StageError('plan_assets 的 category 只能是 background 或 cg。立绘请使用 plan_character_sprites。');
+    const category =
+      safe.category === 'cg' ? 'cg' : safe.category === 'background' ? 'background' : undefined;
+    if (!category)
+      throw new StageError(
+        'plan_assets 的 category 只能是 background 或 cg。立绘请使用 plan_character_sprites。',
+      );
     const title = typeof safe.title === 'string' ? safe.title.trim() : '';
     const prompt = typeof safe.prompt === 'string' ? safe.prompt.trim() : '';
     if (!title) throw new StageError('plan_assets 需要 title。');
@@ -746,13 +835,17 @@ export function stageAssetPlanEdit(staged: Extract<StagedWrite, { tool: 'plan_as
       `ai_asset_${String(index + 1).padStart(2, '0')}`,
       usedTargetStems,
     );
-    const idBase = category === 'background' ? backgroundCardId(`${targetStem}.png`) : `ai:${category}:${targetStem}`;
+    const idBase =
+      category === 'background'
+        ? backgroundCardId(`${targetStem}.png`)
+        : `ai:${category}:${targetStem}`;
     const id = uniqueAssetValue(idBase, `ai:${category}:asset_${index + 1}`, usedIds);
     cards.push({
       id,
       category,
       title,
-      sceneFile: typeof safe.sceneFile === 'string' ? normalizeSceneFilename(safe.sceneFile) : undefined,
+      sceneFile:
+        typeof safe.sceneFile === 'string' ? normalizeSceneFilename(safe.sceneFile) : undefined,
       imageAsset: null,
       targetStem,
       prompt,
@@ -773,7 +866,11 @@ export function stageCharacterEdit(
   const before = existing?.before ?? ctx.getCharacter(staged.id);
   if (!before) throw new StageError(`找不到角色 id：${staged.id}`);
   const baseAfter = existing?.after ?? before;
-  const safePartial = sanitizePartial(staged.partial, CHARACTER_STRING_FIELDS, CHARACTER_STRING_ARRAY_FIELDS);
+  const safePartial = sanitizePartial(
+    staged.partial,
+    CHARACTER_STRING_FIELDS,
+    CHARACTER_STRING_ARRAY_FIELDS,
+  );
   const after = { ...baseAfter, ...safePartial } as Character;
   return {
     kind: 'character',
@@ -781,7 +878,10 @@ export function stageCharacterEdit(
     name: before.name,
     before,
     after,
-    changedFields: diffObjectFields(before as unknown as Record<string, unknown>, after as unknown as Record<string, unknown>),
+    changedFields: diffObjectFields(
+      before as unknown as Record<string, unknown>,
+      after as unknown as Record<string, unknown>,
+    ),
   };
 }
 
@@ -794,7 +894,11 @@ export function stageMemoryEdit(
   const before = existing?.before ?? ctx.memory ?? emptyProjectMemory();
   const baseAfter = existing?.after ?? before;
   const safePartial = sanitizePartial(staged.partial, MEMORY_STRING_FIELDS);
-  const after = { ...baseAfter, ...safePartial, updatedAt: new Date().toISOString() } as ProjectMemory;
+  const after = {
+    ...baseAfter,
+    ...safePartial,
+    updatedAt: new Date().toISOString(),
+  } as ProjectMemory;
   return {
     kind: 'memory',
     before,
@@ -817,20 +921,30 @@ export async function stageCreateSceneEdit(
   if (existing.some((f) => f.toLowerCase() === file.toLowerCase())) {
     throw new StageError(`场景「${file}」已存在，换个名字，或用 edit_scene 修改它。`);
   }
-  return { kind: 'create_scene', file, chapter: staged.chapter, outline: staged.outline };
+  return {
+    kind: 'create_scene',
+    file,
+    chapter: staged.chapter,
+    outline: staged.outline,
+  };
 }
 
 /** Human-readable one-line summary for an edit (approval list rows). */
 export function describeEdit(edit: ChangeEdit, sceneHeaders?: Record<string, SceneHeader>): string {
-  if (edit.kind === 'scene') return `场景「${sceneDisplayName(edit.file, sceneHeaders?.[edit.file])}」：${edit.summary}`;
+  if (edit.kind === 'scene')
+    return `场景「${sceneDisplayName(edit.file, sceneHeaders?.[edit.file])}」：${edit.summary}`;
   if (edit.kind === 'create_character') return `新建角色 ${edit.draft.name}`;
-  if (edit.kind === 'character') return `角色 ${edit.name}：修改 ${edit.changedFields.join('、') || '（无变化）'}`;
+  if (edit.kind === 'character')
+    return `角色 ${edit.name}：修改 ${edit.changedFields.join('、') || '（无变化）'}`;
   if (edit.kind === 'create_scene') return `新建场景「${edit.chapter || edit.file}」`;
   if (edit.kind === 'asset_plan') return `规划待生成素材 ${edit.cards.length} 个`;
   return `项目记忆：修改 ${edit.changedFields.join('、') || '（无变化）'}`;
 }
 
 /** Whole-set summary for the assistant message bubble. */
-export function summarizeChangeSet(set: PendingChangeSet, sceneHeaders?: Record<string, SceneHeader>): string {
+export function summarizeChangeSet(
+  set: PendingChangeSet,
+  sceneHeaders?: Record<string, SceneHeader>,
+): string {
   return set.edits.map((e) => describeEdit(e, sceneHeaders)).join(' · ');
 }

@@ -45,39 +45,332 @@ interface ProviderPreset {
 type AiSettingsTab = 'chat' | 'image' | 'tts' | 'music';
 
 const CHAT_PROVIDERS: ProviderPreset[] = [
-  { value: 'openai', label: 'OpenAI', defaultModel: 'gpt-5.5', models: ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-nano', 'gpt-5.3-codex', 'gpt-5.2', 'gpt-5.1', 'gpt-5', 'gpt-4.1', 'gpt-4o', 'gpt-4o-mini', 'o3', 'o4-mini'], defaultBaseUrl: '', needsBaseUrl: false },
-  { value: 'anthropic', label: 'Anthropic', defaultModel: 'claude-opus-4-8', models: ['claude-opus-4-8', 'claude-opus-4-7', 'claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5', 'claude-3-7-sonnet-latest', 'claude-3-5-haiku-latest'], defaultBaseUrl: '', needsBaseUrl: false },
-  { value: 'gemini', label: 'Gemini', defaultModel: 'gemini-3.5-flash', models: ['gemini-3.5-flash', 'gemini-3.1-pro-preview', 'gemini-3-flash-preview', 'gemini-3.1-flash-lite', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-flash-latest'], defaultBaseUrl: '', needsBaseUrl: false },
-  { value: 'deepseek', label: 'DeepSeek', defaultModel: 'deepseek-v4-flash', models: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-chat', 'deepseek-reasoner'], defaultBaseUrl: '', needsBaseUrl: false },
-  { value: 'groq', label: 'Groq', defaultModel: 'llama-3.3-70b-versatile', models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'groq/compound', 'qwen-2.5-32b', 'deepseek-r1-distill-llama-70b'], defaultBaseUrl: '', needsBaseUrl: false },
-  { value: 'xai', label: 'xAI', defaultModel: 'grok-4.3', models: ['grok-4.3', 'grok-4.20', 'grok-build-0.1'], defaultBaseUrl: '', needsBaseUrl: false },
-  { value: 'ollama', label: 'Ollama (本地)', defaultModel: 'qwen2.5:7b', models: ['qwen2.5:7b', 'qwen2.5:14b', 'qwen2.5:32b', 'llama3.3:70b', 'llama3.2:3b', 'deepseek-r1:7b', 'deepseek-r1:14b', 'gemma2:9b', 'mistral:7b', 'phi4:14b'], defaultBaseUrl: '', needsBaseUrl: false },
-  { value: 'custom', label: '自定义 (OpenAI 兼容)', defaultModel: 'gpt-4o-mini', defaultBaseUrl: 'https://api.example.com/v1/', needsBaseUrl: true },
+  {
+    value: 'openai',
+    label: 'OpenAI',
+    defaultModel: 'gpt-5.5',
+    models: [
+      'gpt-5.5',
+      'gpt-5.4',
+      'gpt-5.4-mini',
+      'gpt-5.4-nano',
+      'gpt-5.3-codex',
+      'gpt-5.2',
+      'gpt-5.1',
+      'gpt-5',
+      'gpt-4.1',
+      'gpt-4o',
+      'gpt-4o-mini',
+      'o3',
+      'o4-mini',
+    ],
+    defaultBaseUrl: '',
+    needsBaseUrl: false,
+  },
+  {
+    value: 'anthropic',
+    label: 'Anthropic',
+    defaultModel: 'claude-opus-4-8',
+    models: [
+      'claude-opus-4-8',
+      'claude-opus-4-7',
+      'claude-opus-4-6',
+      'claude-sonnet-4-6',
+      'claude-haiku-4-5',
+      'claude-3-7-sonnet-latest',
+      'claude-3-5-haiku-latest',
+    ],
+    defaultBaseUrl: '',
+    needsBaseUrl: false,
+  },
+  {
+    value: 'gemini',
+    label: 'Gemini',
+    defaultModel: 'gemini-3.5-flash',
+    models: [
+      'gemini-3.5-flash',
+      'gemini-3.1-pro-preview',
+      'gemini-3-flash-preview',
+      'gemini-3.1-flash-lite',
+      'gemini-2.5-pro',
+      'gemini-2.5-flash',
+      'gemini-2.5-flash-lite',
+      'gemini-flash-latest',
+    ],
+    defaultBaseUrl: '',
+    needsBaseUrl: false,
+  },
+  {
+    value: 'deepseek',
+    label: 'DeepSeek',
+    defaultModel: 'deepseek-v4-flash',
+    models: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-chat', 'deepseek-reasoner'],
+    defaultBaseUrl: '',
+    needsBaseUrl: false,
+  },
+  {
+    value: 'groq',
+    label: 'Groq',
+    defaultModel: 'llama-3.3-70b-versatile',
+    models: [
+      'llama-3.3-70b-versatile',
+      'llama-3.1-8b-instant',
+      'openai/gpt-oss-120b',
+      'openai/gpt-oss-20b',
+      'groq/compound',
+      'qwen-2.5-32b',
+      'deepseek-r1-distill-llama-70b',
+    ],
+    defaultBaseUrl: '',
+    needsBaseUrl: false,
+  },
+  {
+    value: 'xai',
+    label: 'xAI',
+    defaultModel: 'grok-4.3',
+    models: ['grok-4.3', 'grok-4.20', 'grok-build-0.1'],
+    defaultBaseUrl: '',
+    needsBaseUrl: false,
+  },
+  {
+    value: 'ollama',
+    label: 'Ollama (本地)',
+    defaultModel: 'qwen2.5:7b',
+    models: [
+      'qwen2.5:7b',
+      'qwen2.5:14b',
+      'qwen2.5:32b',
+      'llama3.3:70b',
+      'llama3.2:3b',
+      'deepseek-r1:7b',
+      'deepseek-r1:14b',
+      'gemma2:9b',
+      'mistral:7b',
+      'phi4:14b',
+    ],
+    defaultBaseUrl: '',
+    needsBaseUrl: false,
+  },
+  {
+    value: 'custom',
+    label: '自定义 (OpenAI 兼容)',
+    defaultModel: 'gpt-4o-mini',
+    defaultBaseUrl: 'https://api.example.com/v1/',
+    needsBaseUrl: true,
+  },
 ];
 
 const IMAGE_PROVIDERS: ProviderPreset[] = [
-  { value: 'openai', label: 'OpenAI Images', defaultModel: 'gpt-image-1', models: ['gpt-image-1', 'gpt-image-1-mini', 'gpt-image-1.5', 'chatgpt-image-latest', 'dall-e-3', 'dall-e-2'], defaultBaseUrl: '', needsBaseUrl: false },
-  { value: 'gemini', label: 'Google Gemini / Imagen', defaultModel: 'gemini-3-pro-image-preview', models: ['gemini-3-pro-image-preview', 'gemini-3.1-flash-image-preview', 'gemini-2.5-flash-image', 'nano-banana-pro-preview', 'imagen-4.0-ultra-generate-001', 'imagen-4.0-generate-001', 'imagen-4.0-fast-generate-001'], defaultBaseUrl: '', needsBaseUrl: false },
-  { value: 'aliyun', label: '阿里云 DashScope / 通义万相', defaultModel: 'wanx2.1-t2i-turbo', models: ['wanx2.1-t2i-turbo', 'wanx2.1-t2i-plus', 'wanx2.1-imageedit', 'wanx-v1', 'wan2.2-t2i-flash', 'wan2.2-t2i-plus', 'wan2.5-t2i-preview', 'wan2.6-t2i', 'wan2.7-image', 'wan2.7-image-pro', 'qwen-image', 'qwen-image-edit', 'qwen-image-plus', 'qwen-image-max', 'qwen-image-2.0-pro', 'z-image-turbo'], defaultBaseUrl: 'https://dashscope.aliyuncs.com/api/v1', needsBaseUrl: false },
-  { value: 'volcengine', label: '火山引擎 / 即梦 / 豆包', defaultModel: 'doubao-seedream-4-5-251128', models: ['doubao-seedream-4-5-251128', 'doubao-seedream-5-0-lite', 'doubao-seedream-4-0-250828', 'doubao-seededit-3-0-i2i-250628', 'jimeng_high_aes_general_v21_L', 'jimeng_high_aes_general_v20_L', 'doubao-seedream-3-0-t2i-250415'], defaultBaseUrl: '', needsBaseUrl: false },
-  { value: 'zhipu', label: '智谱 CogView', defaultModel: 'cogview-3-flash', models: ['cogview-3-flash', 'cogview-3-plus', 'cogview-4'], defaultBaseUrl: 'https://open.bigmodel.cn/api/paas/v4', needsBaseUrl: false },
-  { value: 'siliconflow', label: 'SiliconFlow', defaultModel: 'Kwai-Kolors/Kolors', models: ['Kwai-Kolors/Kolors', 'black-forest-labs/FLUX.1-schnell', 'black-forest-labs/FLUX.1-dev', 'stabilityai/stable-diffusion-3-5-large', 'stabilityai/stable-diffusion-xl-base-1.0', 'Qwen/Qwen-Image', 'Qwen/Qwen-Image-Edit'], defaultBaseUrl: 'https://api.siliconflow.cn/v1', needsBaseUrl: false },
-  { value: 'sd-webui', label: 'Stable Diffusion WebUI (本地)', defaultModel: 'local', models: ['local', 'sdxl', 'sd1.5', 'sd3.5-large', 'flux', 'kolors'], defaultBaseUrl: 'http://127.0.0.1:7860', needsBaseUrl: true, keyHint: '本地服务通常不需要 Key' },
-  { value: 'custom', label: '自定义', defaultModel: 'image-model', models: ['image-model'], defaultBaseUrl: 'https://api.example.com/v1/images/generations', needsBaseUrl: true },
+  {
+    value: 'openai',
+    label: 'OpenAI Images',
+    defaultModel: 'gpt-image-1',
+    models: [
+      'gpt-image-1',
+      'gpt-image-1-mini',
+      'gpt-image-1.5',
+      'chatgpt-image-latest',
+      'dall-e-3',
+      'dall-e-2',
+    ],
+    defaultBaseUrl: '',
+    needsBaseUrl: false,
+  },
+  {
+    value: 'gemini',
+    label: 'Google Gemini / Imagen',
+    defaultModel: 'gemini-3-pro-image-preview',
+    models: [
+      'gemini-3-pro-image-preview',
+      'gemini-3.1-flash-image-preview',
+      'gemini-2.5-flash-image',
+      'nano-banana-pro-preview',
+      'imagen-4.0-ultra-generate-001',
+      'imagen-4.0-generate-001',
+      'imagen-4.0-fast-generate-001',
+    ],
+    defaultBaseUrl: '',
+    needsBaseUrl: false,
+  },
+  {
+    value: 'aliyun',
+    label: '阿里云 DashScope / 通义万相',
+    defaultModel: 'wanx2.1-t2i-turbo',
+    models: [
+      'wanx2.1-t2i-turbo',
+      'wanx2.1-t2i-plus',
+      'wanx2.1-imageedit',
+      'wanx-v1',
+      'wan2.2-t2i-flash',
+      'wan2.2-t2i-plus',
+      'wan2.5-t2i-preview',
+      'wan2.6-t2i',
+      'wan2.7-image',
+      'wan2.7-image-pro',
+      'qwen-image',
+      'qwen-image-edit',
+      'qwen-image-plus',
+      'qwen-image-max',
+      'qwen-image-2.0-pro',
+      'z-image-turbo',
+    ],
+    defaultBaseUrl: 'https://dashscope.aliyuncs.com/api/v1',
+    needsBaseUrl: false,
+  },
+  {
+    value: 'volcengine',
+    label: '火山引擎 / 即梦 / 豆包',
+    defaultModel: 'doubao-seedream-4-5-251128',
+    models: [
+      'doubao-seedream-4-5-251128',
+      'doubao-seedream-5-0-lite',
+      'doubao-seedream-4-0-250828',
+      'doubao-seededit-3-0-i2i-250628',
+      'jimeng_high_aes_general_v21_L',
+      'jimeng_high_aes_general_v20_L',
+      'doubao-seedream-3-0-t2i-250415',
+    ],
+    defaultBaseUrl: '',
+    needsBaseUrl: false,
+  },
+  {
+    value: 'zhipu',
+    label: '智谱 CogView',
+    defaultModel: 'cogview-3-flash',
+    models: ['cogview-3-flash', 'cogview-3-plus', 'cogview-4'],
+    defaultBaseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    needsBaseUrl: false,
+  },
+  {
+    value: 'siliconflow',
+    label: 'SiliconFlow',
+    defaultModel: 'Kwai-Kolors/Kolors',
+    models: [
+      'Kwai-Kolors/Kolors',
+      'black-forest-labs/FLUX.1-schnell',
+      'black-forest-labs/FLUX.1-dev',
+      'stabilityai/stable-diffusion-3-5-large',
+      'stabilityai/stable-diffusion-xl-base-1.0',
+      'Qwen/Qwen-Image',
+      'Qwen/Qwen-Image-Edit',
+    ],
+    defaultBaseUrl: 'https://api.siliconflow.cn/v1',
+    needsBaseUrl: false,
+  },
+  {
+    value: 'sd-webui',
+    label: 'Stable Diffusion WebUI (本地)',
+    defaultModel: 'local',
+    models: ['local', 'sdxl', 'sd1.5', 'sd3.5-large', 'flux', 'kolors'],
+    defaultBaseUrl: 'http://127.0.0.1:7860',
+    needsBaseUrl: true,
+    keyHint: '本地服务通常不需要 Key',
+  },
+  {
+    value: 'custom',
+    label: '自定义',
+    defaultModel: 'image-model',
+    models: ['image-model'],
+    defaultBaseUrl: 'https://api.example.com/v1/images/generations',
+    needsBaseUrl: true,
+  },
 ];
 
 const TTS_PROVIDERS: ProviderPreset[] = [
-  { value: 'openai', label: 'OpenAI TTS', defaultModel: 'gpt-4o-mini-tts', models: ['gpt-4o-mini-tts', 'gpt-4o-mini-tts-2025-03-20', 'gpt-4o-mini-tts-2025-12-15', 'tts-1', 'tts-1-1106', 'tts-1-hd', 'tts-1-hd-1106'], defaultBaseUrl: '', needsBaseUrl: false },
-  { value: 'elevenlabs', label: 'ElevenLabs', defaultModel: 'eleven_multilingual_v2', models: ['eleven_v3', 'eleven_multilingual_v2', 'eleven_flash_v2_5', 'eleven_flash_v2', 'eleven_turbo_v2_5', 'eleven_turbo_v2', 'eleven_multilingual_sts_v2', 'eleven_monolingual_v1'], defaultBaseUrl: '', needsBaseUrl: false },
-  { value: 'aliyun', label: '阿里云 DashScope / CosyVoice', defaultModel: 'cosyvoice-v2', models: ['cosyvoice-v2', 'cosyvoice-v1', 'cosyvoice-v3-flash', 'cosyvoice-v3-plus', 'qwen3-tts-flash', 'qwen-tts', 'qwen-tts-latest'], defaultBaseUrl: '', needsBaseUrl: false, keyHint: 'Base URL 留空即可' },
-  { value: 'volcengine', label: '火山引擎 / 豆包语音', defaultModel: 'seed-tts', models: ['seed-tts', 'seed-tts-2.0', 'mega-tts', 'doubao-tts'], defaultBaseUrl: '', needsBaseUrl: false },
-  { value: 'custom', label: '自定义', defaultModel: 'tts-model', models: ['tts-model'], defaultBaseUrl: 'https://api.example.com/v1/audio/speech', needsBaseUrl: true },
+  {
+    value: 'openai',
+    label: 'OpenAI TTS',
+    defaultModel: 'gpt-4o-mini-tts',
+    models: [
+      'gpt-4o-mini-tts',
+      'gpt-4o-mini-tts-2025-03-20',
+      'gpt-4o-mini-tts-2025-12-15',
+      'tts-1',
+      'tts-1-1106',
+      'tts-1-hd',
+      'tts-1-hd-1106',
+    ],
+    defaultBaseUrl: '',
+    needsBaseUrl: false,
+  },
+  {
+    value: 'elevenlabs',
+    label: 'ElevenLabs',
+    defaultModel: 'eleven_multilingual_v2',
+    models: [
+      'eleven_v3',
+      'eleven_multilingual_v2',
+      'eleven_flash_v2_5',
+      'eleven_flash_v2',
+      'eleven_turbo_v2_5',
+      'eleven_turbo_v2',
+      'eleven_multilingual_sts_v2',
+      'eleven_monolingual_v1',
+    ],
+    defaultBaseUrl: '',
+    needsBaseUrl: false,
+  },
+  {
+    value: 'aliyun',
+    label: '阿里云 DashScope / CosyVoice',
+    defaultModel: 'cosyvoice-v2',
+    models: [
+      'cosyvoice-v2',
+      'cosyvoice-v1',
+      'cosyvoice-v3-flash',
+      'cosyvoice-v3-plus',
+      'qwen3-tts-flash',
+      'qwen-tts',
+      'qwen-tts-latest',
+    ],
+    defaultBaseUrl: '',
+    needsBaseUrl: false,
+    keyHint: 'Base URL 留空即可',
+  },
+  {
+    value: 'volcengine',
+    label: '火山引擎 / 豆包语音',
+    defaultModel: 'seed-tts',
+    models: ['seed-tts', 'seed-tts-2.0', 'mega-tts', 'doubao-tts'],
+    defaultBaseUrl: '',
+    needsBaseUrl: false,
+  },
+  {
+    value: 'custom',
+    label: '自定义',
+    defaultModel: 'tts-model',
+    models: ['tts-model'],
+    defaultBaseUrl: 'https://api.example.com/v1/audio/speech',
+    needsBaseUrl: true,
+  },
 ];
 
 const MUSIC_PROVIDERS: ProviderPreset[] = [
-  { value: 'custom', label: '自定义 (OpenAI 兼容音乐端点)', defaultModel: 'music-1', models: ['music-1'], defaultBaseUrl: 'https://api.example.com/v1/audio/music', needsBaseUrl: true, keyHint: 'Base URL 指向返回音频字节的音乐生成端点' },
-  { value: 'openai', label: 'OpenAI 兼容', defaultModel: 'music-1', models: ['music-1'], defaultBaseUrl: '', needsBaseUrl: false },
-  { value: 'siliconflow', label: 'SiliconFlow', defaultModel: 'music-1', models: ['music-1'], defaultBaseUrl: 'https://api.siliconflow.cn/v1', needsBaseUrl: false },
+  {
+    value: 'custom',
+    label: '自定义 (OpenAI 兼容音乐端点)',
+    defaultModel: 'music-1',
+    models: ['music-1'],
+    defaultBaseUrl: 'https://api.example.com/v1/audio/music',
+    needsBaseUrl: true,
+    keyHint: 'Base URL 指向返回音频字节的音乐生成端点',
+  },
+  {
+    value: 'openai',
+    label: 'OpenAI 兼容',
+    defaultModel: 'music-1',
+    models: ['music-1'],
+    defaultBaseUrl: '',
+    needsBaseUrl: false,
+  },
+  {
+    value: 'siliconflow',
+    label: 'SiliconFlow',
+    defaultModel: 'music-1',
+    models: ['music-1'],
+    defaultBaseUrl: 'https://api.siliconflow.cn/v1',
+    needsBaseUrl: false,
+  },
 ];
 
 function configFromPreset(preset: ProviderPreset): AiProviderConfig {
@@ -142,8 +435,7 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
 
   if (!open) return null;
 
-  const updateChat = (patch: Partial<AiConfig>) =>
-    setConfig((c) => (c ? { ...c, ...patch } : c));
+  const updateChat = (patch: Partial<AiConfig>) => setConfig((c) => (c ? { ...c, ...patch } : c));
 
   const updateImage = (patch: Partial<AiProviderConfig>) =>
     setImageConfig((c) => (c ? { ...c, ...patch } : c));
@@ -169,7 +461,7 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
     update({
       provider: value,
       model: preset.defaultModel,
-      base_url: preset.needsBaseUrl ? (current.base_url || preset.defaultBaseUrl) : '',
+      base_url: preset.needsBaseUrl ? current.base_url || preset.defaultBaseUrl : '',
     });
     setValidation(null);
   };
@@ -193,10 +485,7 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
     setLogsLoading(true);
     setError(null);
     try {
-      const [nextLogs, path] = await Promise.all([
-        listAiLogs(80),
-        getAiLogPath(),
-      ]);
+      const [nextLogs, path] = await Promise.all([listAiLogs(80), getAiLogPath()]);
       setLogs(nextLogs);
       setLogPath(path);
     } catch (e) {
@@ -246,9 +535,7 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
       <div className="w-[720px] max-h-[85vh] flex flex-col bg-card border border-border rounded-lg shadow-2xl">
         <div className="flex items-center justify-between p-4 border-b border-border">
-          <h2 className="text-lg font-display-family">
-            AI 设置
-          </h2>
+          <h2 className="text-lg font-display-family">AI 设置</h2>
           <button
             onClick={onClose}
             className="p-1.5 rounded-md hover:bg-secondary/50 transition-colors"
@@ -260,10 +547,30 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
 
         <div className="border-b border-border px-4 pt-3">
           <div className="flex items-center gap-1">
-            <TabButton active={activeTab === 'chat'} icon={<MessageSquareText className="h-4 w-4" />} label="聊天" onClick={() => setActiveTab('chat')} />
-            <TabButton active={activeTab === 'image'} icon={<Image className="h-4 w-4" />} label="图片" onClick={() => setActiveTab('image')} />
-            <TabButton active={activeTab === 'tts'} icon={<Volume2 className="h-4 w-4" />} label="音频" onClick={() => setActiveTab('tts')} />
-            <TabButton active={activeTab === 'music'} icon={<Music className="h-4 w-4" />} label="音乐" onClick={() => setActiveTab('music')} />
+            <TabButton
+              active={activeTab === 'chat'}
+              icon={<MessageSquareText className="h-4 w-4" />}
+              label="聊天"
+              onClick={() => setActiveTab('chat')}
+            />
+            <TabButton
+              active={activeTab === 'image'}
+              icon={<Image className="h-4 w-4" />}
+              label="图片"
+              onClick={() => setActiveTab('image')}
+            />
+            <TabButton
+              active={activeTab === 'tts'}
+              icon={<Volume2 className="h-4 w-4" />}
+              label="音频"
+              onClick={() => setActiveTab('tts')}
+            />
+            <TabButton
+              active={activeTab === 'music'}
+              icon={<Music className="h-4 w-4" />}
+              label="音乐"
+              onClick={() => setActiveTab('music')}
+            />
           </div>
         </div>
 
@@ -278,7 +585,9 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
                     config={config}
                     providers={CHAT_PROVIDERS}
                     multiModel={false}
-                    onProviderChange={(value) => handleProviderChange(value, config, CHAT_PROVIDERS, updateChat)}
+                    onProviderChange={(value) =>
+                      handleProviderChange(value, config, CHAT_PROVIDERS, updateChat)
+                    }
                     onUpdate={updateChat}
                     apiKeyHint={
                       config.provider === 'ollama'
@@ -316,7 +625,9 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
                   config={imageConfig}
                   providers={IMAGE_PROVIDERS}
                   onUpdate={updateImage}
-                  onProviderChange={(value) => handleProviderChange(value, imageConfig, IMAGE_PROVIDERS, updateImage)}
+                  onProviderChange={(value) =>
+                    handleProviderChange(value, imageConfig, IMAGE_PROVIDERS, updateImage)
+                  }
                 />
               )}
 
@@ -326,7 +637,9 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
                   config={ttsConfig}
                   providers={TTS_PROVIDERS}
                   onUpdate={updateTts}
-                  onProviderChange={(value) => handleProviderChange(value, ttsConfig, TTS_PROVIDERS, updateTts)}
+                  onProviderChange={(value) =>
+                    handleProviderChange(value, ttsConfig, TTS_PROVIDERS, updateTts)
+                  }
                 />
               )}
 
@@ -336,7 +649,9 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
                   config={musicConfig}
                   providers={MUSIC_PROVIDERS}
                   onUpdate={updateMusic}
-                  onProviderChange={(value) => handleProviderChange(value, musicConfig, MUSIC_PROVIDERS, updateMusic)}
+                  onProviderChange={(value) =>
+                    handleProviderChange(value, musicConfig, MUSIC_PROVIDERS, updateMusic)
+                  }
                 />
               )}
 
@@ -431,7 +746,11 @@ function ProviderConfigPanel({
         onProviderChange={onProviderChange}
         onUpdate={onUpdate}
         apiKeyHint={preset?.keyHint || '存储在本地配置文件中'}
-        baseUrlHint={config.provider === 'custom' ? '按目标服务填写图片或音频接口端点' : '留空使用供应商默认地址'}
+        baseUrlHint={
+          config.provider === 'custom'
+            ? '按目标服务填写图片或音频接口端点'
+            : '留空使用供应商默认地址'
+        }
       />
     </div>
   );
@@ -472,7 +791,9 @@ function ModelSelectField({
             aria-label="选择模型"
           >
             {options.map((model) => (
-              <option key={model} value={model}>{model}</option>
+              <option key={model} value={model}>
+                {model}
+              </option>
             ))}
             <option value={CUSTOM_MODEL_SENTINEL}>自定义…</option>
           </select>
@@ -504,7 +825,9 @@ function ModelSelectField({
       aria-label="选择模型"
     >
       {options.map((model) => (
-        <option key={model} value={model}>{model}</option>
+        <option key={model} value={model}>
+          {model}
+        </option>
       ))}
       <option value={CUSTOM_MODEL_SENTINEL}>自定义…</option>
     </select>
@@ -529,7 +852,11 @@ function ConfigFields({
   baseUrlHint: string;
 }) {
   const provider = providers.find((p) => p.value === config.provider);
-  const modelOptions = provider?.models?.length ? provider.models : provider ? [provider.defaultModel] : [];
+  const modelOptions = provider?.models?.length
+    ? provider.models
+    : provider
+      ? [provider.defaultModel]
+      : [];
   return (
     <div className="space-y-4">
       <Field label="供应商">
@@ -552,7 +879,9 @@ function ConfigFields({
         hint={
           multiModel
             ? '从当前供应商的模型池选择，可批量填入，也可追加自定义模型名。'
-            : provider ? `可下拉选择常用模型，也可直接输入自定义模型名。推荐: ${provider.defaultModel}` : '可直接输入模型名'
+            : provider
+              ? `可下拉选择常用模型，也可直接输入自定义模型名。推荐: ${provider.defaultModel}`
+              : '可直接输入模型名'
         }
       >
         {multiModel ? (
@@ -685,7 +1014,7 @@ function ModelTagPicker({
                 <button
                   key={model}
                   type="button"
-                  onClick={() => active ? removeModel(model) : addModels([model])}
+                  onClick={() => (active ? removeModel(model) : addModels([model]))}
                   className={`rounded-md px-2 py-1 text-xs transition-colors ${
                     active
                       ? 'bg-primary text-primary-foreground'
@@ -850,14 +1179,10 @@ function AiLogRow({ entry }: { entry: AiLogEntry }) {
         </span>
       </div>
       {entry.endpoint && (
-        <div className="mt-1 truncate text-[11px] text-muted-foreground">
-          {entry.endpoint}
-        </div>
+        <div className="mt-1 truncate text-[11px] text-muted-foreground">{entry.endpoint}</div>
       )}
       {entry.message && (
-        <div className="mt-1 break-words text-xs text-muted-foreground">
-          {entry.message}
-        </div>
+        <div className="mt-1 break-words text-xs text-muted-foreground">{entry.message}</div>
       )}
     </div>
   );

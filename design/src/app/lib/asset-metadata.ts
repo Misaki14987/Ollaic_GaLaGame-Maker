@@ -250,7 +250,18 @@ const legacyReferencesKey = (projectId: string) => `asset-references-${projectId
 const pendingSaves = new Map<string, Promise<void>>();
 
 export function emptyAssetMetadata(): AssetMetadata {
-  return { aliases: {}, descriptions: {}, tags: {}, references: {}, sceneCards: {}, cgCards: {}, voiceCards: {}, deletedSceneCards: [], deletedCgCards: [], deletedVoiceCards: [] };
+  return {
+    aliases: {},
+    descriptions: {},
+    tags: {},
+    references: {},
+    sceneCards: {},
+    cgCards: {},
+    voiceCards: {},
+    deletedSceneCards: [],
+    deletedCgCards: [],
+    deletedVoiceCards: [],
+  };
 }
 
 export function assetMetadataKey(category: string, filename: string): string {
@@ -265,7 +276,10 @@ export function assetMetadataEntry<T>(
   return entries[assetMetadataKey(category, filename)] ?? entries[filename];
 }
 
-export function aliasesForCategory(metadata: AssetMetadata, category: string): Record<string, string> {
+export function aliasesForCategory(
+  metadata: AssetMetadata,
+  category: string,
+): Record<string, string> {
   const result: Record<string, string> = {};
   const prefix = `${category}/`;
   for (const [key, value] of Object.entries(metadata.aliases)) {
@@ -279,23 +293,25 @@ function parseRecord<T>(key: string): Record<string, T> {
   try {
     const raw = localStorage.getItem(key);
     const parsed = raw ? JSON.parse(raw) : {};
-    return parsed && typeof parsed === 'object' ? parsed as Record<string, T> : {};
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, T>) : {};
   } catch {
     return {};
   }
 }
 
 function hasEntries(metadata: AssetMetadata): boolean {
-  return Object.keys(metadata.aliases).length > 0
-    || Object.keys(metadata.descriptions).length > 0
-    || Object.keys(metadata.tags).length > 0
-    || Object.keys(metadata.references).length > 0
-    || Object.keys(metadata.sceneCards ?? {}).length > 0
-    || Object.keys(metadata.cgCards ?? {}).length > 0
-    || Object.keys(metadata.voiceCards ?? {}).length > 0
-    || (metadata.deletedSceneCards ?? []).length > 0
-    || (metadata.deletedCgCards ?? []).length > 0
-    || (metadata.deletedVoiceCards ?? []).length > 0;
+  return (
+    Object.keys(metadata.aliases).length > 0 ||
+    Object.keys(metadata.descriptions).length > 0 ||
+    Object.keys(metadata.tags).length > 0 ||
+    Object.keys(metadata.references).length > 0 ||
+    Object.keys(metadata.sceneCards ?? {}).length > 0 ||
+    Object.keys(metadata.cgCards ?? {}).length > 0 ||
+    Object.keys(metadata.voiceCards ?? {}).length > 0 ||
+    (metadata.deletedSceneCards ?? []).length > 0 ||
+    (metadata.deletedCgCards ?? []).length > 0 ||
+    (metadata.deletedVoiceCards ?? []).length > 0
+  );
 }
 
 function loadLegacyMetadata(projectId: string): AssetMetadata {
@@ -395,7 +411,10 @@ export function setAssetAlias(
   alias: string,
 ): AssetMetadata {
   const value = alias.trim() || undefined;
-  return { ...metadata, aliases: setEntry(metadata.aliases, category, filename, value) };
+  return {
+    ...metadata,
+    aliases: setEntry(metadata.aliases, category, filename, value),
+  };
 }
 
 export function setAssetDescription(
@@ -405,7 +424,10 @@ export function setAssetDescription(
   description: string,
 ): AssetMetadata {
   const value = description.trim() || undefined;
-  return { ...metadata, descriptions: setEntry(metadata.descriptions, category, filename, value) };
+  return {
+    ...metadata,
+    descriptions: setEntry(metadata.descriptions, category, filename, value),
+  };
 }
 
 export function setAssetTags(

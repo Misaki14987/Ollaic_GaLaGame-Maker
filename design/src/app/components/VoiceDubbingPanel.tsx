@@ -1,19 +1,27 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import {
-  Music, Trash2, Wand2, Upload, Loader2,
-  CheckSquare, Square, FolderOpen, ChevronDown, ChevronRight,
+  Music,
+  Trash2,
+  Wand2,
+  Upload,
+  Loader2,
+  CheckSquare,
+  Square,
+  FolderOpen,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import type { VoiceAssetCard, AssetUsage } from '../lib/assets-ipc';
-import {
-  fillVoiceCard, deleteVoiceCard, importAsset,
-} from '../lib/assets-ipc';
+import { fillVoiceCard, deleteVoiceCard, importAsset } from '../lib/assets-ipc';
 import { getScenePath, loadScene, saveScene } from '../lib/webgal-ipc';
 import {
-  generateBatchTts, listenBatchTtsProgress,
+  generateBatchTts,
+  listenBatchTtsProgress,
   getAiTtsConfig,
   type AiProviderConfig,
-  type BatchTtsItem, type BatchTtsProgress,
+  type BatchTtsItem,
+  type BatchTtsProgress,
 } from '../lib/ai-ipc';
 import { listCharacters } from '../lib/character-ipc';
 import type { Character } from '../lib/character-types';
@@ -36,11 +44,13 @@ function legacySceneKeyFromId(id: string): string | null {
 }
 
 function sceneKeysForCard(card: VoiceAssetCard): string[] {
-  const scenes = Array.from(new Set(
-    (card.usages ?? [])
-      .map((usage) => usage.sceneFile?.trim())
-      .filter((scene): scene is string => Boolean(scene)),
-  ));
+  const scenes = Array.from(
+    new Set(
+      (card.usages ?? [])
+        .map((usage) => usage.sceneFile?.trim())
+        .filter((scene): scene is string => Boolean(scene)),
+    ),
+  );
   if (scenes.length > 0) return scenes;
   return [legacySceneKeyFromId(card.id) ?? '未关联场景'];
 }
@@ -95,12 +105,14 @@ async function writeVoiceFlagToScenes(
 }
 
 function parseConfiguredModels(value: string): string[] {
-  return Array.from(new Set(
-    value
-      .split(/[\n,，]/)
-      .map((item) => item.trim())
-      .filter(Boolean),
-  ));
+  return Array.from(
+    new Set(
+      value
+        .split(/[\n,，]/)
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  );
 }
 
 export function VoiceDubbingPanel({
@@ -127,7 +139,8 @@ export function VoiceDubbingPanel({
   const [importingId, setImportingId] = useState<string | null>(null);
   const [generatingId, setGeneratingId] = useState<string | null>(null);
   const isGenerated = useCallback(
-    (card: VoiceAssetCard) => !!card.voiceAsset && (!vocalAssetNames || vocalAssetNames.has(card.voiceAsset)),
+    (card: VoiceAssetCard) =>
+      !!card.voiceAsset && (!vocalAssetNames || vocalAssetNames.has(card.voiceAsset)),
     [vocalAssetNames],
   );
 
@@ -140,9 +153,15 @@ export function VoiceDubbingPanel({
   useEffect(() => {
     let cancelled = false;
     listCharacters(projectPath)
-      .then((list) => { if (!cancelled) setCharacters(list); })
-      .catch(() => { if (!cancelled) setCharacters([]); });
-    return () => { cancelled = true; };
+      .then((list) => {
+        if (!cancelled) setCharacters(list);
+      })
+      .catch(() => {
+        if (!cancelled) setCharacters([]);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [projectPath]);
 
   // 角色名 → 音色 ID 映射。别名也一并映射，便于按别名命中。
@@ -162,11 +181,15 @@ export function VoiceDubbingPanel({
     voiceByCharacter.get((card.character ?? '').trim()) ?? '';
 
   // Filter cards
-  const filteredCards = useMemo(() => voiceCards.filter((card) => {
-    if (filterStatus === 'pending') return !isGenerated(card);
-    if (filterStatus === 'done') return isGenerated(card);
-    return true;
-  }), [voiceCards, filterStatus]);
+  const filteredCards = useMemo(
+    () =>
+      voiceCards.filter((card) => {
+        if (filterStatus === 'pending') return !isGenerated(card);
+        if (filterStatus === 'done') return isGenerated(card);
+        return true;
+      }),
+    [voiceCards, filterStatus],
+  );
 
   // Group cards, then sort groups by name.
   const sortedGroups = useMemo(() => {
@@ -190,7 +213,8 @@ export function VoiceDubbingPanel({
   const toggleGroup = (key: string) => {
     setExpandedGroups((prev) => {
       const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   };
@@ -198,7 +222,8 @@ export function VoiceDubbingPanel({
   const toggleSelect = (cardId: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(cardId)) next.delete(cardId); else next.add(cardId);
+      if (next.has(cardId)) next.delete(cardId);
+      else next.add(cardId);
       return next;
     });
   };
@@ -215,10 +240,17 @@ export function VoiceDubbingPanel({
   const selectedPendingCards = voiceCards.filter((c) => selectedIds.has(c.id) && !isGenerated(c));
   const configuredModels = batchConfig ? parseConfiguredModels(batchConfig.model) : [];
   const effectiveBatchModel = batchModel || configuredModels[0] || batchConfig?.model.trim() || '';
-  const completedBatchCount = Array.from(batchProgress.values()).filter((p) => p.status === 'done' || p.status === 'error').length;
-  const doneBatchCount = Array.from(batchProgress.values()).filter((p) => p.status === 'done').length;
-  const errorBatchCount = Array.from(batchProgress.values()).filter((p) => p.status === 'error').length;
-  const batchPercent = batchTotal > 0 ? Math.min(100, Math.round((completedBatchCount / batchTotal) * 100)) : 0;
+  const completedBatchCount = Array.from(batchProgress.values()).filter(
+    (p) => p.status === 'done' || p.status === 'error',
+  ).length;
+  const doneBatchCount = Array.from(batchProgress.values()).filter(
+    (p) => p.status === 'done',
+  ).length;
+  const errorBatchCount = Array.from(batchProgress.values()).filter(
+    (p) => p.status === 'error',
+  ).length;
+  const batchPercent =
+    batchTotal > 0 ? Math.min(100, Math.round((completedBatchCount / batchTotal) * 100)) : 0;
 
   const openBatchGenerateDialog = useCallback(async () => {
     const targets = voiceCards.filter((c) => selectedIds.has(c.id) && !isGenerated(c));
@@ -289,75 +321,107 @@ export function VoiceDubbingPanel({
       setBatchRunning(false);
       setSelectedIds(new Set());
     }
-  }, [batchFormat, effectiveBatchModel, projectPath, voiceCards, selectedIds, onVoiceCardsChanged, isGenerated]);
+  }, [
+    batchFormat,
+    effectiveBatchModel,
+    projectPath,
+    voiceCards,
+    selectedIds,
+    onVoiceCardsChanged,
+    isGenerated,
+  ]);
 
   // Single generate
-  const handleSingleGenerate = useCallback(async (card: VoiceAssetCard) => {
-    const ttsConfig = await getAiTtsConfig().catch(() => null);
-    if (!ttsConfig || !ttsConfig.model) {
-      alert('请先在 AI 设置中配置 TTS 供应商和模型。');
-      return;
-    }
-    setGeneratingId(card.id);
-    const items: BatchTtsItem[] = [{
-      voiceCardId: card.id,
-      text: card.text,
-      voicePrompt: [card.character, card.emotion].filter(Boolean).join(' '),
-    }];
-    try {
-      setBatchProgress(new Map());
-      const unlisten = await listenBatchTtsProgress((p) => {
-        setBatchProgress((prev) => { const n = new Map(prev); n.set(p.voiceCardId, p); return n; });
-      });
-      const results = await generateBatchTts(projectPath, items, ttsConfig.model, 'mp3');
-      unlisten();
-      const done = results.find((r) => r.voiceCardId === card.id && r.status === 'done');
-      if (done?.assetName) await writeVoiceFlagToScenes(projectPath, card, done.assetName);
-      onVoiceCardsChanged();
-    } catch (e) {
-      console.error('Single TTS failed:', e);
-      alert(`生成失败: ${e}`);
-    } finally {
-      setGeneratingId(null);
-      setBatchProgress(new Map());
-    }
-  }, [projectPath, onVoiceCardsChanged]);
+  const handleSingleGenerate = useCallback(
+    async (card: VoiceAssetCard) => {
+      const ttsConfig = await getAiTtsConfig().catch(() => null);
+      if (!ttsConfig || !ttsConfig.model) {
+        alert('请先在 AI 设置中配置 TTS 供应商和模型。');
+        return;
+      }
+      setGeneratingId(card.id);
+      const items: BatchTtsItem[] = [
+        {
+          voiceCardId: card.id,
+          text: card.text,
+          voicePrompt: [card.character, card.emotion].filter(Boolean).join(' '),
+        },
+      ];
+      try {
+        setBatchProgress(new Map());
+        const unlisten = await listenBatchTtsProgress((p) => {
+          setBatchProgress((prev) => {
+            const n = new Map(prev);
+            n.set(p.voiceCardId, p);
+            return n;
+          });
+        });
+        const results = await generateBatchTts(projectPath, items, ttsConfig.model, 'mp3');
+        unlisten();
+        const done = results.find((r) => r.voiceCardId === card.id && r.status === 'done');
+        if (done?.assetName) await writeVoiceFlagToScenes(projectPath, card, done.assetName);
+        onVoiceCardsChanged();
+      } catch (e) {
+        console.error('Single TTS failed:', e);
+        alert(`生成失败: ${e}`);
+      } finally {
+        setGeneratingId(null);
+        setBatchProgress(new Map());
+      }
+    },
+    [projectPath, onVoiceCardsChanged],
+  );
 
   // Import file to fill voice card
-  const handleImportFill = useCallback(async (card: VoiceAssetCard) => {
-    setImportingId(card.id);
-    try {
-      const selected = await openDialog({
-        title: '选择音频文件',
-        filters: [{ name: '音频', extensions: ['mp3', 'wav', 'ogg', 'flac', 'aac', 'opus'] }],
-        multiple: false,
-      });
-      if (!selected) { setImportingId(null); return; }
+  const handleImportFill = useCallback(
+    async (card: VoiceAssetCard) => {
+      setImportingId(card.id);
+      try {
+        const selected = await openDialog({
+          title: '选择音频文件',
+          filters: [
+            {
+              name: '音频',
+              extensions: ['mp3', 'wav', 'ogg', 'flac', 'aac', 'opus'],
+            },
+          ],
+          multiple: false,
+        });
+        if (!selected) {
+          setImportingId(null);
+          return;
+        }
 
-      // Import the file
-      const assetInfo = await importAsset(selected as string, projectPath, 'vocal');
-      // Fill the voice card
-      await fillVoiceCard(projectPath, card.id, assetInfo.name);
-      await writeVoiceFlagToScenes(projectPath, card, assetInfo.name);
-      onVoiceCardsChanged();
-    } catch (e) {
-      console.error('Import fill failed:', e);
-    } finally {
-      setImportingId(null);
-    }
-  }, [projectPath, onVoiceCardsChanged]);
+        // Import the file
+        const assetInfo = await importAsset(selected as string, projectPath, 'vocal');
+        // Fill the voice card
+        await fillVoiceCard(projectPath, card.id, assetInfo.name);
+        await writeVoiceFlagToScenes(projectPath, card, assetInfo.name);
+        onVoiceCardsChanged();
+      } catch (e) {
+        console.error('Import fill failed:', e);
+      } finally {
+        setImportingId(null);
+      }
+    },
+    [projectPath, onVoiceCardsChanged],
+  );
 
   // Delete voice card
-  const handleDelete = useCallback(async (card: VoiceAssetCard) => {
-    if (!window.confirm(`确定删除配音卡 "${card.character}: ${card.text.slice(0, 20)}..." 吗？`)) return;
-    try {
-      await deleteVoiceCard(projectPath, card.id);
-      onVoiceCardsChanged();
-      if (selectedVoiceCard?.id === card.id) onSelectVoiceCard(null);
-    } catch (e) {
-      console.error('Delete voice card failed:', e);
-    }
-  }, [projectPath, selectedVoiceCard, onSelectVoiceCard, onVoiceCardsChanged]);
+  const handleDelete = useCallback(
+    async (card: VoiceAssetCard) => {
+      if (!window.confirm(`确定删除配音卡 "${card.character}: ${card.text.slice(0, 20)}..." 吗？`))
+        return;
+      try {
+        await deleteVoiceCard(projectPath, card.id);
+        onVoiceCardsChanged();
+        if (selectedVoiceCard?.id === card.id) onSelectVoiceCard(null);
+      } catch (e) {
+        console.error('Delete voice card failed:', e);
+      }
+    },
+    [projectPath, selectedVoiceCard, onSelectVoiceCard, onVoiceCardsChanged],
+  );
 
   const pendingCount = voiceCards.filter((c) => !isGenerated(c)).length;
   const doneCount = voiceCards.filter((c) => isGenerated(c)).length;
@@ -375,10 +439,16 @@ export function VoiceDubbingPanel({
               key={s}
               onClick={() => setFilterStatus(s)}
               className={`rounded-sm px-2 py-1 text-[10px] font-semibold transition-colors ${
-                filterStatus === s ? 'bg-secondary text-on-secondary' : 'text-muted-foreground hover:text-foreground'
+                filterStatus === s
+                  ? 'bg-secondary text-on-secondary'
+                  : 'text-muted-foreground hover:text-foreground'
               }`}
             >
-              {s === 'all' ? `全部 (${voiceCards.length})` : s === 'pending' ? `待配音 (${pendingCount})` : `已配音 (${doneCount})`}
+              {s === 'all'
+                ? `全部 (${voiceCards.length})`
+                : s === 'pending'
+                  ? `待配音 (${pendingCount})`
+                  : `已配音 (${doneCount})`}
             </button>
           ))}
         </div>
@@ -388,7 +458,9 @@ export function VoiceDubbingPanel({
               key={m}
               onClick={() => setGroupMode(m)}
               className={`rounded-sm px-2 py-1 text-[10px] font-semibold transition-colors ${
-                groupMode === m ? 'bg-secondary text-on-secondary' : 'text-muted-foreground hover:text-foreground'
+                groupMode === m
+                  ? 'bg-secondary text-on-secondary'
+                  : 'text-muted-foreground hover:text-foreground'
               }`}
             >
               {m === 'scene' ? '按场景' : '按角色'}
@@ -405,10 +477,11 @@ export function VoiceDubbingPanel({
               onClick={toggleSelectAll}
               className="flex items-center gap-1 rounded-sm px-2 py-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
             >
-              {filteredCards.filter((c) => !isGenerated(c)).every((c) => selectedIds.has(c.id))
-                ? <CheckSquare className="h-3.5 w-3.5" />
-                : <Square className="h-3.5 w-3.5" />
-              }
+              {filteredCards.filter((c) => !isGenerated(c)).every((c) => selectedIds.has(c.id)) ? (
+                <CheckSquare className="h-3.5 w-3.5" />
+              ) : (
+                <Square className="h-3.5 w-3.5" />
+              )}
               全选待配音
             </button>
             <button
@@ -416,7 +489,11 @@ export function VoiceDubbingPanel({
               disabled={batchRunning || selectedIds.size === 0}
               className="flex items-center gap-1.5 rounded-sm bg-primary px-3 py-1.5 text-[11px] font-semibold text-on-primary hover:opacity-90 disabled:opacity-50 transition-opacity"
             >
-              {batchRunning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+              {batchRunning ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Wand2 className="h-3.5 w-3.5" />
+              )}
               生成选中 ({selectedIds.size})
             </button>
           </>
@@ -430,7 +507,9 @@ export function VoiceDubbingPanel({
             <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
             <span className="text-primary font-semibold">
               生成中... {doneBatchCount}/{batchTotal}
-              {errorBatchCount > 0 && <span className="ml-2 text-error">失败 {errorBatchCount}</span>}
+              {errorBatchCount > 0 && (
+                <span className="ml-2 text-error">失败 {errorBatchCount}</span>
+              )}
             </span>
           </div>
           <div className="mt-1 h-1 rounded-full bg-secondary/30 overflow-hidden">
@@ -467,12 +546,20 @@ export function VoiceDubbingPanel({
                     onClick={() => toggleGroup(groupKey)}
                     className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left hover:bg-surface-container-low transition-colors"
                   >
-                    {isExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                    {isExpanded ? (
+                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                    )}
                     <span className="text-sm font-semibold">{groupKey}</span>
                     <span className="font-mono text-[10px] text-muted-foreground">
                       {cards.length} 条
-                      {groupPending > 0 && <span className="ml-1 text-tertiary">({groupPending} 待配音)</span>}
-                      {groupDone > 0 && <span className="ml-1 text-primary">({groupDone} 已配音)</span>}
+                      {groupPending > 0 && (
+                        <span className="ml-1 text-tertiary">({groupPending} 待配音)</span>
+                      )}
+                      {groupDone > 0 && (
+                        <span className="ml-1 text-primary">({groupDone} 已配音)</span>
+                      )}
                     </span>
                   </button>
 
@@ -482,7 +569,8 @@ export function VoiceDubbingPanel({
                         const isSelected = selectedVoiceCard?.id === card.id;
                         const isChecked = selectedIds.has(card.id);
                         const progress = batchProgress.get(card.id);
-                        const isGenerating = generatingId === card.id || progress?.status === 'generating';
+                        const isGenerating =
+                          generatingId === card.id || progress?.status === 'generating';
                         const hasAudio = isGenerated(card) || progress?.status === 'done';
 
                         return (
@@ -498,13 +586,17 @@ export function VoiceDubbingPanel({
                             {/* Checkbox (only for pending) */}
                             {!isGenerated(card) && !isGenerating && (
                               <button
-                                onClick={(e) => { e.stopPropagation(); toggleSelect(card.id); }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleSelect(card.id);
+                                }}
                                 className="shrink-0"
                               >
-                                {isChecked
-                                  ? <CheckSquare className="h-4 w-4 text-primary" />
-                                  : <Square className="h-4 w-4 text-muted-foreground" />
-                                }
+                                {isChecked ? (
+                                  <CheckSquare className="h-4 w-4 text-primary" />
+                                ) : (
+                                  <Square className="h-4 w-4 text-muted-foreground" />
+                                )}
                               </button>
                             )}
 
@@ -527,9 +619,13 @@ export function VoiceDubbingPanel({
                                 <span className="text-sm font-medium truncate">
                                   {card.character || '旁白'}
                                 </span>
-                                <span className={`rounded px-1.5 py-0.5 text-[9px] font-semibold ${
-                                  hasAudio ? 'bg-primary/10 text-primary' : 'bg-tertiary/10 text-tertiary'
-                                }`}>
+                                <span
+                                  className={`rounded px-1.5 py-0.5 text-[9px] font-semibold ${
+                                    hasAudio
+                                      ? 'bg-primary/10 text-primary'
+                                      : 'bg-tertiary/10 text-tertiary'
+                                  }`}
+                                >
                                   {hasAudio ? '已配音' : '待配音'}
                                 </span>
                                 <span className="rounded bg-secondary/30 px-1.5 py-0.5 text-[9px] text-muted-foreground">
@@ -540,7 +636,9 @@ export function VoiceDubbingPanel({
                                 "{card.text}"
                               </p>
                               {progress?.message && progress.status !== 'done' && (
-                                <p className="mt-0.5 text-[10px] text-primary/80">{progress.message}</p>
+                                <p className="mt-0.5 text-[10px] text-primary/80">
+                                  {progress.message}
+                                </p>
                               )}
                             </div>
 
@@ -548,7 +646,10 @@ export function VoiceDubbingPanel({
                             <div className="flex shrink-0 items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                               {!isGenerated(card) && !isGenerating && (
                                 <button
-                                  onClick={(e) => { e.stopPropagation(); handleSingleGenerate(card); }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleSingleGenerate(card);
+                                  }}
                                   className="rounded p-1.5 hover:bg-primary/10 text-primary transition-colors"
                                   title="AI 生成"
                                 >
@@ -557,19 +658,26 @@ export function VoiceDubbingPanel({
                               )}
                               {!isGenerated(card) && !isGenerating && (
                                 <button
-                                  onClick={(e) => { e.stopPropagation(); handleImportFill(card); }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleImportFill(card);
+                                  }}
                                   disabled={importingId === card.id}
                                   className="rounded p-1.5 hover:bg-surface-container-high transition-colors"
                                   title="导入音频"
                                 >
-                                  {importingId === card.id
-                                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                    : <Upload className="h-3.5 w-3.5" />
-                                  }
+                                  {importingId === card.id ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  ) : (
+                                    <Upload className="h-3.5 w-3.5" />
+                                  )}
                                 </button>
                               )}
                               <button
-                                onClick={(e) => { e.stopPropagation(); handleDelete(card); }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDelete(card);
+                                }}
                                 className="rounded p-1.5 hover:bg-error/10 text-muted-foreground hover:text-error transition-colors"
                                 title="删除"
                               >
@@ -623,7 +731,9 @@ export function VoiceDubbingPanel({
                         className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
                       >
                         {configuredModels.map((model) => (
-                          <option key={model} value={model}>{model}</option>
+                          <option key={model} value={model}>
+                            {model}
+                          </option>
                         ))}
                       </select>
                     ) : (
@@ -668,7 +778,11 @@ export function VoiceDubbingPanel({
               <button
                 type="button"
                 onClick={handleBatchGenerate}
-                disabled={Boolean(batchConfigError) || !effectiveBatchModel || selectedPendingCards.length === 0}
+                disabled={
+                  Boolean(batchConfigError) ||
+                  !effectiveBatchModel ||
+                  selectedPendingCards.length === 0
+                }
                 className="inline-flex min-w-24 items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-on-primary hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Wand2 className="h-4 w-4" />

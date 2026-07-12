@@ -23,8 +23,7 @@ export type EditorPatch =
     };
 
 export type EditorResponse =
-  | { type: 'patches'; patches: EditorPatch[] }
-  | { type: 'chat'; message: string };
+  { type: 'patches'; patches: EditorPatch[] } | { type: 'chat'; message: string };
 
 const scriptCommands = new Set([
   'changeBg',
@@ -50,7 +49,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function parseJsonCandidate(raw: string): unknown {
   const fenceMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
   const candidate = fenceMatch ? fenceMatch[1] : raw.trim();
-  const cleaned = candidate.trim().replace(/^\uFEFF/, '').replace(/,\s*([}\]])/g, '$1');
+  const cleaned = candidate
+    .trim()
+    .replace(/^\uFEFF/, '')
+    .replace(/,\s*([}\]])/g, '$1');
   return JSON.parse(cleaned);
 }
 
@@ -64,13 +66,25 @@ export function isEditorPatch(value: unknown): value is EditorPatch {
   if (typeof value.file !== 'string' || value.file.trim().length === 0) return false;
   if (value.anchorText !== undefined && typeof value.anchorText !== 'string') return false;
   if (value.type === 'insert') {
-    return (value.afterLine === 'end' || isPositiveLine(value.afterLine)) && typeof value.text === 'string';
+    return (
+      (value.afterLine === 'end' || isPositiveLine(value.afterLine)) &&
+      typeof value.text === 'string'
+    );
   }
   if (value.type === 'delete') {
-    return isPositiveLine(value.startLine) && isPositiveLine(value.endLine) && value.startLine <= value.endLine;
+    return (
+      isPositiveLine(value.startLine) &&
+      isPositiveLine(value.endLine) &&
+      value.startLine <= value.endLine
+    );
   }
   if (value.type === 'replace') {
-    return isPositiveLine(value.startLine) && isPositiveLine(value.endLine) && value.startLine <= value.endLine && typeof value.text === 'string';
+    return (
+      isPositiveLine(value.startLine) &&
+      isPositiveLine(value.endLine) &&
+      value.startLine <= value.endLine &&
+      typeof value.text === 'string'
+    );
   }
   return false;
 }
@@ -100,11 +114,13 @@ export function splitPatchText(text: string): string[] {
 }
 
 export function normalizePatchText(text: string): string {
-  return splitPatchText(text).map((line) => {
-    const trimmed = line.trimEnd();
-    if (!trimmed || trimmed.startsWith(';') || trimmed.endsWith(';')) return trimmed;
-    return trimmed + ';';
-  }).join('\n');
+  return splitPatchText(text)
+    .map((line) => {
+      const trimmed = line.trimEnd();
+      if (!trimmed || trimmed.startsWith(';') || trimmed.endsWith(';')) return trimmed;
+      return trimmed + ';';
+    })
+    .join('\n');
 }
 
 export function validatePatchText(text: string): string[] {
@@ -135,16 +151,26 @@ export function validatePatchText(text: string): string[] {
 }
 
 export function summarizePatch(patch: EditorPatch): string {
-  if (patch.type === 'insert') return patch.afterLine === 'end' ? `在 ${patch.file} 末尾插入内容` : `在 ${patch.file} 第 ${patch.afterLine} 行后插入内容`;
-  if (patch.type === 'delete') return patch.startLine === patch.endLine ? `删除 ${patch.file} 第 ${patch.startLine} 行` : `删除 ${patch.file} 第 ${patch.startLine}-${patch.endLine} 行`;
-  return patch.startLine === patch.endLine ? `替换 ${patch.file} 第 ${patch.startLine} 行` : `替换 ${patch.file} 第 ${patch.startLine}-${patch.endLine} 行`;
+  if (patch.type === 'insert')
+    return patch.afterLine === 'end'
+      ? `在 ${patch.file} 末尾插入内容`
+      : `在 ${patch.file} 第 ${patch.afterLine} 行后插入内容`;
+  if (patch.type === 'delete')
+    return patch.startLine === patch.endLine
+      ? `删除 ${patch.file} 第 ${patch.startLine} 行`
+      : `删除 ${patch.file} 第 ${patch.startLine}-${patch.endLine} 行`;
+  return patch.startLine === patch.endLine
+    ? `替换 ${patch.file} 第 ${patch.startLine} 行`
+    : `替换 ${patch.file} 第 ${patch.startLine}-${patch.endLine} 行`;
 }
 
 export function summarizePatches(patches: EditorPatch[]): string {
   return patches.map(summarizePatch).join(' · ');
 }
 
-export function extractPatchAssetRefs(text: string): Array<{ command: string; file: string; expectedCategory: string }> {
+export function extractPatchAssetRefs(
+  text: string,
+): Array<{ command: string; file: string; expectedCategory: string }> {
   const categoryByCommand: Record<string, string> = {
     changeBg: 'background',
     changeFigure: 'figure',
@@ -153,7 +179,11 @@ export function extractPatchAssetRefs(text: string): Array<{ command: string; fi
     playEffect: 'vocal',
     playVideo: 'video',
   };
-  const refs: Array<{ command: string; file: string; expectedCategory: string }> = [];
+  const refs: Array<{
+    command: string;
+    file: string;
+    expectedCategory: string;
+  }> = [];
   for (const line of splitPatchText(text)) {
     const match = line.trim().match(/^([A-Za-z][A-Za-z0-9_]*):([^;\s]+)/);
     if (!match) continue;

@@ -110,18 +110,20 @@ function defaultProgress(status: StepStatus): number | undefined {
 }
 
 function StepNodeComponent({ data, selected = false, isConnectable = true }: StepNodeProps) {
-  const state = data.status === 'succeeded' && data.downgraded
-    ? { ...STATUS.awaitingInput, label: '已降级', icon: CircleAlert }
-    : STATUS[data.status];
+  const state =
+    data.status === 'succeeded' && data.downgraded
+      ? { ...STATUS.awaitingInput, label: '已降级', icon: CircleAlert }
+      : STATUS[data.status];
   const StatusIcon = state.icon;
   const isSelected = selected || data.selected;
   const attempt = Math.max(0, Math.floor(data.attempt ?? 0));
   const explicitProgress = Number.isFinite(data.progress) ? data.progress : undefined;
-  const progress = explicitProgress == null
-    ? defaultProgress(data.status)
-    : Math.min(100, Math.max(0, explicitProgress));
+  const progress =
+    explicitProgress == null
+      ? defaultProgress(data.status)
+      : Math.min(100, Math.max(0, explicitProgress));
   const progressWidth = progress == null ? '42%' : `${progress}%`;
-  const kindLabel = data.id === 'assetQueue' ? '资产生产' : KIND_LABEL[data.kind] ?? data.kind;
+  const kindLabel = data.id === 'assetQueue' ? '资产生产' : (KIND_LABEL[data.kind] ?? data.kind);
   const cost = Number.isFinite(data.cost) ? Math.max(0, data.cost ?? 0) : null;
 
   return (
@@ -147,7 +149,10 @@ function StepNodeComponent({ data, selected = false, isConnectable = true }: Ste
         title="输入连接点"
       />
 
-      <span className={cn('absolute inset-y-3 left-0 w-1 rounded-r-sm', state.markerClass)} aria-hidden="true" />
+      <span
+        className={cn('absolute inset-y-3 left-0 w-1 rounded-r-sm', state.markerClass)}
+        aria-hidden="true"
+      />
 
       <div className="flex h-full min-w-0 flex-col px-4 pb-3 pt-3.5">
         <div className="flex min-w-0 items-start justify-between gap-3">
@@ -155,9 +160,16 @@ function StepNodeComponent({ data, selected = false, isConnectable = true }: Ste
             <p className="truncate font-mono-family text-[10px] font-semibold text-muted-foreground">
               {kindLabel}
             </p>
-            <p className="mt-1 truncate text-sm font-semibold" title={data.id}>{data.id}</p>
+            <p className="mt-1 truncate text-sm font-semibold" title={data.id}>
+              {data.id}
+            </p>
           </div>
-          <span className={cn('flex shrink-0 items-center gap-1 border px-2 py-1 text-[10px] font-medium', state.badgeClass)}>
+          <span
+            className={cn(
+              'flex shrink-0 items-center gap-1 border px-2 py-1 text-[10px] font-medium',
+              state.badgeClass,
+            )}
+          >
             <StatusIcon
               className={cn('size-3', data.status === 'running' && 'animate-spin')}
               aria-hidden="true"
@@ -166,7 +178,10 @@ function StepNodeComponent({ data, selected = false, isConnectable = true }: Ste
           </span>
         </div>
 
-        <p className="mt-2 line-clamp-2 min-h-8 text-[11px] leading-4 text-muted-foreground" title={data.summary}>
+        <p
+          className="mt-2 line-clamp-2 min-h-8 text-[11px] leading-4 text-muted-foreground"
+          title={data.summary}
+        >
           {data.summary || '等待步骤输入'}
         </p>
 
@@ -175,7 +190,11 @@ function StepNodeComponent({ data, selected = false, isConnectable = true }: Ste
             <span>{attempt ? `尝试 ${attempt}` : '未尝试'}</span>
             <span>
               {cost == null ? '' : `$${cost.toFixed(4)} · `}
-              {progress == null ? (data.status === 'running' ? '进行中' : '未计量') : `${Math.round(progress)}%`}
+              {progress == null
+                ? data.status === 'running'
+                  ? '进行中'
+                  : '未计量'
+                : `${Math.round(progress)}%`}
             </span>
           </div>
           <div

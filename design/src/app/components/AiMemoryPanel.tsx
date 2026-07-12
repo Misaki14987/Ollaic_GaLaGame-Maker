@@ -39,7 +39,12 @@ export function AiMemoryPanel({ memory, disabled = false, onSave }: AiMemoryPane
         className="flex w-full items-center justify-between px-3 py-2 text-left text-xs text-muted-foreground hover:bg-secondary/40"
       >
         <span>项目记忆</span>
-        {isDirty && <span className="h-1.5 w-1.5 rounded-full bg-destructive" aria-label="有未保存的项目记忆" />}
+        {isDirty && (
+          <span
+            className="h-1.5 w-1.5 rounded-full bg-destructive"
+            aria-label="有未保存的项目记忆"
+          />
+        )}
       </button>
       {open && (
         <div className="space-y-2 px-3 pb-3">
@@ -66,7 +71,9 @@ export function AiMemoryPanel({ memory, disabled = false, onSave }: AiMemoryPane
           />
           <button
             type="button"
-            onClick={() => { void save(); }}
+            onClick={() => {
+              void save();
+            }}
             disabled={disabled || saving}
             className={`w-full rounded-md px-3 py-2 text-xs hover:bg-secondary/70 disabled:opacity-40 ${
               isDirty ? 'bg-primary text-primary-foreground hover:opacity-90' : 'bg-secondary'

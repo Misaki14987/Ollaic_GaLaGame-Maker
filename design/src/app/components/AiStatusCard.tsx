@@ -30,25 +30,44 @@ const categoryLabels: Record<string, string> = {
   video: '视频',
 };
 
-export function MissingAssetCard({ issues, onUseFallback, onOpenAssets, onRetryPrompt }: MissingAssetCardProps) {
+export function MissingAssetCard({
+  issues,
+  onUseFallback,
+  onOpenAssets,
+  onRetryPrompt,
+}: MissingAssetCardProps) {
   return (
     <div className="rounded-lg border border-primary/30 bg-primary/10 p-3 text-xs">
       <div className="font-medium text-foreground">发现缺失素材</div>
       <div className="mt-2 space-y-1 text-muted-foreground">
         {issues.map((issue) => (
           <div key={`${issue.command}-${issue.file}`}>
-            缺少{categoryLabels[issue.expectedCategory] ?? issue.expectedCategory}素材「{issue.file}」（命令：{issue.command}）
+            缺少
+            {categoryLabels[issue.expectedCategory] ?? issue.expectedCategory}
+            素材「{issue.file}」（命令：{issue.command}）
           </div>
         ))}
       </div>
       <div className="mt-3 space-y-2">
-        <button type="button" onClick={onUseFallback} className="w-full rounded-md bg-primary px-3 py-2 text-primary-foreground">
+        <button
+          type="button"
+          onClick={onUseFallback}
+          className="w-full rounded-md bg-primary px-3 py-2 text-primary-foreground"
+        >
           暂用默认素材继续
         </button>
-        <button type="button" onClick={onOpenAssets} className="w-full rounded-md bg-secondary px-3 py-2 hover:bg-secondary/70">
+        <button
+          type="button"
+          onClick={onOpenAssets}
+          className="w-full rounded-md bg-secondary px-3 py-2 hover:bg-secondary/70"
+        >
           去素材库补充
         </button>
-        <button type="button" onClick={onRetryPrompt} className="w-full rounded-md border border-border bg-background/60 px-3 py-2 hover:bg-secondary/70">
+        <button
+          type="button"
+          onClick={onRetryPrompt}
+          className="w-full rounded-md border border-border bg-background/60 px-3 py-2 hover:bg-secondary/70"
+        >
           重新描述需求
         </button>
       </div>
@@ -64,13 +83,25 @@ export function ConflictCard({ onKeepManual, onApplyAi, onRegenerate }: Conflict
         你在 AI 方案待确认期间手动修改了脚本。当前有两份内容：AI 方案与手动修改。
       </p>
       <div className="mt-3 space-y-2">
-        <button type="button" onClick={onKeepManual} className="w-full rounded-md bg-secondary px-3 py-2 hover:bg-secondary/70">
+        <button
+          type="button"
+          onClick={onKeepManual}
+          className="w-full rounded-md bg-secondary px-3 py-2 hover:bg-secondary/70"
+        >
           丢弃 AI 方案，保留手动修改
         </button>
-        <button type="button" onClick={onApplyAi} className="w-full rounded-md bg-primary px-3 py-2 text-primary-foreground">
+        <button
+          type="button"
+          onClick={onApplyAi}
+          className="w-full rounded-md bg-primary px-3 py-2 text-primary-foreground"
+        >
           丢弃手动修改，应用 AI 方案
         </button>
-        <button type="button" onClick={onRegenerate} className="w-full rounded-md border border-border bg-background/60 px-3 py-2 hover:bg-secondary/70">
+        <button
+          type="button"
+          onClick={onRegenerate}
+          className="w-full rounded-md border border-border bg-background/60 px-3 py-2 hover:bg-secondary/70"
+        >
           重新生成（基于你的最新内容）
         </button>
       </div>
@@ -78,7 +109,14 @@ export function ConflictCard({ onKeepManual, onApplyAi, onRegenerate }: Conflict
   );
 }
 
-export function ErrorCard({ message, canRetry, cooldown, showSettings = true, onRetry, onOpenSettings }: ErrorCardProps) {
+export function ErrorCard({
+  message,
+  canRetry,
+  cooldown,
+  showSettings = true,
+  onRetry,
+  onOpenSettings,
+}: ErrorCardProps) {
   return (
     <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
       <div className="whitespace-pre-wrap">{message}</div>

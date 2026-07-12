@@ -71,12 +71,26 @@ type PersistOptions = {
   keepSelection?: boolean;
 };
 
-const inputClass = 'w-full px-2.5 py-1.5 bg-input-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/50 text-xs';
-const labelClass = 'block text-[10px] uppercase tracking-wider text-muted-foreground mb-1 font-mono-family';
+const inputClass =
+  'w-full px-2.5 py-1.5 bg-input-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/50 text-xs';
+const labelClass =
+  'block text-[10px] uppercase tracking-wider text-muted-foreground mb-1 font-mono-family';
 const spriteSuggestions = [
-  { pose: '日常站姿', emotion: '微笑', prompt: 'standing pose, gentle smile, relaxed hands' },
-  { pose: '对话半身', emotion: '认真', prompt: 'upper body, serious expression, looking at viewer' },
-  { pose: '惊讶反应', emotion: '惊讶', prompt: 'surprised expression, slightly opened mouth' },
+  {
+    pose: '日常站姿',
+    emotion: '微笑',
+    prompt: 'standing pose, gentle smile, relaxed hands',
+  },
+  {
+    pose: '对话半身',
+    emotion: '认真',
+    prompt: 'upper body, serious expression, looking at viewer',
+  },
+  {
+    pose: '惊讶反应',
+    emotion: '惊讶',
+    prompt: 'surprised expression, slightly opened mouth',
+  },
   { pose: '剧情低落', emotion: '悲伤', prompt: 'sad expression, lowered eyes' },
 ];
 const commonEmotions = ['默认', '微笑', '悲伤', '惊讶', '愤怒', '害羞', '思考', '严肃'];
@@ -101,9 +115,7 @@ interface SpriteUsage extends AssetUsage {
   assetName: string;
 }
 
-type SpriteGenerationTarget =
-  | { kind: 'reference' }
-  | { kind: 'variant'; index: number };
+type SpriteGenerationTarget = { kind: 'reference' } | { kind: 'variant'; index: number };
 
 type PendingSpriteGeneration = {
   emotion: string;
@@ -112,12 +124,14 @@ type PendingSpriteGeneration = {
 };
 
 function parseConfiguredModels(value: string): string[] {
-  return Array.from(new Set(
-    value
-      .split(/[\n,，]/)
-      .map((item) => item.trim())
-      .filter(Boolean),
-  ));
+  return Array.from(
+    new Set(
+      value
+        .split(/[\n,，]/)
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  );
 }
 
 function sanitizeFilenamePart(value: string, fallback: string): string {
@@ -152,11 +166,15 @@ function buildSpritePrompt(
 ): string {
   return [
     'visual novel character sprite, full body, plain white background, clean anime game asset, consistent character design',
-    isReference ? 'main reference sprite, neutral readable pose, front-facing character design sheet quality' : '',
+    isReference
+      ? 'main reference sprite, neutral readable pose, front-facing character design sheet quality'
+      : '',
     instruction ? `本次生成提示词：${instruction}` : '',
     sprite.emotion ? `立绘形态/情绪：${sprite.emotion}` : '',
     'the background must be plain white or very light gray with no gradients shadows or patterns, avoid background scene, avoid text, avoid watermark, avoid extra characters',
-  ].filter(Boolean).join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 // 立绘按角色存放在 game/figure/<角色ID>/ 子目录；sprite.file 存子目录限定路径
@@ -208,19 +226,38 @@ export function CharacterPanel({
   const [usageOpen, setUsageOpen] = useState(false);
   const [figureLibraryOpen, setFigureLibraryOpen] = useState(false);
   const [spriteGeneratingKey, setSpriteGeneratingKey] = useState<string | null>(null);
-  const [pendingSpriteGeneration, setPendingSpriteGeneration] = useState<PendingSpriteGeneration | null>(null);
+  const [pendingSpriteGeneration, setPendingSpriteGeneration] =
+    useState<PendingSpriteGeneration | null>(null);
   // 当前展开提示词编辑框的变体索引；null 表示全部折叠为摘要行。
   const [expandedPromptIndex, setExpandedPromptIndex] = useState<number | null>(null);
   const savingRef = useRef(false);
 
   const emotionColor = (emotion: string): string => {
     const key = emotion.toLowerCase();
-    if (key.includes('微笑') || key.includes('高兴') || key.includes('开心') || key.includes('笑') || key === 'happy' || key === 'smile') return 'var(--color-emotion-happy)';
-    if (key.includes('悲伤') || key.includes('低落') || key.includes('哭') || key === 'sad' || key === 'cry') return 'var(--color-emotion-sad)';
-    if (key.includes('愤怒') || key.includes('生气') || key === 'angry') return 'var(--color-emotion-angry)';
+    if (
+      key.includes('微笑') ||
+      key.includes('高兴') ||
+      key.includes('开心') ||
+      key.includes('笑') ||
+      key === 'happy' ||
+      key === 'smile'
+    )
+      return 'var(--color-emotion-happy)';
+    if (
+      key.includes('悲伤') ||
+      key.includes('低落') ||
+      key.includes('哭') ||
+      key === 'sad' ||
+      key === 'cry'
+    )
+      return 'var(--color-emotion-sad)';
+    if (key.includes('愤怒') || key.includes('生气') || key === 'angry')
+      return 'var(--color-emotion-angry)';
     if (key.includes('惊讶') || key === 'surprised') return 'var(--color-emotion-surprised)';
-    if (key.includes('害羞') || key.includes('羞') || key === 'shy') return 'var(--color-emotion-shy)';
-    if (key.includes('思考') || key.includes('认真') || key.includes('严肃') || key === 'serious') return 'var(--color-emotion-serious)';
+    if (key.includes('害羞') || key.includes('羞') || key === 'shy')
+      return 'var(--color-emotion-shy)';
+    if (key.includes('思考') || key.includes('认真') || key.includes('严肃') || key === 'serious')
+      return 'var(--color-emotion-serious)';
     if (key.includes('默认') || key === 'default') return 'var(--color-emotion-default)';
     return 'var(--color-emotion-happy)';
   };
@@ -270,7 +307,9 @@ export function CharacterPanel({
         if (!cancelled) setFigureAssetsLoading(false);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [projectPath, selectedId, figureLibraryRefreshToken]);
 
   // 切换角色时重置本次选用的参考图。
@@ -287,8 +326,9 @@ export function CharacterPanel({
     const text = query.trim().toLowerCase();
     if (!text) return characters;
     return characters.filter((c) =>
-      [c.name, c.description, c.personality, c.stance, ...c.aliases, ...c.keywords]
-        .some((part) => part?.toLowerCase().includes(text)),
+      [c.name, c.description, c.personality, c.stance, ...c.aliases, ...c.keywords].some((part) =>
+        part?.toLowerCase().includes(text),
+      ),
     );
   }, [characters, query]);
 
@@ -300,40 +340,49 @@ export function CharacterPanel({
     setCharacters((prev) => patchCharacterList(prev, id, partial));
   }, []);
 
-  const persistCharacter = useCallback(async (ch: Character, options: PersistOptions = {}) => {
-    if (!ch.name.trim() || savingRef.current) return null;
-    const { showSavedBadge = true, keepSelection = false } = options;
-    savingRef.current = true;
-    setSavingId(ch.id);
-    setError(null);
-    try {
-      const saved = ch.id.startsWith('tmp_')
-        ? await createCharacter(projectPath, ch)
-        : await updateCharacter(projectPath, ch);
-      setCharacters((prev) => prev.map((c) => (c.id === ch.id ? saved : c)));
-      // 切换角色场景下不要把选中拉回当前角色，否则会和切换目标打架导致卡住。
-      if (!keepSelection) setSelectedId(saved.id);
-      if (showSavedBadge) {
-        setRecentlySavedId(saved.id);
-        setTimeout(() => setRecentlySavedId(null), 1400);
+  const persistCharacter = useCallback(
+    async (ch: Character, options: PersistOptions = {}) => {
+      if (!ch.name.trim() || savingRef.current) return null;
+      const { showSavedBadge = true, keepSelection = false } = options;
+      savingRef.current = true;
+      setSavingId(ch.id);
+      setError(null);
+      try {
+        const saved = ch.id.startsWith('tmp_')
+          ? await createCharacter(projectPath, ch)
+          : await updateCharacter(projectPath, ch);
+        setCharacters((prev) => prev.map((c) => (c.id === ch.id ? saved : c)));
+        // 切换角色场景下不要把选中拉回当前角色，否则会和切换目标打架导致卡住。
+        if (!keepSelection) setSelectedId(saved.id);
+        if (showSavedBadge) {
+          setRecentlySavedId(saved.id);
+          setTimeout(() => setRecentlySavedId(null), 1400);
+        }
+        return saved;
+      } catch (e) {
+        setError(String(e));
+        return null;
+      } finally {
+        savingRef.current = false;
+        setSavingId(null);
       }
-      return saved;
-    } catch (e) {
-      setError(String(e));
-      return null;
-    } finally {
-      savingRef.current = false;
-      setSavingId(null);
-    }
-  }, [projectPath]);
+    },
+    [projectPath],
+  );
 
-  const handleSave = useCallback(async (ch: Character) => {
-    await persistCharacter(ch);
-  }, [persistCharacter]);
+  const handleSave = useCallback(
+    async (ch: Character) => {
+      await persistCharacter(ch);
+    },
+    [persistCharacter],
+  );
 
   const handleCreate = useCallback(async () => {
     // 立即落盘，避免切换 Tab 后 CharacterPanel 卸载导致未保存的草稿丢失。
-    const draft = { ...createDraftCharacter(characters.length), name: '新角色' };
+    const draft = {
+      ...createDraftCharacter(characters.length),
+      name: '新角色',
+    };
     setCharacters((prev) => [...prev, draft]);
     setSelectedId(draft.id);
     setMode('info');
@@ -344,16 +393,19 @@ export function CharacterPanel({
     }
   }, [characters.length, persistCharacter]);
 
-  const ensurePersistedCharacter = useCallback(async (charId: string, actionLabel: string) => {
-    const current = characters.find((c) => c.id === charId);
-    if (!current) return null;
-    if (!current.id.startsWith('tmp_')) return current;
-    if (!current.name.trim()) {
-      setError(`请先填写人物姓名，再${actionLabel}`);
-      return null;
-    }
-    return persistCharacter(current, { showSavedBadge: false });
-  }, [characters, persistCharacter]);
+  const ensurePersistedCharacter = useCallback(
+    async (charId: string, actionLabel: string) => {
+      const current = characters.find((c) => c.id === charId);
+      if (!current) return null;
+      if (!current.id.startsWith('tmp_')) return current;
+      if (!current.name.trim()) {
+        setError(`请先填写人物姓名，再${actionLabel}`);
+        return null;
+      }
+      return persistCharacter(current, { showSavedBadge: false });
+    },
+    [characters, persistCharacter],
+  );
 
   // 点击删除：先弹应用内确认框，不直接删。
   const handleDelete = useCallback((id: string) => {
@@ -361,26 +413,32 @@ export function CharacterPanel({
   }, []);
 
   // 确认后真正删除。
-  const confirmDelete = useCallback(async (id: string) => {
-    setPendingDeleteId(null);
-    setError(null);
-    try {
-      if (!id.startsWith('tmp_')) {
-        await deleteCharacter(projectPath, id);
+  const confirmDelete = useCallback(
+    async (id: string) => {
+      setPendingDeleteId(null);
+      setError(null);
+      try {
+        if (!id.startsWith('tmp_')) {
+          await deleteCharacter(projectPath, id);
+        }
+        setCharacters((prev) => {
+          const next = prev.filter((c) => c.id !== id);
+          if (selectedId === id) setSelectedId(next[0]?.id ?? null);
+          return next;
+        });
+      } catch (e) {
+        setError(String(e));
       }
-      setCharacters((prev) => {
-        const next = prev.filter((c) => c.id !== id);
-        if (selectedId === id) setSelectedId(next[0]?.id ?? null);
-        return next;
-      });
-    } catch (e) {
-      setError(String(e));
-    }
-  }, [projectPath, selectedId]);
+    },
+    [projectPath, selectedId],
+  );
 
-  const updateSprite = useCallback((charId: string, index: number, field: keyof CharacterSprite, value: string) => {
-    setCharacters((prev) => updateCharacterSprite(prev, charId, index, field, value));
-  }, []);
+  const updateSprite = useCallback(
+    (charId: string, index: number, field: keyof CharacterSprite, value: string) => {
+      setCharacters((prev) => updateCharacterSprite(prev, charId, index, field, value));
+    },
+    [],
+  );
 
   const addSprite = useCallback((charId: string, emotion = '', prompt = '') => {
     setCharacters((prev) => appendCharacterSprite(prev, charId, emotion, prompt));
@@ -390,79 +448,102 @@ export function CharacterPanel({
     setCharacters((prev) => appendEmotionPreset(prev, charId, emotion, prompt));
   }, []);
 
-  const setReferenceFile = useCallback(async (charId: string, filename: string) => {
-    const current = characters.find((c) => c.id === charId);
-    if (!current) return;
-    const base = current.id.startsWith('tmp_')
-      ? await ensurePersistedCharacter(charId, '设置主体素材')
-      : current;
-    if (!base) return;
+  const setReferenceFile = useCallback(
+    async (charId: string, filename: string) => {
+      const current = characters.find((c) => c.id === charId);
+      if (!current) return;
+      const base = current.id.startsWith('tmp_')
+        ? await ensurePersistedCharacter(charId, '设置主体素材')
+        : current;
+      if (!base) return;
 
-    // 存子目录限定路径 <角色ID>/<文件名>，空值表示清除主体。
-    const qualified = qualifyFigureFile(base.id, filename);
-    await persistCharacter(withReferenceSprite(base, qualified), { showSavedBadge: false });
-  }, [characters, ensurePersistedCharacter, persistCharacter]);
+      // 存子目录限定路径 <角色ID>/<文件名>，空值表示清除主体。
+      const qualified = qualifyFigureFile(base.id, filename);
+      await persistCharacter(withReferenceSprite(base, qualified), {
+        showSavedBadge: false,
+      });
+    },
+    [characters, ensurePersistedCharacter, persistCharacter],
+  );
 
   const setReferencePrompt = useCallback((charId: string, prompt: string) => {
-    setCharacters((prev) => prev.map((character) => {
-      if (character.id !== charId) return character;
-      const index = referenceSpriteIndex(character);
-      if (index >= 0) {
-        const sprites = character.sprites.map((sprite, spriteIndex) =>
-          spriteIndex === index ? { ...sprite, emotion: '主体参考', prompt } : sprite,
-        );
-        return { ...character, sprites };
-      }
-      return {
-        ...character,
-        sprites: [{ emotion: '主体参考', file: '', prompt }, ...character.sprites],
-      };
-    }));
+    setCharacters((prev) =>
+      prev.map((character) => {
+        if (character.id !== charId) return character;
+        const index = referenceSpriteIndex(character);
+        if (index >= 0) {
+          const sprites = character.sprites.map((sprite, spriteIndex) =>
+            spriteIndex === index ? { ...sprite, emotion: '主体参考', prompt } : sprite,
+          );
+          return { ...character, sprites };
+        }
+        return {
+          ...character,
+          sprites: [{ emotion: '主体参考', file: '', prompt }, ...character.sprites],
+        };
+      }),
+    );
   }, []);
 
   const removeSprite = useCallback((charId: string, index: number) => {
     setCharacters((prev) => removeCharacterSprite(prev, charId, index));
   }, []);
 
-  const uploadReferenceImage = useCallback(async (charId: string) => {
-    const current = characters.find((c) => c.id === charId);
-    if (!current || (current.referenceImages?.length ?? 0) >= 5) return;
-    const path = await openDialog({
-      title: '上传主体参考图',
-      filters: [{ name: '图片文件', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
-    });
-    if (!path) return;
+  const uploadReferenceImage = useCallback(
+    async (charId: string) => {
+      const current = characters.find((c) => c.id === charId);
+      if (!current || (current.referenceImages?.length ?? 0) >= 5) return;
+      const path = await openDialog({
+        title: '上传主体参考图',
+        filters: [{ name: '图片文件', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+      });
+      if (!path) return;
 
-    setReferenceUploading(true);
-    setError(null);
-    try {
-      const persisted = await ensurePersistedCharacter(charId, '上传主体参考图');
+      setReferenceUploading(true);
+      setError(null);
+      try {
+        const persisted = await ensurePersistedCharacter(charId, '上传主体参考图');
+        if (!persisted) return;
+        const info = await importAsset(
+          Array.isArray(path) ? path[0] : path,
+          projectPath,
+          `reference/${persisted.id}`,
+        );
+        await persistCharacter(
+          {
+            ...persisted,
+            referenceImages: [...(persisted.referenceImages ?? []), info.name].slice(0, 5),
+          },
+          { showSavedBadge: false },
+        );
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setReferenceUploading(false);
+      }
+    },
+    [characters, ensurePersistedCharacter, projectPath, persistCharacter],
+  );
+
+  const removeReferenceImage = useCallback(
+    async (charId: string, filename: string) => {
+      const persisted = await ensurePersistedCharacter(charId, '移除主体参考图');
       if (!persisted) return;
-      const info = await importAsset(Array.isArray(path) ? path[0] : path, projectPath, `reference/${persisted.id}`);
-      await persistCharacter({
-        ...persisted,
-        referenceImages: [...(persisted.referenceImages ?? []), info.name].slice(0, 5),
-      }, { showSavedBadge: false });
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setReferenceUploading(false);
-    }
-  }, [characters, ensurePersistedCharacter, projectPath, persistCharacter]);
-
-  const removeReferenceImage = useCallback(async (charId: string, filename: string) => {
-    const persisted = await ensurePersistedCharacter(charId, '移除主体参考图');
-    if (!persisted) return;
-    try {
-      await deleteAsset(projectPath, `reference/${persisted.id}`, filename);
-    } catch {
-      // The reference may already have been removed from disk; still remove the character mapping.
-    }
-    await persistCharacter({
-      ...persisted,
-      referenceImages: (persisted.referenceImages ?? []).filter((name) => name !== filename),
-    }, { showSavedBadge: false });
-  }, [ensurePersistedCharacter, persistCharacter, projectPath]);
+      try {
+        await deleteAsset(projectPath, `reference/${persisted.id}`, filename);
+      } catch {
+        // The reference may already have been removed from disk; still remove the character mapping.
+      }
+      await persistCharacter(
+        {
+          ...persisted,
+          referenceImages: (persisted.referenceImages ?? []).filter((name) => name !== filename),
+        },
+        { showSavedBadge: false },
+      );
+    },
+    [ensurePersistedCharacter, persistCharacter, projectPath],
+  );
 
   const containerClass = embedded
     ? 'h-full flex flex-col overflow-hidden'
@@ -481,7 +562,9 @@ export function CharacterPanel({
       setSpriteUsages([]);
       return;
     }
-    const filenames = Array.from(new Set(selected.sprites.map((sprite) => sprite.file).filter(Boolean)));
+    const filenames = Array.from(
+      new Set(selected.sprites.map((sprite) => sprite.file).filter(Boolean)),
+    );
     if (filenames.length === 0) {
       setSpriteUsages([]);
       return;
@@ -500,13 +583,20 @@ export function CharacterPanel({
         if (!cancelled) setSpriteUsages([]);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [projectPath, selected]);
 
-  const openUsage = useCallback((usage: AssetUsage) => {
-    if (!projectId) return;
-    navigate(`/editor/${projectId}?scene=${encodeURIComponent(usage.sceneFile)}&line=${usage.lineNumber}`);
-  }, [navigate, projectId]);
+  const openUsage = useCallback(
+    (usage: AssetUsage) => {
+      if (!projectId) return;
+      navigate(
+        `/editor/${projectId}?scene=${encodeURIComponent(usage.sceneFile)}&line=${usage.lineNumber}`,
+      );
+    },
+    [navigate, projectId],
+  );
 
   const refreshFigureAssets = useCallback(async () => {
     if (!selectedId) {
@@ -526,24 +616,30 @@ export function CharacterPanel({
   }, [projectPath, selectedId]);
 
   // sprite.file 优先；否则按情绪前缀匹配素材库中最新文件。
-  const findSpriteAssetSrc = useCallback((sprite: CharacterSprite): string | null => {
-    if (!selected) return null;
-    if (sprite.file) {
-      const tail = figureFileTail(sprite.file);
-      const match = figureAssets.find((asset) => figureFileTail(asset.name) === tail);
-      if (match) return convertFileSrc(match.path);
-      return convertFileSrc(`${projectPath}/game/figure/${sprite.file}`);
-    }
-    const prefix = spritePrefix(characterFilenamePart(selected), sprite.emotion);
-    const matches = figureAssets
-      .filter((asset) => figureFileTail(asset.name).startsWith(prefix))
-      .sort((a, b) => figureFileTail(b.name).localeCompare(figureFileTail(a.name)));
-    return matches[0] ? convertFileSrc(matches[0].path) : null;
-  }, [figureAssets, projectPath, selected]);
+  const findSpriteAssetSrc = useCallback(
+    (sprite: CharacterSprite): string | null => {
+      if (!selected) return null;
+      if (sprite.file) {
+        const tail = figureFileTail(sprite.file);
+        const match = figureAssets.find((asset) => figureFileTail(asset.name) === tail);
+        if (match) return convertFileSrc(match.path);
+        return convertFileSrc(`${projectPath}/game/figure/${sprite.file}`);
+      }
+      const prefix = spritePrefix(characterFilenamePart(selected), sprite.emotion);
+      const matches = figureAssets
+        .filter((asset) => figureFileTail(asset.name).startsWith(prefix))
+        .sort((a, b) => figureFileTail(b.name).localeCompare(figureFileTail(a.name)));
+      return matches[0] ? convertFileSrc(matches[0].path) : null;
+    },
+    [figureAssets, projectPath, selected],
+  );
 
-  const hasGeneratedAsset = useCallback((emotion: string): boolean => {
-    return findSpriteAssetSrc({ emotion, file: '' }) !== null;
-  }, [findSpriteAssetSrc]);
+  const hasGeneratedAsset = useCallback(
+    (emotion: string): boolean => {
+      return findSpriteAssetSrc({ emotion, file: '' }) !== null;
+    },
+    [findSpriteAssetSrc],
+  );
 
   const refreshMainCandidates = useCallback(async () => {
     if (!selectedId) {
@@ -559,158 +655,206 @@ export function CharacterPanel({
   }, [projectPath, selectedId]);
 
   // 从主体候选中选定当前主体（file 用 <角色ID>/main/<文件名> 限定路径）。
-  const setMainFromCandidate = useCallback((asset: AssetInfo) => {
-    if (!selectedId) return;
-    void setReferenceFile(selectedId, `${selectedId}/main/${figureFileTail(asset.name)}`);
-  }, [selectedId, setReferenceFile]);
+  const setMainFromCandidate = useCallback(
+    (asset: AssetInfo) => {
+      if (!selectedId) return;
+      void setReferenceFile(selectedId, `${selectedId}/main/${figureFileTail(asset.name)}`);
+    },
+    [selectedId, setReferenceFile],
+  );
 
-  const removeMainCandidate = useCallback(async (asset: AssetInfo) => {
-    if (!selectedId) return;
-    const tail = figureFileTail(asset.name);
-    setMainCandidateDeleting(asset.name);
-    setError(null);
-    try {
-      await deleteAsset(projectPath, `figure/${selectedId}/main`, tail);
-      // 若删除的是当前主体，清空主体引用。
-      const current = characters.find((c) => c.id === selectedId);
-      if (current && referenceSpriteIndex(current) >= 0
-        && figureFileTail(current.sprites[referenceSpriteIndex(current)].file) === tail) {
-        await setReferenceFile(selectedId, '');
-      }
-      await refreshMainCandidates();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setMainCandidateDeleting(null);
-    }
-  }, [characters, projectPath, refreshMainCandidates, selectedId, setReferenceFile]);
-
-  const generateSprite = useCallback(async (
-    emotion: string,
-    target: SpriteGenerationTarget,
-    model: string,
-    instruction: string,
-    sourceCharacter?: Character,
-  ) => {
-    const current = sourceCharacter ?? selected;
-    if (!current) return null;
-    if (!projectPath) {
-      setError('未打开项目，无法保存生成立绘。');
-      return null;
-    }
-
-    const persisted = current.id.startsWith('tmp_')
-      ? await ensurePersistedCharacter(current.id, '生成立绘')
-      : current;
-    if (!persisted) return null;
-
-    const sprite =
-      target.kind === 'reference'
-        ? persisted.sprites[referenceSpriteIndex(persisted)] ?? { emotion: emotion || '主体参考', file: '', prompt: '' }
-        : persisted.sprites[target.index];
-    if (!sprite) {
-      setError('没有找到要生成的立绘形态。');
-      return null;
-    }
-
-    const trimmedInstruction = instruction.trim();
-    if (!trimmedInstruction) {
-      setError('请先填写本次立绘生成提示词，再生成。');
-      return null;
-    }
-
-    const effectiveSprite = {
-      ...sprite,
-      emotion: emotion || sprite.emotion || (target.kind === 'reference' ? '主体参考' : '默认'),
-    };
-    const key = target.kind === 'reference' ? 'reference' : `variant:${target.index}`;
-    setSpriteGeneratingKey(key);
-    setError(null);
-    try {
-      // 主体图生成可带用户选定的参考图；表情变体自动以已确认的主体图作为参考，
-      // 保证各变体与主体设计一致。不支持图生图的供应商（如火山引擎）会静默忽略。
-      let referenceImagePath: string | undefined;
-      if (target.kind === 'reference' && selectedReferenceImage) {
-        referenceImagePath = `${projectPath}/game/reference/${persisted.id}/${selectedReferenceImage}`;
-      } else if (target.kind === 'variant') {
-        const refIdx = referenceSpriteIndex(persisted);
-        const mainFile = refIdx >= 0 ? persisted.sprites[refIdx]?.file : undefined;
-        if (mainFile) {
-          referenceImagePath = `${projectPath}/game/figure/${mainFile}`;
-        }
-      }
-      const media = await aiGenerateImage(
-        buildSpritePrompt(persisted, effectiveSprite, target.kind === 'reference', trimmedInstruction),
-        model,
-        referenceImagePath,
-      );
-      // 抠背景：AI 出图多为白底/纯色底，用本地 ONNX 模型扣成透明 PNG 再入库。
-      // 失败不阻断流程，回退使用原图；成功则把原图保留到 _raw/ 子目录（不污染素材库）。
-      let finalMedia = media;
-      let matted = false;
+  const removeMainCandidate = useCallback(
+    async (asset: AssetInfo) => {
+      if (!selectedId) return;
+      const tail = figureFileTail(asset.name);
+      setMainCandidateDeleting(asset.name);
+      setError(null);
       try {
-        finalMedia = await removeBackground(media.base64Data);
-        matted = true;
-      } catch (e) {
-        console.warn('立绘抠背景失败，使用原图：', e);
-      }
-      const ts = Date.now();
-      const extension = finalMedia.extension?.replace(/^\./, '') || 'png';
-      const characterPart = sanitizeFilenamePart(persisted.name || persisted.id, 'character');
-      const emotionPart = sanitizeFilenamePart(effectiveSprite.emotion || 'sprite', 'sprite');
-      const filename = `${characterPart}_${emotionPart}_${ts}.${extension}`;
-      // 主体候选存 main/ 子目录（与素材库隔离）；表情变体存子目录顶层。
-      const figureCategory = target.kind === 'reference'
-        ? `figure/${persisted.id}/main`
-        : `figure/${persisted.id}`;
-      const asset = await saveGeneratedAsset(projectPath, figureCategory, filename, finalMedia.base64Data);
-      // 抠图成功时，把未抠的原图保留到 _raw/ 子目录（list 不递归，故不进素材库展示），
-      // 便于需要时回溯或换用其他抠图方式。失败为尽力而为，不影响主流程。
-      if (matted) {
-        const rawExtension = media.extension?.replace(/^\./, '') || 'png';
-        const rawFilename = `${characterPart}_${emotionPart}_${ts}_raw.${rawExtension}`;
-        try {
-          await saveGeneratedAsset(projectPath, `${figureCategory}/_raw`, rawFilename, media.base64Data);
-        } catch (e) {
-          console.warn('保存立绘原图失败：', e);
+        await deleteAsset(projectPath, `figure/${selectedId}/main`, tail);
+        // 若删除的是当前主体，清空主体引用。
+        const current = characters.find((c) => c.id === selectedId);
+        if (
+          current &&
+          referenceSpriteIndex(current) >= 0 &&
+          figureFileTail(current.sprites[referenceSpriteIndex(current)].file) === tail
+        ) {
+          await setReferenceFile(selectedId, '');
         }
-      }
-      // 仅主体（reference）需要把限定路径写回 sprite.file；变体图只进素材库不绑定。
-      const qualifiedFile = `${persisted.id}/main/${asset.name}`;
-      const nextCharacter = target.kind === 'reference'
-        ? (() => {
-            const next = withReferenceSprite(persisted, qualifiedFile);
-            const index = referenceSpriteIndex(next);
-            return {
-              ...next,
-              sprites: next.sprites.map((item, itemIndex) =>
-                itemIndex === index ? { ...item, prompt: trimmedInstruction } : item,
-              ),
-            };
-          })()
-        : {
-            ...persisted,
-            sprites: persisted.sprites.map((item, index) =>
-              // 变体生成的图片只进素材库（figure/<角色ID>/），卡片不绑定具体图片，
-              // 脚本从素材库挑图。故 file 置空，仅保留情绪与提示词。
-              index === target.index ? { ...item, emotion: effectiveSprite.emotion, file: '', prompt: trimmedInstruction } : item,
-            ),
-          };
-      const saved = await persistCharacter(nextCharacter, { showSavedBadge: false });
-      if (target.kind === 'reference') {
         await refreshMainCandidates();
-      } else {
-        await refreshFigureAssets();
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setMainCandidateDeleting(null);
       }
-      setMode('sprite');
-      return saved;
-    } catch (e) {
-      setError(String(e));
-      return null;
-    } finally {
-      setSpriteGeneratingKey(null);
-    }
-  }, [ensurePersistedCharacter, persistCharacter, projectPath, refreshFigureAssets, refreshMainCandidates, selected, selectedReferenceImage]);
+    },
+    [characters, projectPath, refreshMainCandidates, selectedId, setReferenceFile],
+  );
+
+  const generateSprite = useCallback(
+    async (
+      emotion: string,
+      target: SpriteGenerationTarget,
+      model: string,
+      instruction: string,
+      sourceCharacter?: Character,
+    ) => {
+      const current = sourceCharacter ?? selected;
+      if (!current) return null;
+      if (!projectPath) {
+        setError('未打开项目，无法保存生成立绘。');
+        return null;
+      }
+
+      const persisted = current.id.startsWith('tmp_')
+        ? await ensurePersistedCharacter(current.id, '生成立绘')
+        : current;
+      if (!persisted) return null;
+
+      const sprite =
+        target.kind === 'reference'
+          ? (persisted.sprites[referenceSpriteIndex(persisted)] ?? {
+              emotion: emotion || '主体参考',
+              file: '',
+              prompt: '',
+            })
+          : persisted.sprites[target.index];
+      if (!sprite) {
+        setError('没有找到要生成的立绘形态。');
+        return null;
+      }
+
+      const trimmedInstruction = instruction.trim();
+      if (!trimmedInstruction) {
+        setError('请先填写本次立绘生成提示词，再生成。');
+        return null;
+      }
+
+      const effectiveSprite = {
+        ...sprite,
+        emotion: emotion || sprite.emotion || (target.kind === 'reference' ? '主体参考' : '默认'),
+      };
+      const key = target.kind === 'reference' ? 'reference' : `variant:${target.index}`;
+      setSpriteGeneratingKey(key);
+      setError(null);
+      try {
+        // 主体图生成可带用户选定的参考图；表情变体自动以已确认的主体图作为参考，
+        // 保证各变体与主体设计一致。不支持图生图的供应商（如火山引擎）会静默忽略。
+        let referenceImagePath: string | undefined;
+        if (target.kind === 'reference' && selectedReferenceImage) {
+          referenceImagePath = `${projectPath}/game/reference/${persisted.id}/${selectedReferenceImage}`;
+        } else if (target.kind === 'variant') {
+          const refIdx = referenceSpriteIndex(persisted);
+          const mainFile = refIdx >= 0 ? persisted.sprites[refIdx]?.file : undefined;
+          if (mainFile) {
+            referenceImagePath = `${projectPath}/game/figure/${mainFile}`;
+          }
+        }
+        const media = await aiGenerateImage(
+          buildSpritePrompt(
+            persisted,
+            effectiveSprite,
+            target.kind === 'reference',
+            trimmedInstruction,
+          ),
+          model,
+          referenceImagePath,
+        );
+        // 抠背景：AI 出图多为白底/纯色底，用本地 ONNX 模型扣成透明 PNG 再入库。
+        // 失败不阻断流程，回退使用原图；成功则把原图保留到 _raw/ 子目录（不污染素材库）。
+        let finalMedia = media;
+        let matted = false;
+        try {
+          finalMedia = await removeBackground(media.base64Data);
+          matted = true;
+        } catch (e) {
+          console.warn('立绘抠背景失败，使用原图：', e);
+        }
+        const ts = Date.now();
+        const extension = finalMedia.extension?.replace(/^\./, '') || 'png';
+        const characterPart = sanitizeFilenamePart(persisted.name || persisted.id, 'character');
+        const emotionPart = sanitizeFilenamePart(effectiveSprite.emotion || 'sprite', 'sprite');
+        const filename = `${characterPart}_${emotionPart}_${ts}.${extension}`;
+        // 主体候选存 main/ 子目录（与素材库隔离）；表情变体存子目录顶层。
+        const figureCategory =
+          target.kind === 'reference' ? `figure/${persisted.id}/main` : `figure/${persisted.id}`;
+        const asset = await saveGeneratedAsset(
+          projectPath,
+          figureCategory,
+          filename,
+          finalMedia.base64Data,
+        );
+        // 抠图成功时，把未抠的原图保留到 _raw/ 子目录（list 不递归，故不进素材库展示），
+        // 便于需要时回溯或换用其他抠图方式。失败为尽力而为，不影响主流程。
+        if (matted) {
+          const rawExtension = media.extension?.replace(/^\./, '') || 'png';
+          const rawFilename = `${characterPart}_${emotionPart}_${ts}_raw.${rawExtension}`;
+          try {
+            await saveGeneratedAsset(
+              projectPath,
+              `${figureCategory}/_raw`,
+              rawFilename,
+              media.base64Data,
+            );
+          } catch (e) {
+            console.warn('保存立绘原图失败：', e);
+          }
+        }
+        // 仅主体（reference）需要把限定路径写回 sprite.file；变体图只进素材库不绑定。
+        const qualifiedFile = `${persisted.id}/main/${asset.name}`;
+        const nextCharacter =
+          target.kind === 'reference'
+            ? (() => {
+                const next = withReferenceSprite(persisted, qualifiedFile);
+                const index = referenceSpriteIndex(next);
+                return {
+                  ...next,
+                  sprites: next.sprites.map((item, itemIndex) =>
+                    itemIndex === index ? { ...item, prompt: trimmedInstruction } : item,
+                  ),
+                };
+              })()
+            : {
+                ...persisted,
+                sprites: persisted.sprites.map((item, index) =>
+                  // 变体生成的图片只进素材库（figure/<角色ID>/），卡片不绑定具体图片，
+                  // 脚本从素材库挑图。故 file 置空，仅保留情绪与提示词。
+                  index === target.index
+                    ? {
+                        ...item,
+                        emotion: effectiveSprite.emotion,
+                        file: '',
+                        prompt: trimmedInstruction,
+                      }
+                    : item,
+                ),
+              };
+        const saved = await persistCharacter(nextCharacter, {
+          showSavedBadge: false,
+        });
+        if (target.kind === 'reference') {
+          await refreshMainCandidates();
+        } else {
+          await refreshFigureAssets();
+        }
+        setMode('sprite');
+        return saved;
+      } catch (e) {
+        setError(String(e));
+        return null;
+      } finally {
+        setSpriteGeneratingKey(null);
+      }
+    },
+    [
+      ensurePersistedCharacter,
+      persistCharacter,
+      projectPath,
+      refreshFigureAssets,
+      refreshMainCandidates,
+      selected,
+      selectedReferenceImage,
+    ],
+  );
 
   const triggerBatchSpriteGeneration = useCallback(() => {
     if (!selected) {
@@ -724,61 +868,81 @@ export function CharacterPanel({
     }
     setMode('sprite');
     setError(null);
-    setPendingSpriteGeneration({ emotion: '批量生成', target: { kind: 'variant', index: -1 }, batch: true });
+    setPendingSpriteGeneration({
+      emotion: '批量生成',
+      target: { kind: 'variant', index: -1 },
+      batch: true,
+    });
   }, [selected, variantSprites]);
 
-  const triggerSingleSpriteGeneration = useCallback((emotion: string, target: SpriteGenerationTarget = { kind: 'reference' }) => {
-    if (!selected) return;
-    setPendingSpriteGeneration({ emotion, target });
-  }, [selected]);
+  const triggerSingleSpriteGeneration = useCallback(
+    (emotion: string, target: SpriteGenerationTarget = { kind: 'reference' }) => {
+      if (!selected) return;
+      setPendingSpriteGeneration({ emotion, target });
+    },
+    [selected],
+  );
 
-  const handleConfirmSpriteGeneration = useCallback(async (model: string) => {
-    if (!selected || !pendingSpriteGeneration) return;
-    if (pendingSpriteGeneration.batch) {
-      let current: Character | null = selected;
-      let generatedCount = 0;
-      for (const { sprite, index } of variantSprites) {
-        if (hasGeneratedAsset(sprite.emotion)) continue;  // 已生成跳过
-        if (!sprite.prompt?.trim()) continue;              // 无提示词跳过
-        current = await generateSprite(
-          sprite.emotion,
-          { kind: 'variant', index },
-          model,
-          sprite.prompt,
-          current ?? undefined,
+  const handleConfirmSpriteGeneration = useCallback(
+    async (model: string) => {
+      if (!selected || !pendingSpriteGeneration) return;
+      if (pendingSpriteGeneration.batch) {
+        let current: Character | null = selected;
+        let generatedCount = 0;
+        for (const { sprite, index } of variantSprites) {
+          if (hasGeneratedAsset(sprite.emotion)) continue; // 已生成跳过
+          if (!sprite.prompt?.trim()) continue; // 无提示词跳过
+          current = await generateSprite(
+            sprite.emotion,
+            { kind: 'variant', index },
+            model,
+            sprite.prompt,
+            current ?? undefined,
+          );
+          if (!current) return;
+          generatedCount += 1;
+        }
+        const skippedNoPrompt = variantSprites.filter(
+          ({ sprite }) => !hasGeneratedAsset(sprite.emotion) && !sprite.prompt?.trim(),
+        ).length;
+        if (generatedCount === 0 && skippedNoPrompt === 0) {
+          setError('所有变体均已生成，如需重做请用单个变体的「重新生成」按钮。');
+        } else if (skippedNoPrompt > 0 && generatedCount === 0) {
+          setError(`${skippedNoPrompt} 个变体缺少提示词已跳过，请填写后重试。`);
+        } else if (skippedNoPrompt > 0) {
+          setError(`已生成 ${generatedCount} 个，${skippedNoPrompt} 个缺少提示词已跳过。`);
+        }
+        setPendingSpriteGeneration(null);
+        return;
+      }
+      const instruction =
+        pendingSpriteGeneration.target.kind === 'reference'
+          ? (referenceSprite?.prompt ?? '')
+          : (selected.sprites[pendingSpriteGeneration.target.index]?.prompt ?? '');
+      if (!instruction.trim()) {
+        throw new Error(
+          pendingSpriteGeneration.target.kind === 'reference'
+            ? '请先填写主体区域的设定图提示词。'
+            : '请先填写该表情变体的提示词。',
         );
-        if (!current) return;
-        generatedCount += 1;
       }
-      const skippedNoPrompt = variantSprites.filter(({ sprite }) =>
-        !hasGeneratedAsset(sprite.emotion) && !sprite.prompt?.trim(),
-      ).length;
-      if (generatedCount === 0 && skippedNoPrompt === 0) {
-        setError('所有变体均已生成，如需重做请用单个变体的「重新生成」按钮。');
-      } else if (skippedNoPrompt > 0 && generatedCount === 0) {
-        setError(`${skippedNoPrompt} 个变体缺少提示词已跳过，请填写后重试。`);
-      } else if (skippedNoPrompt > 0) {
-        setError(`已生成 ${generatedCount} 个，${skippedNoPrompt} 个缺少提示词已跳过。`);
-      }
-      setPendingSpriteGeneration(null);
-      return;
-    }
-    const instruction = pendingSpriteGeneration.target.kind === 'reference'
-      ? referenceSprite?.prompt ?? ''
-      : selected.sprites[pendingSpriteGeneration.target.index]?.prompt ?? '';
-    if (!instruction.trim()) {
-      throw new Error(pendingSpriteGeneration.target.kind === 'reference'
-        ? '请先填写主体区域的设定图提示词。'
-        : '请先填写该表情变体的提示词。');
-    }
-    const saved = await generateSprite(
-      pendingSpriteGeneration.emotion,
-      pendingSpriteGeneration.target,
-      model,
-      instruction,
-    );
-    if (saved) setPendingSpriteGeneration(null);
-  }, [generateSprite, hasGeneratedAsset, pendingSpriteGeneration, referenceSprite, selected, variantSprites]);
+      const saved = await generateSprite(
+        pendingSpriteGeneration.emotion,
+        pendingSpriteGeneration.target,
+        model,
+        instruction,
+      );
+      if (saved) setPendingSpriteGeneration(null);
+    },
+    [
+      generateSprite,
+      hasGeneratedAsset,
+      pendingSpriteGeneration,
+      referenceSprite,
+      selected,
+      variantSprites,
+    ],
+  );
 
   const uploadFigureAsset = useCallback(async () => {
     if (!selectedId) {
@@ -787,7 +951,12 @@ export function CharacterPanel({
     }
     const path = await openDialog({
       title: '上传立绘素材',
-      filters: [{ name: '图片文件', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'] }],
+      filters: [
+        {
+          name: '图片文件',
+          extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'],
+        },
+      ],
     });
     if (!path) return;
 
@@ -803,20 +972,23 @@ export function CharacterPanel({
     }
   }, [projectPath, refreshFigureAssets, selectedId]);
 
-  const removeFigureAsset = useCallback(async (asset: AssetInfo) => {
-    if (!selectedId) return;
-    setFigureAssetDeleting(asset.name);
-    setError(null);
-    try {
-      // asset.name 为子目录内平铺文件名，类别携带角色子目录。
-      await deleteAsset(projectPath, `figure/${selectedId}`, figureFileTail(asset.name));
-      await refreshFigureAssets();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setFigureAssetDeleting(null);
-    }
-  }, [projectPath, refreshFigureAssets, selectedId]);
+  const removeFigureAsset = useCallback(
+    async (asset: AssetInfo) => {
+      if (!selectedId) return;
+      setFigureAssetDeleting(asset.name);
+      setError(null);
+      try {
+        // asset.name 为子目录内平铺文件名，类别携带角色子目录。
+        await deleteAsset(projectPath, `figure/${selectedId}`, figureFileTail(asset.name));
+        await refreshFigureAssets();
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setFigureAssetDeleting(null);
+      }
+    },
+    [projectPath, refreshFigureAssets, selectedId],
+  );
 
   useEffect(() => {
     if (!generationRequestToken) return;
@@ -837,7 +1009,10 @@ export function CharacterPanel({
         </div>
         <div className="flex items-center gap-1">
           {onClose && (
-            <button onClick={onClose} className="p-1.5 rounded-md hover:bg-secondary/50 transition-colors">
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-md hover:bg-secondary/50 transition-colors"
+            >
               <X className="w-4 h-4 text-muted-foreground" />
             </button>
           )}
@@ -847,7 +1022,9 @@ export function CharacterPanel({
       {error && (
         <div className="mx-4 mt-3 px-3 py-2 rounded-md bg-destructive/10 border border-destructive/20 text-xs text-destructive flex items-center gap-2">
           {error}
-          <button onClick={() => setError(null)} className="ml-auto underline hover:no-underline">关闭</button>
+          <button onClick={() => setError(null)} className="ml-auto underline hover:no-underline">
+            关闭
+          </button>
         </div>
       )}
 
@@ -857,7 +1034,9 @@ export function CharacterPanel({
         </div>
       ) : (
         <div className="flex-1 min-h-0 flex overflow-hidden">
-          <aside className={`${embedded ? 'w-72' : 'w-56'} border-r border-border bg-surface-bright/85 backdrop-blur flex flex-col`}>
+          <aside
+            className={`${embedded ? 'w-72' : 'w-56'} border-r border-border bg-surface-bright/85 backdrop-blur flex flex-col`}
+          >
             <div className="p-3 border-b border-border bg-surface-container-low">
               <button
                 onClick={handleCreate}
@@ -882,75 +1061,96 @@ export function CharacterPanel({
                   <Users className="w-8 h-8 opacity-40" />
                   暂无人物
                 </div>
-              ) : filtered.map((ch, index) => {
-                const active = ch.id === selectedId;
-                const sprite = ch.sprites[referenceSpriteIndex(ch)]?.file || ch.sprites[0]?.file;
-                const color = ch.colorTheme || characterColor(index);
-                return (
-                  <div
-                    key={ch.id}
-                    className={`rounded border transition-all ${
-                      active ? 'border-secondary bg-secondary/10 story-os-hard-shadow' : 'border-border/60 bg-surface-container-lowest/80'
-                    }`}
-                  >
-                    <button
-                      onClick={() => {
-                        // 切换到其他角色前，先静默保存当前角色，避免未保存改动丢失。
-                        if (selected && selected.id !== ch.id && selected.name.trim() && !selected.id.startsWith('tmp_')) {
-                          persistCharacter(selected, { showSavedBadge: false, keepSelection: true });
-                        }
-                        setSelectedId(ch.id);
-                        if (!active) setMode('info');
-                      }}
-                      className="w-full p-2 text-left"
+              ) : (
+                filtered.map((ch, index) => {
+                  const active = ch.id === selectedId;
+                  const sprite = ch.sprites[referenceSpriteIndex(ch)]?.file || ch.sprites[0]?.file;
+                  const color = ch.colorTheme || characterColor(index);
+                  return (
+                    <div
+                      key={ch.id}
+                      className={`rounded border transition-all ${
+                        active
+                          ? 'border-secondary bg-secondary/10 story-os-hard-shadow'
+                          : 'border-border/60 bg-surface-container-lowest/80'
+                      }`}
                     >
-                      <div className="flex items-center gap-2">
-                        {sprite ? (
-                          <img
-                            src={convertFileSrc(`${projectPath}/game/figure/${sprite}`)}
-                            className="w-10 h-10 rounded object-cover bg-secondary/40 flex-shrink-0"
-                            alt=""
-                            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                          />
-                        ) : (
-                          <div className="w-10 h-10 rounded bg-secondary/50 flex items-center justify-center flex-shrink-0">
-                            <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />
-                          </div>
-                        )}
-                        <div className="min-w-0">
-                          <div className="text-sm truncate">{ch.name || '未命名'}</div>
-                          <div className="text-[10px] text-muted-foreground truncate">
-                            {ch.stance || ch.personality || `${ch.sprites.length} 个立绘`}
+                      <button
+                        onClick={() => {
+                          // 切换到其他角色前，先静默保存当前角色，避免未保存改动丢失。
+                          if (
+                            selected &&
+                            selected.id !== ch.id &&
+                            selected.name.trim() &&
+                            !selected.id.startsWith('tmp_')
+                          ) {
+                            persistCharacter(selected, {
+                              showSavedBadge: false,
+                              keepSelection: true,
+                            });
+                          }
+                          setSelectedId(ch.id);
+                          if (!active) setMode('info');
+                        }}
+                        className="w-full p-2 text-left"
+                      >
+                        <div className="flex items-center gap-2">
+                          {sprite ? (
+                            <img
+                              src={convertFileSrc(`${projectPath}/game/figure/${sprite}`)}
+                              className="w-10 h-10 rounded object-cover bg-secondary/40 flex-shrink-0"
+                              alt=""
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).style.display = 'none';
+                              }}
+                            />
+                          ) : (
+                            <div className="w-10 h-10 rounded bg-secondary/50 flex items-center justify-center flex-shrink-0">
+                              <span
+                                className="w-2.5 h-2.5 rounded-full"
+                                style={{ backgroundColor: color }}
+                              />
+                            </div>
+                          )}
+                          <div className="min-w-0">
+                            <div className="text-sm truncate">{ch.name || '未命名'}</div>
+                            <div className="text-[10px] text-muted-foreground truncate">
+                              {ch.stance || ch.personality || `${ch.sprites.length} 个立绘`}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </button>
+                      </button>
 
-                    {active && (
-                      <div className="px-2 pb-2 grid grid-cols-2 gap-1">
-                        <button
-                          onClick={() => setMode('info')}
-                          className={`px-2 py-1.5 rounded text-xs transition-colors flex items-center justify-center gap-1 ${
-                            mode === 'info' ? 'bg-primary text-primary-foreground' : 'bg-secondary/60 hover:bg-secondary'
-                          }`}
-                        >
-                          <FileText className="w-3 h-3" />
-                          基本信息
-                        </button>
-                        <button
-                          onClick={() => setMode('sprite')}
-                          className={`px-2 py-1.5 rounded text-xs transition-colors flex items-center justify-center gap-1 ${
-                            mode === 'sprite' ? 'bg-primary text-primary-foreground' : 'bg-secondary/60 hover:bg-secondary'
-                          }`}
-                        >
-                          <Sparkles className="w-3 h-3" />
-                          立绘创作
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+                      {active && (
+                        <div className="px-2 pb-2 grid grid-cols-2 gap-1">
+                          <button
+                            onClick={() => setMode('info')}
+                            className={`px-2 py-1.5 rounded text-xs transition-colors flex items-center justify-center gap-1 ${
+                              mode === 'info'
+                                ? 'bg-primary text-primary-foreground'
+                                : 'bg-secondary/60 hover:bg-secondary'
+                            }`}
+                          >
+                            <FileText className="w-3 h-3" />
+                            基本信息
+                          </button>
+                          <button
+                            onClick={() => setMode('sprite')}
+                            className={`px-2 py-1.5 rounded text-xs transition-colors flex items-center justify-center gap-1 ${
+                              mode === 'sprite'
+                                ? 'bg-primary text-primary-foreground'
+                                : 'bg-secondary/60 hover:bg-secondary'
+                            }`}
+                          >
+                            <Sparkles className="w-3 h-3" />
+                            立绘创作
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
             </div>
           </aside>
 
@@ -958,7 +1158,12 @@ export function CharacterPanel({
             {selected && (
               <div className="pointer-events-none absolute inset-0 -z-10 flex items-center justify-center overflow-hidden opacity-40">
                 <div className="relative h-[78%] w-full max-w-2xl rounded-t-[220px] border border-dashed border-primary/30 bg-primary/5">
-                  <svg className="mx-auto h-full max-h-[620px] fill-none stroke-primary/45" strokeWidth="0.5" viewBox="0 0 400 600" aria-hidden="true">
+                  <svg
+                    className="mx-auto h-full max-h-[620px] fill-none stroke-primary/45"
+                    strokeWidth="0.5"
+                    viewBox="0 0 400 600"
+                    aria-hidden="true"
+                  >
                     <path d="M200,50 C150,50 120,100 120,150 C120,200 150,250 200,250 C250,250 280,200 280,150 C280,100 250,50 200,50 Z" />
                     <path d="M120,250 C80,250 50,400 50,600 L350,600 C350,400 320,250 280,250" />
                     <line strokeDasharray="2,2" x1="50" x2="350" y1="300" y2="300" />
@@ -987,7 +1192,9 @@ export function CharacterPanel({
               <div className="relative z-10 p-4 space-y-4 max-w-5xl">
                 <section className="story-os-panel p-4">
                   <div className="mb-4 pb-3 border-b border-border">
-                    <h4 className="text-xs uppercase tracking-wide text-muted-foreground font-mono-family">基本信息</h4>
+                    <h4 className="text-xs uppercase tracking-wide text-muted-foreground font-mono-family">
+                      基本信息
+                    </h4>
                     <p className="mt-1 text-[10px] text-muted-foreground">
                       以下字段会构成 AI 角色上下文，影响立绘生成与剧本辅助；关键词同时用于人物搜索。
                     </p>
@@ -995,13 +1202,19 @@ export function CharacterPanel({
 
                   {/* 身份标识 */}
                   <div className="mb-5">
-                    <div className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground/60">身份标识</div>
+                    <div className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground/60">
+                      身份标识
+                    </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       <div>
                         <label className={labelClass}>姓名 *</label>
                         <input
                           value={selected.name}
-                          onChange={(e) => patchCharacter(selected.id, { name: e.target.value })}
+                          onChange={(e) =>
+                            patchCharacter(selected.id, {
+                              name: e.target.value,
+                            })
+                          }
                           className={`${inputClass} ${!selected.name.trim() ? 'border-destructive/50' : ''}`}
                           placeholder="角色姓名（用于脚本对话标识）"
                         />
@@ -1010,9 +1223,14 @@ export function CharacterPanel({
                         <label className={labelClass}>别名</label>
                         <input
                           value={selected.aliases.join(', ')}
-                          onChange={(e) => patchCharacter(selected.id, {
-                            aliases: e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
-                          })}
+                          onChange={(e) =>
+                            patchCharacter(selected.id, {
+                              aliases: e.target.value
+                                .split(',')
+                                .map((s) => s.trim())
+                                .filter(Boolean),
+                            })
+                          }
                           className={inputClass}
                           placeholder="昵称、称号，逗号分隔；用于人物搜索"
                         />
@@ -1021,7 +1239,11 @@ export function CharacterPanel({
                         <label className={labelClass}>性别</label>
                         <input
                           value={selected.gender}
-                          onChange={(e) => patchCharacter(selected.id, { gender: e.target.value })}
+                          onChange={(e) =>
+                            patchCharacter(selected.id, {
+                              gender: e.target.value,
+                            })
+                          }
                           className={inputClass}
                           placeholder="男 / 女 / 其他"
                         />
@@ -1038,23 +1260,37 @@ export function CharacterPanel({
                       <div className="md:col-span-2">
                         <label className={labelClass}>配音音色</label>
                         <select
-                          value={voiceTimbrePresets.some((p) => p.value === (selected.voiceTimbre || '')) ? (selected.voiceTimbre || '') : '__custom__'}
+                          value={
+                            voiceTimbrePresets.some((p) => p.value === (selected.voiceTimbre || ''))
+                              ? selected.voiceTimbre || ''
+                              : '__custom__'
+                          }
                           onChange={(e) => {
                             const v = e.target.value;
                             // 选「自定义」时清空走输入框；否则写入预设音色（含空＝未设置）。
-                            patchCharacter(selected.id, { voiceTimbre: v === '__custom__' ? '' : v });
+                            patchCharacter(selected.id, {
+                              voiceTimbre: v === '__custom__' ? '' : v,
+                            });
                           }}
                           className={inputClass}
                         >
                           {voiceTimbrePresets.map((p) => (
-                            <option key={p.value || 'none'} value={p.value}>{p.label}</option>
+                            <option key={p.value || 'none'} value={p.value}>
+                              {p.label}
+                            </option>
                           ))}
                           <option value="__custom__">自定义音色 ID…</option>
                         </select>
-                        {!voiceTimbrePresets.some((p) => p.value === (selected.voiceTimbre || '')) && (
+                        {!voiceTimbrePresets.some(
+                          (p) => p.value === (selected.voiceTimbre || ''),
+                        ) && (
                           <input
                             value={selected.voiceTimbre || ''}
-                            onChange={(e) => patchCharacter(selected.id, { voiceTimbre: e.target.value })}
+                            onChange={(e) =>
+                              patchCharacter(selected.id, {
+                                voiceTimbre: e.target.value,
+                              })
+                            }
                             className={`${inputClass} mt-2`}
                             placeholder="手填音色 ID，如 longxiaochun_v2"
                           />
@@ -1065,13 +1301,19 @@ export function CharacterPanel({
 
                   {/* 形象设定 */}
                   <div className="mb-5">
-                    <div className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground/60">形象设定 · 立绘生成输入</div>
+                    <div className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground/60">
+                      形象设定 · 立绘生成输入
+                    </div>
                     <div className="space-y-3">
                       <div>
                         <label className={labelClass}>外观设定</label>
                         <textarea
                           value={selected.description}
-                          onChange={(e) => patchCharacter(selected.id, { description: e.target.value })}
+                          onChange={(e) =>
+                            patchCharacter(selected.id, {
+                              description: e.target.value,
+                            })
+                          }
                           className={`${inputClass} h-24 resize-none`}
                           placeholder="只写可画出来的内容：发型、瞳色、服装、体型、配饰、标志物。不要写背景故事。"
                         />
@@ -1081,7 +1323,11 @@ export function CharacterPanel({
                           <label className={labelClass}>性格气质</label>
                           <input
                             value={selected.personality}
-                            onChange={(e) => patchCharacter(selected.id, { personality: e.target.value })}
+                            onChange={(e) =>
+                              patchCharacter(selected.id, {
+                                personality: e.target.value,
+                              })
+                            }
                             className={inputClass}
                             placeholder="例：冷静、克制、对陌生人保持距离"
                           />
@@ -1090,7 +1336,11 @@ export function CharacterPanel({
                           <label className={labelClass}>剧情定位</label>
                           <input
                             value={selected.stance}
-                            onChange={(e) => patchCharacter(selected.id, { stance: e.target.value })}
+                            onChange={(e) =>
+                              patchCharacter(selected.id, {
+                                stance: e.target.value,
+                              })
+                            }
                             className={inputClass}
                             placeholder="例：转校生 / 学生会成员 / 反派协力者"
                           />
@@ -1100,9 +1350,14 @@ export function CharacterPanel({
                         <label className={labelClass}>关键词</label>
                         <input
                           value={selected.keywords.join(', ')}
-                          onChange={(e) => patchCharacter(selected.id, {
-                            keywords: e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
-                          })}
+                          onChange={(e) =>
+                            patchCharacter(selected.id, {
+                              keywords: e.target.value
+                                .split(',')
+                                .map((s) => s.trim())
+                                .filter(Boolean),
+                            })
+                          }
                           className={inputClass}
                           placeholder="例：学生, 傲娇, 学生会；逗号分隔，兼作搜索标签"
                         />
@@ -1112,13 +1367,19 @@ export function CharacterPanel({
 
                   {/* 创作辅助 */}
                   <div>
-                    <div className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground/60">创作辅助</div>
+                    <div className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground/60">
+                      创作辅助
+                    </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       <div className="md:col-span-2">
                         <label className={labelClass}>说话风格</label>
                         <textarea
                           value={selected.dialogueStyle}
-                          onChange={(e) => patchCharacter(selected.id, { dialogueStyle: e.target.value })}
+                          onChange={(e) =>
+                            patchCharacter(selected.id, {
+                              dialogueStyle: e.target.value,
+                            })
+                          }
                           className={`${inputClass} h-16 resize-none`}
                           placeholder="例：句子短，少用感叹号；紧张时回避称呼对方名字。供文本生成参考，不影响立绘外观。"
                         />
@@ -1128,13 +1389,23 @@ export function CharacterPanel({
                         <div className="flex items-center gap-2">
                           <input
                             type="color"
-                            value={selected.colorTheme || characterColor(characters.indexOf(selected))}
-                            onChange={(e) => patchCharacter(selected.id, { colorTheme: e.target.value })}
+                            value={
+                              selected.colorTheme || characterColor(characters.indexOf(selected))
+                            }
+                            onChange={(e) =>
+                              patchCharacter(selected.id, {
+                                colorTheme: e.target.value,
+                              })
+                            }
                             className="w-9 h-8 rounded border border-border bg-transparent"
                           />
                           <input
                             value={selected.colorTheme || ''}
-                            onChange={(e) => patchCharacter(selected.id, { colorTheme: e.target.value })}
+                            onChange={(e) =>
+                              patchCharacter(selected.id, {
+                                colorTheme: e.target.value,
+                              })
+                            }
                             className={`${inputClass} font-mono-family`}
                             placeholder="var(--color-character-1)"
                           />
@@ -1146,7 +1417,9 @@ export function CharacterPanel({
 
                 <section className="story-os-panel p-4">
                   <label className={labelClass}>内部备注</label>
-                  <p className="mb-2 text-[10px] text-muted-foreground">制作备注、待办、设定来源；不参与立绘或配音生成。</p>
+                  <p className="mb-2 text-[10px] text-muted-foreground">
+                    制作备注、待办、设定来源；不参与立绘或配音生成。
+                  </p>
                   <textarea
                     value={selected.notes}
                     onChange={(e) => patchCharacter(selected.id, { notes: e.target.value })}
@@ -1164,7 +1437,9 @@ export function CharacterPanel({
                       <Sparkles className="w-3.5 h-3.5 text-primary" />
                     </div>
                     <div>
-                      <h4 className="text-sm font-semibold tracking-wide text-primary">主体立绘 · 角色设定图</h4>
+                      <h4 className="text-sm font-semibold tracking-wide text-primary">
+                        主体立绘 · 角色设定图
+                      </h4>
                     </div>
                   </div>
 
@@ -1190,7 +1465,9 @@ export function CharacterPanel({
                           value={referenceSprite?.prompt || ''}
                           onChange={(e) => setReferencePrompt(selected.id, e.target.value)}
                           className={`${inputClass} h-28 resize-none font-mono-family`}
-                          placeholder={'左区：角色正脸特写，面部占满左区，五官、发型、配饰清晰，无身体入镜、无遮挡变形；右区：标准角色设定三视图，横向依次排列侧视图、正视图、背视图，从头到脚完整无遮挡、高度统一；核心约束：特写与三视图为同一角色，五官、服装、配饰、体态完全一致；中性表情，眼神平静，自然站立，双手自然下垂，空手无手持物；浅灰色纯净背景，角色无阴影，无畸变，平视视角，超高清；严禁出现无关文字；\n银发齐刘海，红色瞳孔，白色水手服校服，左侧蝴蝶结发饰，纤细体型'}
+                          placeholder={
+                            '左区：角色正脸特写，面部占满左区，五官、发型、配饰清晰，无身体入镜、无遮挡变形；右区：标准角色设定三视图，横向依次排列侧视图、正视图、背视图，从头到脚完整无遮挡、高度统一；核心约束：特写与三视图为同一角色，五官、服装、配饰、体态完全一致；中性表情，眼神平静，自然站立，双手自然下垂，空手无手持物；浅灰色纯净背景，角色无阴影，无畸变，平视视角，超高清；严禁出现无关文字；\n银发齐刘海，红色瞳孔，白色水手服校服，左侧蝴蝶结发饰，纤细体型'
+                          }
                         />
                       </div>
                       <div>
@@ -1201,32 +1478,43 @@ export function CharacterPanel({
                           {(selected.referenceImages ?? []).map((filename) => {
                             const isPicked = selectedReferenceImage === filename;
                             return (
-                            <div
-                              key={filename}
-                              onClick={() => setSelectedReferenceImage((cur) => cur === filename ? null : filename)}
-                              className={`group relative aspect-square rounded-md border overflow-hidden bg-secondary/20 cursor-pointer transition-all ${
-                                isPicked ? 'border-primary ring-2 ring-primary' : 'border-border hover:border-primary/40'
-                              }`}
-                            >
-                              <img
-                                src={convertFileSrc(`${projectPath}/game/reference/${selected.id}/${filename}`)}
-                                alt=""
-                                className="w-full h-full object-cover"
-                              />
-                              {isPicked && (
-                                <div className="absolute left-1 top-1 rounded bg-primary px-1 py-0.5 text-[9px] font-semibold text-primary-foreground">
-                                  参考
-                                </div>
-                              )}
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); removeReferenceImage(selected.id, filename); }}
-                                className="absolute right-1 top-1 p-1 rounded bg-background/80 opacity-0 group-hover:opacity-100 transition-opacity"
-                                aria-label="移除参考图"
+                              <div
+                                key={filename}
+                                onClick={() =>
+                                  setSelectedReferenceImage((cur) =>
+                                    cur === filename ? null : filename,
+                                  )
+                                }
+                                className={`group relative aspect-square rounded-md border overflow-hidden bg-secondary/20 cursor-pointer transition-all ${
+                                  isPicked
+                                    ? 'border-primary ring-2 ring-primary'
+                                    : 'border-border hover:border-primary/40'
+                                }`}
                               >
-                                <X className="w-3 h-3" />
-                              </button>
-                            </div>
+                                <img
+                                  src={convertFileSrc(
+                                    `${projectPath}/game/reference/${selected.id}/${filename}`,
+                                  )}
+                                  alt=""
+                                  className="w-full h-full object-cover"
+                                />
+                                {isPicked && (
+                                  <div className="absolute left-1 top-1 rounded bg-primary px-1 py-0.5 text-[9px] font-semibold text-primary-foreground">
+                                    参考
+                                  </div>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    removeReferenceImage(selected.id, filename);
+                                  }}
+                                  className="absolute right-1 top-1 p-1 rounded bg-background/80 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  aria-label="移除参考图"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </div>
                             );
                           })}
                           {(selected.referenceImages?.length ?? 0) < 5 && (
@@ -1236,7 +1524,11 @@ export function CharacterPanel({
                               disabled={referenceUploading || !selected.name.trim()}
                               className="aspect-square rounded-md border border-dashed border-border bg-secondary/10 hover:bg-secondary/30 transition-colors flex flex-col items-center justify-center gap-1 text-xs text-muted-foreground disabled:opacity-50"
                             >
-                              {referenceUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                              {referenceUploading ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <Upload className="w-4 h-4" />
+                              )}
                               上传
                             </button>
                           )}
@@ -1245,16 +1537,24 @@ export function CharacterPanel({
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => triggerSingleSpriteGeneration(referenceSprite?.emotion || '主体参考', { kind: 'reference' })}
+                          onClick={() =>
+                            triggerSingleSpriteGeneration(referenceSprite?.emotion || '主体参考', {
+                              kind: 'reference',
+                            })
+                          }
                           disabled={spriteGeneratingKey !== null}
                           className="px-3 py-1.5 rounded bg-primary text-primary-foreground hover:opacity-90 text-xs flex items-center gap-2 disabled:opacity-50"
                         >
-                          {spriteGeneratingKey === 'reference'
-                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            : <Sparkles className="w-3.5 h-3.5" />}
+                          {spriteGeneratingKey === 'reference' ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Sparkles className="w-3.5 h-3.5" />
+                          )}
                           {spriteGeneratingKey === 'reference'
                             ? '生成中'
-                            : selectedReferenceImage ? '基于参考图生成（图生图）' : '生成主体设定图'}
+                            : selectedReferenceImage
+                              ? '基于参考图生成（图生图）'
+                              : '生成主体设定图'}
                         </button>
                       </div>
                     </div>
@@ -1264,7 +1564,9 @@ export function CharacterPanel({
                   <div className="mt-4 border-t border-border/60 pt-3">
                     <div className="mb-2 flex items-center justify-between">
                       <label className={labelClass}>主体候选</label>
-                      <span className="text-[10px] text-muted-foreground">{mainCandidates.length} 张 · 点选设为当前主体</span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {mainCandidates.length} 张 · 点选设为当前主体
+                      </span>
                     </div>
                     {mainCandidates.length === 0 ? (
                       <div className="rounded-md border border-dashed border-border p-3 text-[11px] text-muted-foreground">
@@ -1273,16 +1575,24 @@ export function CharacterPanel({
                     ) : (
                       <div className="grid grid-cols-3 md:grid-cols-5 xl:grid-cols-8 gap-2">
                         {mainCandidates.map((candidate) => {
-                          const isCurrent = figureFileTail(referenceSprite?.file || '') === figureFileTail(candidate.name);
+                          const isCurrent =
+                            figureFileTail(referenceSprite?.file || '') ===
+                            figureFileTail(candidate.name);
                           return (
                             <div
                               key={candidate.path}
                               onClick={() => setMainFromCandidate(candidate)}
                               className={`group relative aspect-[3/4] rounded-md border overflow-hidden bg-secondary/20 cursor-pointer transition-all ${
-                                isCurrent ? 'border-primary ring-2 ring-primary' : 'border-border hover:border-primary/40'
+                                isCurrent
+                                  ? 'border-primary ring-2 ring-primary'
+                                  : 'border-border hover:border-primary/40'
                               }`}
                             >
-                              <img src={convertFileSrc(candidate.path)} alt="" className="w-full h-full object-cover object-top" />
+                              <img
+                                src={convertFileSrc(candidate.path)}
+                                alt=""
+                                className="w-full h-full object-cover object-top"
+                              />
                               {isCurrent && (
                                 <div className="absolute left-1 top-1 rounded bg-primary px-1 py-0.5 text-[9px] font-semibold text-primary-foreground">
                                   当前主体
@@ -1290,14 +1600,19 @@ export function CharacterPanel({
                               )}
                               <button
                                 type="button"
-                                onClick={(e) => { e.stopPropagation(); removeMainCandidate(candidate); }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  removeMainCandidate(candidate);
+                                }}
                                 disabled={mainCandidateDeleting === candidate.name}
                                 className="absolute right-1 top-1 p-1 rounded bg-background/80 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50"
                                 aria-label="删除候选"
                               >
-                                {mainCandidateDeleting === candidate.name
-                                  ? <Loader2 className="w-3 h-3 animate-spin" />
-                                  : <Trash2 className="w-3 h-3" />}
+                                {mainCandidateDeleting === candidate.name ? (
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                ) : (
+                                  <Trash2 className="w-3 h-3" />
+                                )}
                               </button>
                             </div>
                           );
@@ -1311,7 +1626,9 @@ export function CharacterPanel({
                 <section className="story-os-panel p-4">
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <div>
-                      <h4 className="text-xs uppercase tracking-wide text-muted-foreground font-mono-family">表情变体</h4>
+                      <h4 className="text-xs uppercase tracking-wide text-muted-foreground font-mono-family">
+                        表情变体
+                      </h4>
                     </div>
                     <div className="flex items-center gap-2">
                       <button
@@ -1326,10 +1643,14 @@ export function CharacterPanel({
                         disabled={spriteGeneratingKey !== null || variantSprites.length === 0}
                         className="px-2 py-1 rounded bg-primary text-primary-foreground hover:opacity-90 text-xs flex items-center gap-1 disabled:opacity-50"
                       >
+                        {spriteGeneratingKey !== null && spriteGeneratingKey !== 'reference' ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Sparkles className="w-3 h-3" />
+                        )}
                         {spriteGeneratingKey !== null && spriteGeneratingKey !== 'reference'
-                          ? <Loader2 className="w-3 h-3 animate-spin" />
-                          : <Sparkles className="w-3 h-3" />}
-                        {spriteGeneratingKey !== null && spriteGeneratingKey !== 'reference' ? '生成中' : '批量生成'}
+                          ? '生成中'
+                          : '批量生成'}
                       </button>
                     </div>
                   </div>
@@ -1381,12 +1702,27 @@ export function CharacterPanel({
                           {spriteSuggestions.map((suggestion) => (
                             <button
                               key={`${suggestion.pose}-${suggestion.emotion}`}
-                              onClick={() => addSprite(selected.id, `${suggestion.pose}-${suggestion.emotion}`, suggestion.prompt)}
+                              onClick={() =>
+                                addSprite(
+                                  selected.id,
+                                  `${suggestion.pose}-${suggestion.emotion}`,
+                                  suggestion.prompt,
+                                )
+                              }
                               className="rounded-md border border-border bg-background/40 p-2 text-left hover:border-primary/40 hover:bg-primary/10 transition-colors"
                             >
                               <div className="text-xs font-medium">{suggestion.pose}</div>
-                              <div className="mt-0.5 text-[11px]" style={{ color: emotionColor(suggestion.emotion) }}>{suggestion.emotion}</div>
-                              <div className="mt-1 text-[10px] text-muted-foreground font-mono-family line-clamp-2">{suggestion.prompt}</div>
+                              <div
+                                className="mt-0.5 text-[11px]"
+                                style={{
+                                  color: emotionColor(suggestion.emotion),
+                                }}
+                              >
+                                {suggestion.emotion}
+                              </div>
+                              <div className="mt-1 text-[10px] text-muted-foreground font-mono-family line-clamp-2">
+                                {suggestion.prompt}
+                              </div>
                             </button>
                           ))}
                         </div>
@@ -1395,7 +1731,9 @@ export function CharacterPanel({
                   )}
 
                   {variantSprites.length === 0 ? (
-                    <div className="text-xs text-muted-foreground border border-dashed border-border rounded-md p-3">还没有表情变体。点击「添加变体」选择情绪或建议姿态。</div>
+                    <div className="text-xs text-muted-foreground border border-dashed border-border rounded-md p-3">
+                      还没有表情变体。点击「添加变体」选择情绪或建议姿态。
+                    </div>
                   ) : (
                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2">
                       {variantSprites.map(({ sprite, index }) => {
@@ -1404,7 +1742,10 @@ export function CharacterPanel({
                         const generating = spriteGeneratingKey === `variant:${index}`;
                         const expanded = expandedPromptIndex === index;
                         return (
-                          <div key={index} className="rounded-md border border-border bg-secondary/15 overflow-hidden hover:border-primary/30 transition-colors">
+                          <div
+                            key={index}
+                            className="rounded-md border border-border bg-secondary/15 overflow-hidden hover:border-primary/30 transition-colors"
+                          >
                             {/* 情绪标签 — 醒目展示 */}
                             <div
                               className="px-2 py-1 flex items-center gap-1"
@@ -1415,7 +1756,9 @@ export function CharacterPanel({
                             >
                               <input
                                 value={sprite.emotion}
-                                onChange={(e) => updateSprite(selected.id, index, 'emotion', e.target.value)}
+                                onChange={(e) =>
+                                  updateSprite(selected.id, index, 'emotion', e.target.value)
+                                }
                                 className="min-w-0 flex-1 bg-transparent text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-primary/40 rounded px-1 py-0.5"
                                 placeholder="情绪标签"
                                 style={{ color }}
@@ -1438,23 +1781,39 @@ export function CharacterPanel({
                                       type="button"
                                       className="w-full aspect-square flex items-center justify-center overflow-hidden border-b border-border relative cursor-pointer hover:opacity-80 transition-opacity"
                                       style={{
-                                        background: src ? undefined : `linear-gradient(135deg, color-mix(in srgb, ${color} 18%, transparent), color-mix(in srgb, ${color} 4%, transparent))`,
+                                        background: src
+                                          ? undefined
+                                          : `linear-gradient(135deg, color-mix(in srgb, ${color} 18%, transparent), color-mix(in srgb, ${color} 4%, transparent))`,
                                       }}
                                     >
                                       {src ? (
-                                        <img src={src} alt={sprite.emotion} className="w-full h-full object-cover object-top" />
+                                        <img
+                                          src={src}
+                                          alt={sprite.emotion}
+                                          className="w-full h-full object-cover object-top"
+                                        />
                                       ) : (
-                                        <ImageIcon className="w-6 h-6 opacity-60" style={{ color }} />
+                                        <ImageIcon
+                                          className="w-6 h-6 opacity-60"
+                                          style={{ color }}
+                                        />
                                       )}
                                     </button>
                                   </PopoverTrigger>
-                                  <PopoverContent align="start" className="w-64 p-2 max-h-72 overflow-y-auto">
+                                  <PopoverContent
+                                    align="start"
+                                    className="w-64 p-2 max-h-72 overflow-y-auto"
+                                  >
                                     <div className="mb-1.5 flex items-center justify-between">
-                                      <span className="text-xs text-muted-foreground">选择立绘图片</span>
+                                      <span className="text-xs text-muted-foreground">
+                                        选择立绘图片
+                                      </span>
                                       {sprite.file && (
                                         <button
                                           type="button"
-                                          onClick={() => updateSprite(selected.id, index, 'file', '')}
+                                          onClick={() =>
+                                            updateSprite(selected.id, index, 'file', '')
+                                          }
                                           className="text-[10px] text-muted-foreground hover:text-foreground"
                                         >
                                           清除绑定
@@ -1462,7 +1821,9 @@ export function CharacterPanel({
                                       )}
                                     </div>
                                     {figureAssets.length === 0 ? (
-                                      <div className="py-4 text-center text-[11px] text-muted-foreground">暂无素材图片</div>
+                                      <div className="py-4 text-center text-[11px] text-muted-foreground">
+                                        暂无素材图片
+                                      </div>
                                     ) : (
                                       <div className="grid grid-cols-3 gap-1.5">
                                         {figureAssets.map((asset) => {
@@ -1473,12 +1834,20 @@ export function CharacterPanel({
                                             <button
                                               type="button"
                                               key={asset.path}
-                                              onClick={() => updateSprite(selected.id, index, 'file', qualified)}
+                                              onClick={() =>
+                                                updateSprite(selected.id, index, 'file', qualified)
+                                              }
                                               className={`aspect-square rounded border overflow-hidden transition-colors ${
-                                                isCurrent ? 'border-primary ring-1 ring-primary' : 'border-border hover:border-primary/50'
+                                                isCurrent
+                                                  ? 'border-primary ring-1 ring-primary'
+                                                  : 'border-border hover:border-primary/50'
                                               }`}
                                             >
-                                              <img src={convertFileSrc(asset.path)} alt={tail} className="w-full h-full object-cover object-top" />
+                                              <img
+                                                src={convertFileSrc(asset.path)}
+                                                alt={tail}
+                                                className="w-full h-full object-cover object-top"
+                                              />
                                             </button>
                                           );
                                         })}
@@ -1494,7 +1863,9 @@ export function CharacterPanel({
                               {expanded ? (
                                 <textarea
                                   value={sprite.prompt || ''}
-                                  onChange={(e) => updateSprite(selected.id, index, 'prompt', e.target.value)}
+                                  onChange={(e) =>
+                                    updateSprite(selected.id, index, 'prompt', e.target.value)
+                                  }
                                   onBlur={() => setExpandedPromptIndex(null)}
                                   autoFocus
                                   className="w-full h-14 resize-none text-[10px] font-mono-family bg-input-background border border-border rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary/40"
@@ -1507,18 +1878,27 @@ export function CharacterPanel({
                                   className="w-full text-left text-[10px] text-muted-foreground hover:text-foreground bg-input-background/60 border border-border rounded px-2 py-1 line-clamp-1 transition-colors"
                                   title={sprite.prompt || '点击添加提示词'}
                                 >
-                                  {sprite.prompt?.trim() || <span className="text-muted-foreground/60">点击添加提示词</span>}
+                                  {sprite.prompt?.trim() || (
+                                    <span className="text-muted-foreground/60">点击添加提示词</span>
+                                  )}
                                 </button>
                               )}
                               <button
                                 type="button"
-                                onClick={() => triggerSingleSpriteGeneration(sprite.emotion, { kind: 'variant', index })}
+                                onClick={() =>
+                                  triggerSingleSpriteGeneration(sprite.emotion, {
+                                    kind: 'variant',
+                                    index,
+                                  })
+                                }
                                 disabled={spriteGeneratingKey !== null}
                                 className="w-full px-2 py-1.5 rounded bg-primary/10 text-primary hover:bg-primary/20 text-xs flex items-center justify-center gap-1 disabled:opacity-50"
                               >
-                                {generating
-                                  ? <Loader2 className="w-3 h-3 animate-spin" />
-                                  : <Sparkles className="w-3 h-3" />}
+                                {generating ? (
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                ) : (
+                                  <Sparkles className="w-3 h-3" />
+                                )}
                                 {generating ? '生成中' : generated ? '重新生成' : '生成'}
                               </button>
                             </div>
@@ -1537,12 +1917,18 @@ export function CharacterPanel({
                     className="w-full flex items-center justify-between text-left"
                   >
                     <div>
-                      <h4 className="text-xs uppercase tracking-wide text-muted-foreground font-mono-family">立绘素材库</h4>
-                      <p className="mt-0.5 text-[10px] text-muted-foreground/70">表情变体与上传的备用图；主体图在上方独立管理。</p>
+                      <h4 className="text-xs uppercase tracking-wide text-muted-foreground font-mono-family">
+                        立绘素材库
+                      </h4>
+                      <p className="mt-0.5 text-[10px] text-muted-foreground/70">
+                        表情变体与上传的备用图；主体图在上方独立管理。
+                      </p>
                     </div>
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                       {figureAssets.length} 个
-                      <ChevronDown className={`w-4 h-4 transition-transform ${figureLibraryOpen ? 'rotate-180' : ''}`} />
+                      <ChevronDown
+                        className={`w-4 h-4 transition-transform ${figureLibraryOpen ? 'rotate-180' : ''}`}
+                      />
                     </div>
                   </button>
 
@@ -1555,7 +1941,11 @@ export function CharacterPanel({
                           disabled={figureAssetImporting}
                           className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground hover:opacity-90 transition-colors text-xs flex items-center gap-2 disabled:opacity-50"
                         >
-                          {figureAssetImporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                          {figureAssetImporting ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Upload className="w-3.5 h-3.5" />
+                          )}
                           上传立绘素材
                         </button>
                       </div>
@@ -1571,7 +1961,10 @@ export function CharacterPanel({
                       ) : (
                         <div className="grid grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-2">
                           {figureAssets.map((asset) => (
-                            <div key={asset.path} className="rounded-md border border-border bg-secondary/20 overflow-hidden">
+                            <div
+                              key={asset.path}
+                              className="rounded-md border border-border bg-secondary/20 overflow-hidden"
+                            >
                               <div className="aspect-[3/4] bg-background/40 overflow-hidden">
                                 <img
                                   src={convertFileSrc(asset.path)}
@@ -1580,7 +1973,12 @@ export function CharacterPanel({
                                 />
                               </div>
                               <div className="p-1.5 space-y-1">
-                                <div className="truncate text-[10px] font-medium" title={asset.name}>{asset.name}</div>
+                                <div
+                                  className="truncate text-[10px] font-medium"
+                                  title={asset.name}
+                                >
+                                  {asset.name}
+                                </div>
                                 <button
                                   type="button"
                                   onClick={() => removeFigureAsset(asset)}
@@ -1604,31 +2002,45 @@ export function CharacterPanel({
                     onClick={() => setUsageOpen((value) => !value)}
                     className="w-full flex items-center justify-between text-left"
                   >
-                    <h4 className="text-xs uppercase tracking-wide text-muted-foreground font-mono-family">剧本引用</h4>
+                    <h4 className="text-xs uppercase tracking-wide text-muted-foreground font-mono-family">
+                      剧本引用
+                    </h4>
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                       {spriteUsages.length} 条
-                      <ChevronDown className={`w-4 h-4 transition-transform ${usageOpen ? 'rotate-180' : ''}`} />
+                      <ChevronDown
+                        className={`w-4 h-4 transition-transform ${usageOpen ? 'rotate-180' : ''}`}
+                      />
                     </div>
                   </button>
                   {usageOpen && (
                     <div className="mt-3 space-y-2">
                       {spriteUsages.length === 0 ? (
-                        <div className="text-xs text-muted-foreground border border-dashed border-border rounded-md p-3">未在剧本中找到该角色立绘引用。</div>
-                      ) : spriteUsages.map((usage, index) => (
-                        <button
-                          key={`${usage.assetName}-${usage.sceneFile}-${usage.lineNumber}-${index}`}
-                          type="button"
-                          onClick={() => openUsage(usage)}
-                          className="w-full rounded-md bg-secondary/20 p-2 text-left hover:bg-primary/10 transition-colors"
-                        >
-                          <div className="flex items-center gap-2 text-xs">
-                            <span className="font-mono-family text-primary">{usage.assetName}</span>
-                            <span className="text-muted-foreground">{usage.sceneFile} 第 {usage.lineNumber} 行</span>
-                            <ExternalLink className="ml-auto w-3 h-3 text-muted-foreground" />
-                          </div>
-                          <div className="mt-1 truncate text-[10px] text-muted-foreground font-mono-family">{usage.lineContent}</div>
-                        </button>
-                      ))}
+                        <div className="text-xs text-muted-foreground border border-dashed border-border rounded-md p-3">
+                          未在剧本中找到该角色立绘引用。
+                        </div>
+                      ) : (
+                        spriteUsages.map((usage, index) => (
+                          <button
+                            key={`${usage.assetName}-${usage.sceneFile}-${usage.lineNumber}-${index}`}
+                            type="button"
+                            onClick={() => openUsage(usage)}
+                            className="w-full rounded-md bg-secondary/20 p-2 text-left hover:bg-primary/10 transition-colors"
+                          >
+                            <div className="flex items-center gap-2 text-xs">
+                              <span className="font-mono-family text-primary">
+                                {usage.assetName}
+                              </span>
+                              <span className="text-muted-foreground">
+                                {usage.sceneFile} 第 {usage.lineNumber} 行
+                              </span>
+                              <ExternalLink className="ml-auto w-3 h-3 text-muted-foreground" />
+                            </div>
+                            <div className="mt-1 truncate text-[10px] text-muted-foreground font-mono-family">
+                              {usage.lineContent}
+                            </div>
+                          </button>
+                        ))
+                      )}
                     </div>
                   )}
                 </section>
@@ -1661,46 +2073,53 @@ export function CharacterPanel({
                   ) : (
                     <Save className="w-3.5 h-3.5" />
                   )}
-                  {savingId === selected.id ? '保存中' : recentlySavedId === selected.id ? '已保存' : '保存'}
+                  {savingId === selected.id
+                    ? '保存中'
+                    : recentlySavedId === selected.id
+                      ? '已保存'
+                      : '保存'}
                 </button>
               </div>
             )}
           </main>
         </div>
       )}
-      {pendingDeleteId && (() => {
-        const target = characters.find((c) => c.id === pendingDeleteId);
-        const name = target?.name?.trim() || '未命名角色';
-        return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-            <div className="w-[400px] max-w-full rounded-lg border border-border bg-card shadow-2xl">
-              <div className="border-b border-border px-4 py-3">
-                <h3 className="text-sm font-semibold text-destructive">删除角色</h3>
-              </div>
-              <div className="px-4 py-4 text-sm">
-                确定删除角色「{name}」？
-                <p className="mt-2 text-xs text-muted-foreground">此操作不可撤销，角色数据将永久丢失。</p>
-              </div>
-              <div className="flex justify-end gap-2 border-t border-border p-4">
-                <button
-                  type="button"
-                  onClick={() => setPendingDeleteId(null)}
-                  className="rounded-md bg-secondary px-4 py-2 text-sm hover:bg-secondary/70"
-                >
-                  取消
-                </button>
-                <button
-                  type="button"
-                  onClick={() => confirmDelete(pendingDeleteId)}
-                  className="rounded-md bg-destructive px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
-                >
-                  删除
-                </button>
+      {pendingDeleteId &&
+        (() => {
+          const target = characters.find((c) => c.id === pendingDeleteId);
+          const name = target?.name?.trim() || '未命名角色';
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+              <div className="w-[400px] max-w-full rounded-lg border border-border bg-card shadow-2xl">
+                <div className="border-b border-border px-4 py-3">
+                  <h3 className="text-sm font-semibold text-destructive">删除角色</h3>
+                </div>
+                <div className="px-4 py-4 text-sm">
+                  确定删除角色「{name}」？
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    此操作不可撤销，角色数据将永久丢失。
+                  </p>
+                </div>
+                <div className="flex justify-end gap-2 border-t border-border p-4">
+                  <button
+                    type="button"
+                    onClick={() => setPendingDeleteId(null)}
+                    className="rounded-md bg-secondary px-4 py-2 text-sm hover:bg-secondary/70"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => confirmDelete(pendingDeleteId)}
+                    className="rounded-md bg-destructive px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
+                  >
+                    删除
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        );
-      })()}
+          );
+        })()}
       <SpriteAiGenerateDialog
         open={pendingSpriteGeneration !== null}
         generation={pendingSpriteGeneration}
@@ -1743,7 +2162,9 @@ function SpriteAiGenerateDialog({
   const [selectedModel, setSelectedModel] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
-  const [generationProgress, setGenerationProgress] = useState<AiMediaGenerationProgress | null>(null);
+  const [generationProgress, setGenerationProgress] = useState<AiMediaGenerationProgress | null>(
+    null,
+  );
 
   const configuredModels = config ? parseConfiguredModels(config.model) : [];
   const effectiveModel = selectedModel || configuredModels[0] || config?.model.trim() || '';
@@ -1793,7 +2214,11 @@ function SpriteAiGenerateDialog({
       return;
     }
     if (!isBatch && !initialInstruction.trim()) {
-      setError(generation.target.kind === 'reference' ? '请先填写主体区域的设定图提示词。' : '请先填写该表情变体的提示词。');
+      setError(
+        generation.target.kind === 'reference'
+          ? '请先填写主体区域的设定图提示词。'
+          : '请先填写该表情变体的提示词。',
+      );
       return;
     }
     setError(null);
@@ -1834,7 +2259,9 @@ function SpriteAiGenerateDialog({
           </div>
 
           <div>
-            <label className="mb-1.5 block text-xs uppercase tracking-wide text-muted-foreground">生成模型</label>
+            <label className="mb-1.5 block text-xs uppercase tracking-wide text-muted-foreground">
+              生成模型
+            </label>
             {configuredModels.length > 1 ? (
               <select
                 value={effectiveModel}
@@ -1842,7 +2269,9 @@ function SpriteAiGenerateDialog({
                 className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
               >
                 {configuredModels.map((model) => (
-                  <option key={model} value={model}>{model}</option>
+                  <option key={model} value={model}>
+                    {model}
+                  </option>
                 ))}
               </select>
             ) : (
@@ -1899,7 +2328,11 @@ function SpriteAiGenerateDialog({
             disabled={loadingConfig || generating}
             className="inline-flex min-w-24 items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:opacity-90 disabled:opacity-50"
           >
-            {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+            {generating ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Sparkles className="h-4 w-4" />
+            )}
             {generating ? '生成中' : '生成'}
           </button>
         </div>

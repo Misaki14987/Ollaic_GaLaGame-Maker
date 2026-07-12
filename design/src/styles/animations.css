@@ -10,7 +10,8 @@
 }
 
 @keyframes pulse-glow {
-  0%, 100% {
+  0%,
+  100% {
     filter: drop-shadow(0 0 8px color-mix(in srgb, var(--color-warm-glow) 50%, transparent));
   }
   50% {
@@ -19,7 +20,8 @@
 }
 
 @keyframes float {
-  0%, 100% {
+  0%,
+  100% {
     transform: translateY(0px);
   }
   50% {

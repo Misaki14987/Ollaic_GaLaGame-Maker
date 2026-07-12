@@ -14,13 +14,7 @@ import {
 import { listScenes, sceneDisplayName, type SceneHeader } from '../lib/webgal-ipc';
 import { listAssets, type AssetInfo } from '../lib/assets-ipc';
 import { figureFileTail, spritePrefix, resolveSpriteFile } from '../lib/figure-resolve';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from './ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 
 interface DetailPanelProps {
   node: WebGalNode;
@@ -64,7 +58,8 @@ const typeOptions: { value: WebGalCommandType; label: string }[] = [
   { value: 'comment', label: '注释' },
 ];
 
-const inputClass = 'w-full px-3 py-2 bg-input-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/50 text-sm';
+const inputClass =
+  'w-full px-3 py-2 bg-input-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/50 text-sm';
 const labelClass = 'block text-xs uppercase tracking-widest text-muted-foreground mb-1.5';
 
 export function DetailPanel({
@@ -95,7 +90,9 @@ export function DetailPanel({
       .catch(() => {
         if (!cancelled) setMetadata(emptyAssetMetadata());
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [projectId, projectPath]);
 
   return (
@@ -110,7 +107,11 @@ export function DetailPanel({
             {commandLabels[node.type]}
           </div>
         </div>
-        <button onClick={onClose} className="p-1.5 rounded-md hover:bg-secondary/50 transition-colors" aria-label="关闭">
+        <button
+          onClick={onClose}
+          className="p-1.5 rounded-md hover:bg-secondary/50 transition-colors"
+          aria-label="关闭"
+        >
           <X className="w-4 h-4 text-muted-foreground" />
         </button>
       </div>
@@ -126,14 +127,26 @@ export function DetailPanel({
             className={`${inputClass} font-mono-family`}
             aria-label="指令类型"
           >
-            {typeOptions.map(opt => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            {typeOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
             ))}
           </select>
         </div>
 
         {/* Type-specific fields */}
-        {renderTypeFields(node, onUpdateNode, characterNames, projectPath, characters, metadata, suggestedFigureCharacter, scenes, sceneHeaders)}
+        {renderTypeFields(
+          node,
+          onUpdateNode,
+          characterNames,
+          projectPath,
+          characters,
+          metadata,
+          suggestedFigureCharacter,
+          scenes,
+          sceneHeaders,
+        )}
 
         {/* Common flags */}
         <div className="pt-3 border-t border-border space-y-3">
@@ -157,7 +170,6 @@ export function DetailPanel({
               onChange={(e) => onUpdateNode({ when: e.target.value || undefined })}
               className={`${inputClass} font-mono-family`}
               placeholder="例: score>10"
-              
               aria-label="条件"
             />
           </div>
@@ -165,12 +177,8 @@ export function DetailPanel({
 
         {/* Raw content preview */}
         <div className="pt-3 border-t border-border">
-          <label className={`${labelClass} font-mono-family`}>
-            节点 ID
-          </label>
-          <div className="text-xs text-muted-foreground font-mono-family">
-            {node.id}
-          </div>
+          <label className={`${labelClass} font-mono-family`}>节点 ID</label>
+          <div className="text-xs text-muted-foreground font-mono-family">{node.id}</div>
         </div>
       </div>
 
@@ -222,7 +230,7 @@ function renderTypeFields(
             />
             {characterNames && characterNames.length > 0 && (
               <datalist id="character-suggestions">
-                {characterNames.map(name => (
+                {characterNames.map((name) => (
                   <option key={name} value={name} />
                 ))}
               </datalist>
@@ -231,7 +239,10 @@ function renderTypeFields(
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label className={`${labelClass} font-mono-family mb-0`}>对话内容</label>
-              <button className="p-1 hover:bg-primary/10 rounded transition-colors group" aria-label="AI 生成对话">
+              <button
+                className="p-1 hover:bg-primary/10 rounded transition-colors group"
+                aria-label="AI 生成对话"
+              >
                 <Sparkles className="w-3 h-3 text-muted-foreground group-hover:text-primary transition-colors" />
               </button>
             </div>
@@ -264,7 +275,9 @@ function renderTypeFields(
                 />
               )}
             </div>
-            <p className="text-[10px] text-muted-foreground mt-1">作为当前对白的 -voice 标记保存，不会新建独立音频指令</p>
+            <p className="text-[10px] text-muted-foreground mt-1">
+              作为当前对白的 -voice 标记保存，不会新建独立音频指令
+            </p>
           </div>
         </>
       );
@@ -303,7 +316,9 @@ function renderTypeFields(
                 />
               )}
             </div>
-            <p className="text-[10px] text-muted-foreground mt-1">作为当前旁白的 -voice 标记保存，不会新建独立音频指令</p>
+            <p className="text-[10px] text-muted-foreground mt-1">
+              作为当前旁白的 -voice 标记保存，不会新建独立音频指令
+            </p>
           </div>
         </>
       );
@@ -311,12 +326,15 @@ function renderTypeFields(
     case 'intro':
       return (
         <div>
-          <label className={`${labelClass} font-mono-family`}>
-            黑屏文字（每行用回车分隔）
-          </label>
+          <label className={`${labelClass} font-mono-family`}>黑屏文字（每行用回车分隔）</label>
           <textarea
             value={(node.introLines || []).join('\n')}
-            onChange={(e) => onUpdate({ introLines: e.target.value.split('\n'), content: e.target.value.split('\n').join('|') })}
+            onChange={(e) =>
+              onUpdate({
+                introLines: e.target.value.split('\n'),
+                content: e.target.value.split('\n').join('|'),
+              })
+            }
             className={`${inputClass} h-28 resize-none font-body-family`}
             placeholder="第一行&#10;第二行&#10;第三行"
             aria-label="黑屏文字"
@@ -325,7 +343,9 @@ function renderTypeFields(
       );
 
     case 'choose':
-      return <ChoiceEditor node={node} onUpdate={onUpdate} scenes={scenes} sceneHeaders={sceneHeaders} />;
+      return (
+        <ChoiceEditor node={node} onUpdate={onUpdate} scenes={scenes} sceneHeaders={sceneHeaders} />
+      );
 
     case 'changeBg':
       return (
@@ -338,12 +358,20 @@ function renderTypeFields(
                   src={convertFileSrc(`${projectPath}/game/background/${node.asset}`)}
                   alt=""
                   className="w-full h-full object-cover"
-                  onError={(e) => { (e.currentTarget.style.display = 'none'); }}
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                  }}
                 />
               </div>
               <div className="px-3 py-2 min-w-0">
-                <div className="truncate text-sm">{backgroundAliases[node.asset] || node.asset}</div>
-                {backgroundAliases[node.asset] && <div className="truncate text-[11px] text-muted-foreground font-mono-family">{node.asset}</div>}
+                <div className="truncate text-sm">
+                  {backgroundAliases[node.asset] || node.asset}
+                </div>
+                {backgroundAliases[node.asset] && (
+                  <div className="truncate text-[11px] text-muted-foreground font-mono-family">
+                    {node.asset}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -393,7 +421,11 @@ function renderTypeFields(
             <label className={`${labelClass} font-mono-family`}>位置</label>
             <select
               value={node.figurePosition || 'center'}
-              onChange={(e) => onUpdate({ figurePosition: e.target.value as 'left' | 'center' | 'right' })}
+              onChange={(e) =>
+                onUpdate({
+                  figurePosition: e.target.value as 'left' | 'center' | 'right',
+                })
+              }
               className={inputClass}
               aria-label="立绘位置"
             >
@@ -446,9 +478,7 @@ function renderTypeFields(
     case 'callScene':
       return (
         <div>
-          <label className={`${labelClass} font-mono-family`}>
-            目标场景
-          </label>
+          <label className={`${labelClass} font-mono-family`}>目标场景</label>
           <SceneSelect
             value={node.targetScene || node.content || ''}
             scenes={scenes}
@@ -456,15 +486,15 @@ function renderTypeFields(
             onChange={(name) => onUpdate({ targetScene: name, content: name })}
           />
           <p className="text-[10px] text-muted-foreground mt-1">
-            {node.type === 'callScene' ? 'callScene 执行完后会返回当前场景' : 'changeScene 会永久切换'}
+            {node.type === 'callScene'
+              ? 'callScene 执行完后会返回当前场景'
+              : 'changeScene 会永久切换'}
           </p>
         </div>
       );
 
     case 'end':
-      return (
-        <p className="text-sm text-muted-foreground">结束当前场景，无需参数。</p>
-      );
+      return <p className="text-sm text-muted-foreground">结束当前场景，无需参数。</p>;
 
     case 'bgm':
     case 'playEffect':
@@ -473,7 +503,11 @@ function renderTypeFields(
         <>
           <div>
             <label className={`${labelClass} font-mono-family`}>
-              {node.type === 'bgm' ? '音乐文件' : node.type === 'playEffect' ? '音效文件' : '视频文件'}
+              {node.type === 'bgm'
+                ? '音乐文件'
+                : node.type === 'playEffect'
+                  ? '音效文件'
+                  : '视频文件'}
             </label>
             <div className="flex gap-1">
               <input
@@ -482,12 +516,24 @@ function renderTypeFields(
                 onChange={(e) => onUpdate({ asset: e.target.value, content: e.target.value })}
                 className={`${inputClass} flex-1 font-mono-family`}
                 placeholder={node.type === 'bgm' ? '例: bgm.mp3 或 none' : '例: effect.mp3'}
-                aria-label={node.type === 'bgm' ? '音乐文件' : node.type === 'playEffect' ? '音效文件' : '视频文件'}
+                aria-label={
+                  node.type === 'bgm'
+                    ? '音乐文件'
+                    : node.type === 'playEffect'
+                      ? '音效文件'
+                      : '视频文件'
+                }
               />
               {projectPath && (
                 <AssetPickerButton
                   projectPath={projectPath}
-                  category={node.type === 'playEffect' ? 'vocal' : node.type === 'playVideo' ? 'video' : 'bgm'}
+                  category={
+                    node.type === 'playEffect'
+                      ? 'vocal'
+                      : node.type === 'playVideo'
+                        ? 'video'
+                        : 'bgm'
+                  }
                   currentValue={node.asset || node.content}
                   aliases={
                     node.type === 'playEffect'
@@ -508,7 +554,11 @@ function renderTypeFields(
               min={0}
               max={100}
               value={node.volume ?? ''}
-              onChange={(e) => onUpdate({ volume: e.target.value ? parseInt(e.target.value, 10) : undefined })}
+              onChange={(e) =>
+                onUpdate({
+                  volume: e.target.value ? parseInt(e.target.value, 10) : undefined,
+                })
+              }
               className={inputClass}
               placeholder="默认 100"
               aria-label="音量"
@@ -521,9 +571,7 @@ function renderTypeFields(
     case 'jumpLabel':
       return (
         <div>
-          <label className={`${labelClass} font-mono-family`}>
-            标签名称
-          </label>
+          <label className={`${labelClass} font-mono-family`}>标签名称</label>
           <input
             type="text"
             value={node.labelName || node.content}
@@ -539,22 +587,32 @@ function renderTypeFields(
       return (
         <>
           <div>
-              <label className={`${labelClass} font-mono-family`}>变量名</label>
-              <input
-                type="text"
-                value={node.varName || ''}
-                onChange={(e) => onUpdate({ varName: e.target.value, content: `${e.target.value}=${node.varValue || ''}` })}
-                className={`${inputClass} font-mono-family`}
-                placeholder="例: score"
-                aria-label="变量名"
-              />
+            <label className={`${labelClass} font-mono-family`}>变量名</label>
+            <input
+              type="text"
+              value={node.varName || ''}
+              onChange={(e) =>
+                onUpdate({
+                  varName: e.target.value,
+                  content: `${e.target.value}=${node.varValue || ''}`,
+                })
+              }
+              className={`${inputClass} font-mono-family`}
+              placeholder="例: score"
+              aria-label="变量名"
+            />
           </div>
           <div>
             <label className={`${labelClass} font-mono-family`}>值</label>
             <input
               type="text"
               value={node.varValue || ''}
-              onChange={(e) => onUpdate({ varValue: e.target.value, content: `${node.varName || ''}=${e.target.value}` })}
+              onChange={(e) =>
+                onUpdate({
+                  varValue: e.target.value,
+                  content: `${node.varName || ''}=${e.target.value}`,
+                })
+              }
               className={`${inputClass} font-mono-family`}
               placeholder="例: 1, true, 文本"
               aria-label="值"
@@ -568,14 +626,14 @@ function renderTypeFields(
         <>
           <div>
             <label className={`${labelClass} font-mono-family`}>存入变量</label>
-              <input
-                type="text"
-                value={node.varName || node.content}
-                onChange={(e) => onUpdate({ varName: e.target.value, content: e.target.value })}
-                className={`${inputClass} font-mono-family`}
-                placeholder="例: name"
-                aria-label="存入变量"
-              />
+            <input
+              type="text"
+              value={node.varName || node.content}
+              onChange={(e) => onUpdate({ varName: e.target.value, content: e.target.value })}
+              className={`${inputClass} font-mono-family`}
+              placeholder="例: name"
+              aria-label="存入变量"
+            />
           </div>
           <div>
             <label className={`${labelClass} font-mono-family`}>提示文字</label>
@@ -626,7 +684,12 @@ function renderTypeFields(
             <input
               type="text"
               value={node.animationName || node.content}
-              onChange={(e) => onUpdate({ animationName: e.target.value, content: e.target.value })}
+              onChange={(e) =>
+                onUpdate({
+                  animationName: e.target.value,
+                  content: e.target.value,
+                })
+              }
               className={`${inputClass} font-mono-family`}
               placeholder="例: enter-from-left"
               aria-label="动画名称"
@@ -774,13 +837,19 @@ function CharacterFigurePicker({
 }) {
   const filename = node.asset || node.content;
   const inferred = useMemo(() => findSpriteSelection(characters, filename), [characters, filename]);
-  const selectedCharacterName = node.figureCharacter || inferred?.character.name || suggestedFigureCharacter || '';
-  const selectedCharacter = characters.find((character) => character.name === selectedCharacterName);
+  const selectedCharacterName =
+    node.figureCharacter || inferred?.character.name || suggestedFigureCharacter || '';
+  const selectedCharacter = characters.find(
+    (character) => character.name === selectedCharacterName,
+  );
   const figureAliases = useMemo(() => figureAliasesFromCharacters(characters), [characters]);
 
   useEffect(() => {
     if (!node.figureCharacter && !node.figureEmotion && inferred) {
-      onUpdate({ figureCharacter: inferred.character.name, figureEmotion: inferred.sprite.emotion });
+      onUpdate({
+        figureCharacter: inferred.character.name,
+        figureEmotion: inferred.sprite.emotion,
+      });
     }
   }, [inferred, node.figureCharacter, node.figureEmotion, onUpdate]);
 
@@ -811,7 +880,9 @@ function CharacterFigurePicker({
         >
           <option value="">无</option>
           {characters.map((character) => (
-            <option key={character.id} value={character.name}>{character.name}</option>
+            <option key={character.id} value={character.name}>
+              {character.name}
+            </option>
           ))}
         </select>
       </div>
@@ -820,18 +891,22 @@ function CharacterFigurePicker({
         <div>
           <div className="flex items-center justify-between mb-1.5">
             <label className={`${labelClass} font-mono-family mb-0`}>表情形态</label>
-            <span className="text-[10px] text-muted-foreground font-mono-family">{filename || 'none'}</span>
+            <span className="text-[10px] text-muted-foreground font-mono-family">
+              {filename || 'none'}
+            </span>
           </div>
           <CharacterEmotionDialog
             character={selectedCharacter}
             currentFile={filename}
             projectPath={projectPath}
-            onSelect={(sprite) => onUpdate({
-              asset: sprite.file,
-              content: sprite.file,
-              figureCharacter: selectedCharacter.name,
-              figureEmotion: sprite.emotion,
-            })}
+            onSelect={(sprite) =>
+              onUpdate({
+                asset: sprite.file,
+                content: sprite.file,
+                figureCharacter: selectedCharacter.name,
+                figureEmotion: sprite.emotion,
+              })
+            }
           />
         </div>
       ) : (
@@ -841,12 +916,14 @@ function CharacterFigurePicker({
             <input
               type="text"
               value={filename}
-              onChange={(e) => onUpdate({
-                asset: e.target.value,
-                content: e.target.value,
-                figureCharacter: undefined,
-                figureEmotion: undefined,
-              })}
+              onChange={(e) =>
+                onUpdate({
+                  asset: e.target.value,
+                  content: e.target.value,
+                  figureCharacter: undefined,
+                  figureEmotion: undefined,
+                })
+              }
               className={`${inputClass} flex-1 font-mono-family`}
               placeholder="例: stand.webp 或 none"
               aria-label="立绘文件"
@@ -857,12 +934,14 @@ function CharacterFigurePicker({
                 category="figure"
                 currentValue={filename}
                 aliases={figureAliases}
-                onSelect={(name) => onUpdate({
-                  asset: name,
-                  content: name,
-                  figureCharacter: undefined,
-                  figureEmotion: undefined,
-                })}
+                onSelect={(name) =>
+                  onUpdate({
+                    asset: name,
+                    content: name,
+                    figureCharacter: undefined,
+                    figureEmotion: undefined,
+                  })
+                }
               />
             )}
           </div>
@@ -877,8 +956,8 @@ function CharacterFigurePicker({
 // 文件名解析复用 figure-resolve（与 CharacterPanel 的命名规则一致：
 // `${角色}_${情绪}_${timestamp}.${ext}`，变体立绘只进 figure/<角色ID>/、sprite.file 留空）。
 interface ResolvedSprite {
-  file: string;          // 写入脚本的限定文件名，如 "<角色ID>/xxx.png"
-  src: string | null;    // convertFileSrc 后的可显示地址
+  file: string; // 写入脚本的限定文件名，如 "<角色ID>/xxx.png"
+  src: string | null; // convertFileSrc 后的可显示地址
 }
 
 function resolveSpriteImage(
@@ -924,16 +1003,19 @@ function CharacterEmotionDialog({
       ]);
       if (!cancelled) setAssets([...variants, ...candidates]);
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [open, projectPath, character.id]);
 
   const hasSelection = Boolean(currentFile) && currentFile !== 'none';
   // 当前选中文件直接据其限定路径出图：变体的 sprite.file 为空，无法用 find 反查，
   // 故不依赖 sprites 匹配，直接用 currentFile 渲染缩略图。
   const selectedSprite = character.sprites.find((sprite) => sprite.file === currentFile);
-  const selectedSrc = hasSelection && projectPath
-    ? convertFileSrc(`${projectPath}/game/figure/${currentFile}`)
-    : null;
+  const selectedSrc =
+    hasSelection && projectPath
+      ? convertFileSrc(`${projectPath}/game/figure/${currentFile}`)
+      : null;
   const filtered = character.sprites.filter((sprite) =>
     `${sprite.emotion} ${sprite.file}`.toLowerCase().includes(search.toLowerCase()),
   );
@@ -957,7 +1039,9 @@ function CharacterEmotionDialog({
   const unboundAssets = useMemo(() => {
     const list = assets.filter((asset) => !boundTails.has(figureFileTail(asset.name)));
     return search
-      ? list.filter((asset) => figureFileTail(asset.name).toLowerCase().includes(search.toLowerCase()))
+      ? list.filter((asset) =>
+          figureFileTail(asset.name).toLowerCase().includes(search.toLowerCase()),
+        )
       : list;
   }, [assets, boundTails, search]);
 
@@ -980,8 +1064,14 @@ function CharacterEmotionDialog({
               )}
             </div>
             <div className="min-w-0">
-              <div className="text-sm truncate">{selectedSprite?.emotion ? `${character.name} · ${selectedSprite.emotion}` : character.name}</div>
-              <div className="mt-1 text-[11px] text-muted-foreground truncate font-mono-family">{figureFileTail(currentFile)}</div>
+              <div className="text-sm truncate">
+                {selectedSprite?.emotion
+                  ? `${character.name} · ${selectedSprite.emotion}`
+                  : character.name}
+              </div>
+              <div className="mt-1 text-[11px] text-muted-foreground truncate font-mono-family">
+                {figureFileTail(currentFile)}
+              </div>
             </div>
           </div>
         ) : (
@@ -992,8 +1082,12 @@ function CharacterEmotionDialog({
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-2xl p-0 overflow-hidden">
           <DialogHeader className="px-5 pt-5 pb-3 border-b border-border">
-            <DialogTitle className="text-base font-display-family">选择立绘 - {character.name}</DialogTitle>
-            <DialogDescription className="text-xs">点击表情卡片后会写入对应立绘文件名。</DialogDescription>
+            <DialogTitle className="text-base font-display-family">
+              选择立绘 - {character.name}
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              点击表情卡片后会写入对应立绘文件名。
+            </DialogDescription>
           </DialogHeader>
           <div className="px-5 py-3 border-b border-border">
             <div className="relative">
@@ -1011,7 +1105,9 @@ function CharacterEmotionDialog({
           </div>
           <div className="max-h-[60vh] overflow-y-auto p-5">
             {!hasAnything ? (
-              <div className="py-12 text-center text-sm text-muted-foreground">该角色暂无立绘，请先在素材库中添加。</div>
+              <div className="py-12 text-center text-sm text-muted-foreground">
+                该角色暂无立绘，请先在素材库中添加。
+              </div>
             ) : (
               <div className="space-y-4">
                 {filtered.length > 0 && (
@@ -1023,14 +1119,24 @@ function CharacterEmotionDialog({
                         <button
                           type="button"
                           key={`${character.id}-${sprite.file}-${sprite.emotion}`}
-                          onClick={() => { onSelect({ ...sprite, file: resolved.file || sprite.file }); setOpen(false); }}
+                          onClick={() => {
+                            onSelect({
+                              ...sprite,
+                              file: resolved.file || sprite.file,
+                            });
+                            setOpen(false);
+                          }}
                           className={`min-h-40 rounded-md border overflow-hidden bg-card/60 hover:bg-secondary/50 transition-colors text-left ${
                             selected ? 'border-primary bg-primary/10 text-primary' : 'border-border'
                           }`}
                         >
                           <div className="h-28 bg-secondary/30 flex items-center justify-center overflow-hidden">
                             {resolved.src ? (
-                              <img src={resolved.src} alt="" className="w-full h-full object-cover object-top" />
+                              <img
+                                src={resolved.src}
+                                alt=""
+                                className="w-full h-full object-cover object-top"
+                              />
                             ) : (
                               <Image className="w-7 h-7 text-muted-foreground/40" />
                             )}
@@ -1045,7 +1151,9 @@ function CharacterEmotionDialog({
                 )}
                 {unboundAssets.length > 0 && (
                   <>
-                    <div className="text-[11px] text-muted-foreground uppercase tracking-wide">未绑定素材</div>
+                    <div className="text-[11px] text-muted-foreground uppercase tracking-wide">
+                      未绑定素材
+                    </div>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                       {unboundAssets.map((asset) => {
                         const tail = figureFileTail(asset.name);
@@ -1055,13 +1163,22 @@ function CharacterEmotionDialog({
                           <button
                             type="button"
                             key={asset.path}
-                            onClick={() => { onSelect({ emotion: '', file: qualifiedFile }); setOpen(false); }}
+                            onClick={() => {
+                              onSelect({ emotion: '', file: qualifiedFile });
+                              setOpen(false);
+                            }}
                             className={`min-h-40 rounded-md border overflow-hidden bg-card/60 hover:bg-secondary/50 transition-colors text-left ${
-                              selected ? 'border-primary bg-primary/10 text-primary' : 'border-border'
+                              selected
+                                ? 'border-primary bg-primary/10 text-primary'
+                                : 'border-border'
                             }`}
                           >
                             <div className="h-28 bg-secondary/30 flex items-center justify-center overflow-hidden">
-                              <img src={convertFileSrc(asset.path)} alt="" className="w-full h-full object-cover object-top" />
+                              <img
+                                src={convertFileSrc(asset.path)}
+                                alt=""
+                                className="w-full h-full object-cover object-top"
+                              />
                             </div>
                             <div className="px-2 py-1 text-center">
                               <div className="truncate text-xs text-muted-foreground">{tail}</div>
@@ -1124,7 +1241,9 @@ function ScenePickerButton({
         <DialogContent className="max-w-lg p-0 overflow-hidden">
           <DialogHeader className="px-5 pt-5 pb-3 border-b border-border">
             <DialogTitle className="text-base font-display-family">选择场景文件</DialogTitle>
-            <DialogDescription className="text-xs">读取 game/scene/ 下的 .txt 场景。</DialogDescription>
+            <DialogDescription className="text-xs">
+              读取 game/scene/ 下的 .txt 场景。
+            </DialogDescription>
           </DialogHeader>
           <div className="px-5 py-3 border-b border-border">
             <div className="relative">
@@ -1140,22 +1259,33 @@ function ScenePickerButton({
           </div>
           <div className="max-h-[55vh] overflow-y-auto p-3">
             {loading ? (
-              <div className="flex justify-center py-10"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
+              <div className="flex justify-center py-10">
+                <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+              </div>
             ) : filtered.length === 0 ? (
               <div className="py-10 text-center text-sm text-muted-foreground">暂无场景文件</div>
-            ) : filtered.map((scene) => (
-              <button
-                key={scene}
-                type="button"
-                onClick={() => { onSelect(scene); setOpen(false); }}
-                className={`w-full px-3 py-2 rounded-md text-left hover:bg-secondary/50 transition-colors ${
-                  currentValue === scene ? 'bg-primary/10 text-primary' : ''
-                }`}
-              >
-                <div className="text-sm truncate">{aliases[scene] || scene}</div>
-                {aliases[scene] && <div className="mt-0.5 text-xs text-muted-foreground truncate font-mono-family">{scene}</div>}
-              </button>
-            ))}
+            ) : (
+              filtered.map((scene) => (
+                <button
+                  key={scene}
+                  type="button"
+                  onClick={() => {
+                    onSelect(scene);
+                    setOpen(false);
+                  }}
+                  className={`w-full px-3 py-2 rounded-md text-left hover:bg-secondary/50 transition-colors ${
+                    currentValue === scene ? 'bg-primary/10 text-primary' : ''
+                  }`}
+                >
+                  <div className="text-sm truncate">{aliases[scene] || scene}</div>
+                  {aliases[scene] && (
+                    <div className="mt-0.5 text-xs text-muted-foreground truncate font-mono-family">
+                      {scene}
+                    </div>
+                  )}
+                </button>
+              ))
+            )}
           </div>
         </DialogContent>
       </Dialog>
@@ -1201,14 +1331,21 @@ function SceneSelect({
       {!known && value && <option value={value}>{value}（未找到）</option>}
       {scenes.map((s) => (
         <option key={s} value={s}>
-          {showOutline ? sceneDisplayName(s, sceneHeaders[s]) : (sceneHeaders[s]?.chapter?.trim() || s)}
+          {showOutline
+            ? sceneDisplayName(s, sceneHeaders[s])
+            : sceneHeaders[s]?.chapter?.trim() || s}
         </option>
       ))}
     </select>
   );
 }
 
-function ChoiceEditor({ node, onUpdate, scenes = [], sceneHeaders = {} }: {
+function ChoiceEditor({
+  node,
+  onUpdate,
+  scenes = [],
+  sceneHeaders = {},
+}: {
   node: WebGalNode;
   onUpdate: (u: Partial<WebGalNode>) => void;
   scenes?: string[];
@@ -1223,12 +1360,18 @@ function ChoiceEditor({ node, onUpdate, scenes = [], sceneHeaders = {} }: {
   const update = (idx: number, field: 'text' | 'target', value: string) => {
     const next = [...choices];
     next[idx] = { ...next[idx], [field]: value };
-    onUpdate({ choices: next, content: next.map(c => c.target ? `${c.text}:${c.target}` : c.text).join('|') });
+    onUpdate({
+      choices: next,
+      content: next.map((c) => (c.target ? `${c.text}:${c.target}` : c.text)).join('|'),
+    });
   };
 
   const remove = (idx: number) => {
     const next = choices.filter((_, i) => i !== idx);
-    onUpdate({ choices: next, content: next.map(c => c.target ? `${c.text}:${c.target}` : c.text).join('|') });
+    onUpdate({
+      choices: next,
+      content: next.map((c) => (c.target ? `${c.text}:${c.target}` : c.text)).join('|'),
+    });
   };
 
   return (
@@ -1283,9 +1426,7 @@ function ChoiceEditor({ node, onUpdate, scenes = [], sceneHeaders = {} }: {
         ))}
 
         {choices.length === 0 && (
-          <div className="text-center py-4 text-muted-foreground text-xs">
-            点击上方添加选项分支
-          </div>
+          <div className="text-center py-4 text-muted-foreground text-xs">点击上方添加选项分支</div>
         )}
       </div>
     </div>

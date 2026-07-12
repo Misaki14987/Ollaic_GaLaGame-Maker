@@ -2,15 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 export type AiProvider =
-  | 'openai'
-  | 'anthropic'
-  | 'gemini'
-  | 'deepseek'
-  | 'groq'
-  | 'xai'
-  | 'ollama'
-  | 'cohere'
-  | 'custom';
+  'openai' | 'anthropic' | 'gemini' | 'deepseek' | 'groq' | 'xai' | 'ollama' | 'cohere' | 'custom';
 
 export interface AiConfig {
   provider: AiProvider | string;
@@ -156,7 +148,12 @@ export async function aiGenerateTts(
   model: string,
   format: string,
 ): Promise<GeneratedMedia> {
-  return invoke<GeneratedMedia>('ai_generate_tts', { text, voicePrompt, model, format });
+  return invoke<GeneratedMedia>('ai_generate_tts', {
+    text,
+    voicePrompt,
+    model,
+    format,
+  });
 }
 
 export async function generateMusic(
@@ -210,7 +207,12 @@ export async function generateBatchTts(
   model: string,
   format: string,
 ): Promise<BatchTtsProgress[]> {
-  return invoke<BatchTtsProgress[]>('generate_batch_tts', { projectPath, items, model, format });
+  return invoke<BatchTtsProgress[]>('generate_batch_tts', {
+    projectPath,
+    items,
+    model,
+    format,
+  });
 }
 
 export async function listenBatchTtsProgress(
@@ -268,7 +270,11 @@ export async function aiChatStream(
   });
 
   try {
-    await invoke<void>('ai_chat_stream', { requestId, messages, characterContext });
+    await invoke<void>('ai_chat_stream', {
+      requestId,
+      messages,
+      characterContext,
+    });
   } catch (err) {
     stop();
     handlers.onError?.(String(err));
@@ -290,7 +296,12 @@ export async function aiChatTurn(
   const wireMessages = messages.map((m) => ({
     role: m.role,
     content: m.content,
-    tool_calls: m.toolCalls?.map((c) => ({ id: c.id, name: c.name, arguments: c.arguments })) ?? null,
+    tool_calls:
+      m.toolCalls?.map((c) => ({
+        id: c.id,
+        name: c.name,
+        arguments: c.arguments,
+      })) ?? null,
     tool_call_id: m.toolCallId ?? null,
   }));
   return invoke<AiTurnResult>('ai_chat_turn', {

@@ -14,7 +14,10 @@ pub fn run_state_path(project_path: &Path, run_id: &str) -> PathBuf {
     run_state_dir(project_path).join(format!("{}.json", run_id))
 }
 
-pub fn load_run_state(project_path: &Path, run_id: &str) -> Result<Option<RunState>, RunStoreError> {
+pub fn load_run_state(
+    project_path: &Path,
+    run_id: &str,
+) -> Result<Option<RunState>, RunStoreError> {
     let path = run_state_path(project_path, run_id);
     let candidates = crate::json_store::read_candidates(&path)
         .map_err(|e| RunStoreError::ReadFailed(path.display().to_string(), e.to_string()))?;
@@ -105,8 +108,7 @@ mod tests {
             .step(StepDef::new("a", StepKind::Plan))
             .step(StepDef::new("b", StepKind::Outline).depends_on("a"));
         let mut state = RunState::new(run_id, ".", "a brief", &recipe, 100);
-        state.find_step_mut("a").unwrap().status =
-            crate::pipeline::state::StepStatus::Succeeded;
+        state.find_step_mut("a").unwrap().status = crate::pipeline::state::StepStatus::Succeeded;
         state
     }
 
@@ -164,10 +166,12 @@ mod tests {
         save_run_state(&project, &newer).unwrap();
 
         let runs = list_run_states(&project).unwrap();
-        assert_eq!(runs.iter().map(|run| run.run_id.as_str()).collect::<Vec<_>>(), vec![
-            "run_new",
-            "run_old",
-        ]);
+        assert_eq!(
+            runs.iter()
+                .map(|run| run.run_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["run_new", "run_old",]
+        );
     }
 
     #[test]
@@ -194,6 +198,9 @@ mod tests {
 
         save_run_state(&project, &state).unwrap();
 
-        assert_eq!(load_run_state(&project, "run_backup_resave").unwrap(), Some(state));
+        assert_eq!(
+            load_run_state(&project, "run_backup_resave").unwrap(),
+            Some(state)
+        );
     }
 }

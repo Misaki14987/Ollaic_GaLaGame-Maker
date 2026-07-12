@@ -10,7 +10,10 @@ const steps: Pick<StepDef, 'id' | 'kind'>[] = [
   { id: 'outline', kind: 'outline' },
 ];
 
-const record = (event: PipelineEventRecord['event'], receivedAt: number): PipelineEventRecord => ({ event, receivedAt });
+const record = (event: PipelineEventRecord['event'], receivedAt: number): PipelineEventRecord => ({
+  event,
+  receivedAt,
+});
 
 describe('PipelineEventLedger', () => {
   it('announces a useful empty state', () => {
@@ -24,7 +27,15 @@ describe('PipelineEventLedger', () => {
   it('sorts events chronologically and renders localized run and step activity', () => {
     const events = [
       record({ type: 'runCompleted', runId: 'run-1' }, at(8, 10)),
-      record({ type: 'stepFailed', runId: 'run-1', stepId: 'outline', error: '模型超时' }, at(8, 4)),
+      record(
+        {
+          type: 'stepFailed',
+          runId: 'run-1',
+          stepId: 'outline',
+          error: '模型超时',
+        },
+        at(8, 4),
+      ),
       record({ type: 'runStarted', runId: 'run-1' }, at(8, 1)),
       record({ type: 'stepStarted', runId: 'run-1', stepId: 'plan', kind: 'plan' }, at(8, 2)),
       record({ type: 'stepSucceeded', runId: 'run-1', stepId: 'plan', output: '{}' }, at(8, 3)),
@@ -59,8 +70,24 @@ describe('PipelineEventLedger', () => {
 
   it('learns an unknown step type from its start event', () => {
     const events = [
-      record({ type: 'stepStarted', runId: 'run-1', stepId: 'export', kind: 'export' }, at(9, 1)),
-      record({ type: 'stepSucceeded', runId: 'run-1', stepId: 'export', output: null }, at(9, 2)),
+      record(
+        {
+          type: 'stepStarted',
+          runId: 'run-1',
+          stepId: 'export',
+          kind: 'export',
+        },
+        at(9, 1),
+      ),
+      record(
+        {
+          type: 'stepSucceeded',
+          runId: 'run-1',
+          stepId: 'export',
+          output: null,
+        },
+        at(9, 2),
+      ),
     ];
 
     render(<PipelineEventLedger events={events} />);
