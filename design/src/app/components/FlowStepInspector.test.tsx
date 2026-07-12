@@ -132,12 +132,7 @@ describe('FlowStepInspector', () => {
   it('opens a completed business artifact in its editor', async () => {
     const user = userEvent.setup();
     const onOpenArtifact = vi.fn();
-    const character = {
-      ...step,
-      id: 'character',
-      kind: 'character',
-      status: 'succeeded' as const,
-    };
+    const character = { ...step, id: 'character', kind: 'character', status: 'succeeded' as const };
     render(
       <FlowStepInspector
         selected={character}
@@ -226,15 +221,9 @@ describe('FlowStepInspector', () => {
     expect(screen.getByText('provider timeout')).toBeInTheDocument();
     expect(screen.getByText(/"queued": 2/)).toBeInTheDocument();
 
-    const preview = screen.getByRole('button', {
-      name: '预览 bg_opening 候选 1',
-    });
-    const promote = screen.getByRole('button', {
-      name: '提升 bg_opening 候选 1',
-    });
-    const remove = screen.getByRole('button', {
-      name: '删除 bg_opening 候选 1',
-    });
+    const preview = screen.getByRole('button', { name: '预览 bg_opening 候选 1' });
+    const promote = screen.getByRole('button', { name: '提升 bg_opening 候选 1' });
+    const remove = screen.getByRole('button', { name: '删除 bg_opening 候选 1' });
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
     await user.click(preview);
     expect(promote).toBeDisabled();
