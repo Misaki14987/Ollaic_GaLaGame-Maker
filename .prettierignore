@@ -1,0 +1,9 @@
+node_modules
+design/dist
+src-tauri/target
+coverage
+playwright-report
+test-results
+
+pnpm-lock.yaml
+bun.lock
