@@ -41,7 +41,11 @@ export function figureFileTail(file: string): string {
   return slash >= 0 ? file.slice(slash + 1) : file;
 }
 
-function assetMatchesSprite(character: Character, sprite: CharacterSprite, asset: AssetInfo): boolean {
+function assetMatchesSprite(
+  character: Character,
+  sprite: CharacterSprite,
+  asset: AssetInfo,
+): boolean {
   const tail = figureFileTail(asset.name);
   if (tail.startsWith(spritePrefix(character, sprite.emotion))) return true;
   const stem = tail.replace(/\.[^.]+$/, '');
@@ -75,7 +79,10 @@ export function resolveSpriteFile(
 }
 
 /** Match a character by id, name, or alias (case-insensitive). */
-export function findCharacter(characters: Character[], charNameOrId: string): Character | undefined {
+export function findCharacter(
+  characters: Character[],
+  charNameOrId: string,
+): Character | undefined {
   const needle = charNameOrId.trim().toLowerCase();
   if (!needle) return undefined;
   return characters.find((c) => {

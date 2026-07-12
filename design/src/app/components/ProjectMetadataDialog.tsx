@@ -1,6 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
-import { AlertTriangle, CheckCircle2, FolderOpen, Loader2, Package, RotateCcw, Save, X } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  FolderOpen,
+  Loader2,
+  Package,
+  RotateCcw,
+  Save,
+  X,
+} from 'lucide-react';
 import type { ExportValidationIssue, ProjectMetadata } from '../lib/webgal-ipc';
 
 export type ExportTaskStatus = 'idle' | 'savingMetadata' | 'exporting' | 'succeeded' | 'failed';
@@ -102,7 +111,8 @@ export function ProjectMetadataDialog({
           <div>
             <h2 className="text-lg font-display-family">项目元信息与导出</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              为《{projectName}》维护简介、版本与导出说明。导出结果会包含标准 WebGAL 目录和元信息文件。
+              为《{projectName}》维护简介、版本与导出说明。导出结果会包含标准 WebGAL
+              目录和元信息文件。
             </p>
           </div>
           <button
@@ -273,8 +283,14 @@ function ExportStatus({
           <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-500" />
           <div className="min-w-0">
             <div className="font-medium text-emerald-700 dark:text-emerald-300">导出成功</div>
-            {task.outputPath && <div className="mt-1 break-all text-xs text-muted-foreground">{task.outputPath}</div>}
-            <IssueList warnings={task.warnings} warningIssues={warningIssues} errorIssues={errorIssues} />
+            {task.outputPath && (
+              <div className="mt-1 break-all text-xs text-muted-foreground">{task.outputPath}</div>
+            )}
+            <IssueList
+              warnings={task.warnings}
+              warningIssues={warningIssues}
+              errorIssues={errorIssues}
+            />
           </div>
         </div>
       </div>
@@ -288,10 +304,17 @@ function ExportStatus({
           <AlertTriangle className="mt-0.5 h-4 w-4 text-destructive" />
           <div className="min-w-0 flex-1">
             <div className="font-medium text-destructive">
-              导出失败{task.failureCount > 1 ? `（第 ${task.failureCount} 次）` : ''}
+              导出失败
+              {task.failureCount > 1 ? `（第 ${task.failureCount} 次）` : ''}
             </div>
-            {task.error && <div className="mt-1 break-words text-xs text-muted-foreground">{task.error}</div>}
-            <IssueList warnings={task.warnings} warningIssues={warningIssues} errorIssues={errorIssues} />
+            {task.error && (
+              <div className="mt-1 break-words text-xs text-muted-foreground">{task.error}</div>
+            )}
+            <IssueList
+              warnings={task.warnings}
+              warningIssues={warningIssues}
+              errorIssues={errorIssues}
+            />
           </div>
           {onRetry && (
             <button
@@ -311,7 +334,11 @@ function ExportStatus({
   if (task.warnings.length > 0 || task.issues.length > 0) {
     return (
       <div className="rounded-md border border-border bg-secondary/30 px-3 py-2 text-sm">
-        <IssueList warnings={task.warnings} warningIssues={warningIssues} errorIssues={errorIssues} />
+        <IssueList
+          warnings={task.warnings}
+          warningIssues={warningIssues}
+          errorIssues={errorIssues}
+        />
       </div>
     );
   }
@@ -330,7 +357,10 @@ function IssueList({
 }) {
   const rows = [
     ...errorIssues.map((issue) => ({ kind: '错误', text: formatIssue(issue) })),
-    ...warningIssues.map((issue) => ({ kind: '警告', text: formatIssue(issue) })),
+    ...warningIssues.map((issue) => ({
+      kind: '警告',
+      text: formatIssue(issue),
+    })),
     ...warnings.map((warning) => ({ kind: '警告', text: warning })),
   ];
   if (rows.length === 0) return null;
@@ -350,13 +380,7 @@ function formatIssue(issue: ExportValidationIssue): string {
   return issue.path ? `${issue.message} (${issue.path})` : issue.message;
 }
 
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
       <div className="mb-1.5 text-xs uppercase tracking-widest text-muted-foreground font-mono-family">

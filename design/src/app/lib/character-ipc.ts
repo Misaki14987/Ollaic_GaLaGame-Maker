@@ -47,9 +47,6 @@ export async function listCharacterNames(projectPath: string): Promise<Character
 }
 
 /** Bulk-save the entire character list. */
-export async function saveCharacters(
-  projectPath: string,
-  characters: Character[],
-): Promise<void> {
+export async function saveCharacters(projectPath: string, characters: Character[]): Promise<void> {
   return invoke<void>('save_characters', { projectPath, characters });
 }

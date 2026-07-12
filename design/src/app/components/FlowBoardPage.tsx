@@ -9,9 +9,7 @@ import type { StoryPlan } from '../lib/pipeline-types';
 export function FlowBoardPage() {
   const navigate = useNavigate();
   const { projectId } = useParams();
-  const projectPath = projectId
-    ? localStorage.getItem(`project-path-${projectId}`) ?? ''
-    : '';
+  const projectPath = projectId ? (localStorage.getItem(`project-path-${projectId}`) ?? '') : '';
 
   const openArtifact = (step: FlowStepView, plan: StoryPlan | null) => {
     if (!projectId) return;
@@ -43,7 +41,9 @@ export function FlowBoardPage() {
             <div>
               <AlertTriangle className="mx-auto mb-3 h-10 w-10 text-destructive" />
               <p className="mb-4 text-sm text-muted-foreground">项目路径不可用</p>
-              <Button variant="outline" onClick={() => navigate('/')}>返回项目列表</Button>
+              <Button variant="outline" onClick={() => navigate('/')}>
+                返回项目列表
+              </Button>
             </div>
           </div>
         )}

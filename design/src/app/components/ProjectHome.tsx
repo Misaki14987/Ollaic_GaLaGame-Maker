@@ -59,7 +59,9 @@ export function ProjectHome() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
   const [projects, setProjects] = useState<Project[]>(loadProjects);
-  const [sidebarFilter, setSidebarFilter] = useState<'all' | 'favorites' | 'recent' | 'trash'>('all');
+  const [sidebarFilter, setSidebarFilter] = useState<'all' | 'favorites' | 'recent' | 'trash'>(
+    'all',
+  );
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [projectName, setProjectName] = useState('');
@@ -86,11 +88,16 @@ export function ProjectHome() {
   const greeting = useMemo(() => {
     const now = new Date();
     const hour = now.getHours();
-    const title = hour < 5 ? '夜深了，创作者'
-      : hour < 11 ? '早安，创作者'
-      : hour < 14 ? '午安，创作者'
-      : hour < 18 ? '下午好，创作者'
-      : '晚上好，创作者';
+    const title =
+      hour < 5
+        ? '夜深了，创作者'
+        : hour < 11
+          ? '早安，创作者'
+          : hour < 14
+            ? '午安，创作者'
+            : hour < 18
+              ? '下午好，创作者'
+              : '晚上好，创作者';
     const pad = (n: number) => String(n).padStart(2, '0');
     const tag = `STORY OS · ${now.getFullYear()}.${pad(now.getMonth() + 1)}.${pad(now.getDate())} · 在线`;
     return { title, tag };
@@ -99,10 +106,14 @@ export function ProjectHome() {
   const filterLabel = useMemo(() => {
     if (searchQuery.trim()) return '搜索结果';
     switch (sidebarFilter) {
-      case 'favorites': return '我的收藏';
-      case 'recent': return '最近编辑';
-      case 'trash': return '回收站';
-      default: return '全部项目';
+      case 'favorites':
+        return '我的收藏';
+      case 'recent':
+        return '最近编辑';
+      case 'trash':
+        return '回收站';
+      default:
+        return '全部项目';
     }
   }, [sidebarFilter, searchQuery]);
 
@@ -124,10 +135,11 @@ export function ProjectHome() {
 
     const query = searchQuery.trim().toLowerCase();
     if (!query) return list;
-    return list.filter((p) =>
-      p.name.toLowerCase().includes(query) ||
-      p.description.toLowerCase().includes(query) ||
-      p.path.toLowerCase().includes(query),
+    return list.filter(
+      (p) =>
+        p.name.toLowerCase().includes(query) ||
+        p.description.toLowerCase().includes(query) ||
+        p.path.toLowerCase().includes(query),
     );
   }, [projects, searchQuery, sidebarFilter]);
 
@@ -148,11 +160,17 @@ export function ProjectHome() {
 
   const handleSaveEdit = () => {
     if (!editingProject) return;
-    setProjects((prev) => prev.map((p) =>
-      p.id === editingProject.id
-        ? { ...p, name: editName.trim() || p.name, description: editDesc.trim() }
-        : p,
-    ));
+    setProjects((prev) =>
+      prev.map((p) =>
+        p.id === editingProject.id
+          ? {
+              ...p,
+              name: editName.trim() || p.name,
+              description: editDesc.trim(),
+            }
+          : p,
+      ),
+    );
     setEditingProject(null);
   };
 
@@ -235,19 +253,19 @@ export function ProjectHome() {
 
   const toggleFavorite = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    setProjects((prev) => prev.map((p) => p.id === id ? { ...p, isFavorite: !p.isFavorite } : p));
+    setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, isFavorite: !p.isFavorite } : p)));
   };
 
   const deleteProject = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (confirm('移入回收站？（不会删除磁盘上的文件）')) {
-      setProjects((prev) => prev.map((p) => p.id === id ? { ...p, deleted: true } : p));
+      setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, deleted: true } : p)));
     }
   };
 
   const restoreProject = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    setProjects((prev) => prev.map((p) => p.id === id ? { ...p, deleted: false } : p));
+    setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, deleted: false } : p)));
   };
 
   const permanentlyDeleteProject = (id: string, e: React.MouseEvent) => {
@@ -290,7 +308,9 @@ export function ProjectHome() {
           <span className="font-display-family text-base font-semibold tracking-tight text-primary">
             Story OS
           </span>
-          <span className="hidden font-mono-family text-[10px] font-semibold uppercase tracking-widest text-muted-foreground sm:inline">工作台</span>
+          <span className="hidden font-mono-family text-[10px] font-semibold uppercase tracking-widest text-muted-foreground sm:inline">
+            工作台
+          </span>
         </div>
         <div className="flex items-center gap-2">
           <div className="relative hidden sm:block">
@@ -315,8 +335,12 @@ export function ProjectHome() {
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-tertiary animate-pulse" />
               {greeting.tag}
             </div>
-            <h1 className="font-display-family text-3xl font-semibold tracking-tight text-foreground">{greeting.title}</h1>
-            <p className="mt-1 text-sm text-muted-foreground">Story OS 2.0 准备就绪，今天想创造怎样的世界？</p>
+            <h1 className="font-display-family text-3xl font-semibold tracking-tight text-foreground">
+              {greeting.title}
+            </h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Story OS 2.0 准备就绪，今天想创造怎样的世界？
+            </p>
           </div>
 
           {/* Quick actions */}
@@ -358,7 +382,7 @@ export function ProjectHome() {
             title="项目库"
             icon={Folder}
             className="flex min-h-0 flex-1 flex-col"
-            action={(
+            action={
               <div className="flex items-center gap-1 rounded border border-border bg-surface-container px-1 py-0.5">
                 <button
                   type="button"
@@ -377,15 +401,30 @@ export function ProjectHome() {
                   <ListIcon className="h-4 w-4" />
                 </button>
               </div>
-            )}
+            }
           >
             <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[200px_minmax(0,1fr)]">
               {/* Left filter sidebar */}
               <aside className="flex flex-row flex-wrap gap-1.5 border-b border-border/50 bg-surface-container-lowest p-3 md:flex-col md:gap-1 md:border-b-0 md:border-r md:overflow-y-auto">
-                {filterButton('all', '全部项目', <Folder className="h-4 w-4" />, activeProjects.length)}
-                {filterButton('favorites', '我的收藏', <Star className="h-4 w-4" />, activeProjects.filter((p) => p.isFavorite).length)}
+                {filterButton(
+                  'all',
+                  '全部项目',
+                  <Folder className="h-4 w-4" />,
+                  activeProjects.length,
+                )}
+                {filterButton(
+                  'favorites',
+                  '我的收藏',
+                  <Star className="h-4 w-4" />,
+                  activeProjects.filter((p) => p.isFavorite).length,
+                )}
                 {filterButton('recent', '最近编辑', <Clock className="h-4 w-4" />)}
-                {filterButton('trash', '回收站', <Trash2 className="h-4 w-4" />, projects.filter((p) => p.deleted).length)}
+                {filterButton(
+                  'trash',
+                  '回收站',
+                  <Trash2 className="h-4 w-4" />,
+                  projects.filter((p) => p.deleted).length,
+                )}
 
                 <div className="mt-auto hidden rounded border border-primary/10 bg-gradient-to-br from-primary/5 to-transparent p-3 md:block">
                   <h3 className="flex items-center gap-1.5 text-xs font-semibold text-primary">
@@ -406,117 +445,143 @@ export function ProjectHome() {
                     {filterLabel} · {filteredProjects.length} 个
                   </span>
                   {searchQuery.trim() && (
-                    <button type="button" onClick={() => setSearchQuery('')} className="text-xs text-primary hover:underline">
+                    <button
+                      type="button"
+                      onClick={() => setSearchQuery('')}
+                      className="text-xs text-primary hover:underline"
+                    >
                       清除搜索
                     </button>
                   )}
                 </div>
 
                 <div className="min-h-0 flex-1 overflow-y-auto">
-                {filteredProjects.length === 0 ? (
-                  <div className="flex h-full min-h-[280px] flex-col items-center justify-center rounded border-2 border-dashed border-border/50 bg-surface-container-low text-center text-muted-foreground">
-                    {(() => {
-                      if (searchQuery.trim()) {
+                  {filteredProjects.length === 0 ? (
+                    <div className="flex h-full min-h-[280px] flex-col items-center justify-center rounded border-2 border-dashed border-border/50 bg-surface-container-low text-center text-muted-foreground">
+                      {(() => {
+                        if (searchQuery.trim()) {
+                          return (
+                            <>
+                              <div className="mb-3 rounded-full bg-surface-container p-3">
+                                <Search className="h-8 w-8 opacity-30" />
+                              </div>
+                              <p className="text-sm font-medium">没有找到相关项目</p>
+                              <p className="mt-1 text-xs text-muted-foreground/60">
+                                换个关键词试试
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => setSearchQuery('')}
+                                className="mt-3 text-xs text-primary hover:underline"
+                              >
+                                清除搜索
+                              </button>
+                            </>
+                          );
+                        }
+                        if (sidebarFilter === 'trash') {
+                          return (
+                            <>
+                              <div className="mb-3 rounded-full bg-surface-container p-3">
+                                <Trash2 className="h-8 w-8 opacity-30" />
+                              </div>
+                              <p className="text-sm font-medium">回收站是空的</p>
+                              <p className="mt-1 text-xs text-muted-foreground/60">
+                                移入回收站的项目将在这里显示
+                              </p>
+                            </>
+                          );
+                        }
+                        if (sidebarFilter === 'favorites') {
+                          return (
+                            <>
+                              <div className="mb-3 rounded-full bg-surface-container p-3">
+                                <Star className="h-8 w-8 opacity-20" />
+                              </div>
+                              <p className="text-sm font-medium">还没有收藏的项目</p>
+                              <p className="mt-1 text-xs text-muted-foreground/60">
+                                点击项目卡片上的星标即可收藏
+                              </p>
+                            </>
+                          );
+                        }
+                        if (sidebarFilter === 'recent') {
+                          return (
+                            <>
+                              <div className="mb-3 rounded-full bg-surface-container p-3">
+                                <Clock className="h-8 w-8 opacity-20" />
+                              </div>
+                              <p className="text-sm font-medium">暂无最近编辑的项目</p>
+                              <p className="mt-1 text-xs text-muted-foreground/60">
+                                打开项目后将在这里显示
+                              </p>
+                            </>
+                          );
+                        }
                         return (
                           <>
                             <div className="mb-3 rounded-full bg-surface-container p-3">
-                              <Search className="h-8 w-8 opacity-30" />
+                              <Folder className="h-8 w-8 opacity-30" />
                             </div>
-                            <p className="text-sm font-medium">没有找到相关项目</p>
-                            <p className="mt-1 text-xs text-muted-foreground/60">换个关键词试试</p>
-                            <button type="button" onClick={() => setSearchQuery('')} className="mt-3 text-xs text-primary hover:underline">
-                              清除搜索
-                            </button>
+                            <p className="text-sm font-medium">还没有项目</p>
+                            <p className="mt-1 text-xs text-muted-foreground/60">
+                              创建新项目或打开已有的 WebGAL 项目开始
+                            </p>
+                            <div className="mt-4 flex gap-2">
+                              <button
+                                type="button"
+                                onClick={handleOpenProject}
+                                className="rounded border border-border bg-surface-container px-3 py-1.5 text-xs hover:bg-surface-container-high"
+                              >
+                                <FolderOpen className="mr-1 inline h-3 w-3" />
+                                打开项目
+                              </button>
+                              <button
+                                type="button"
+                                onClick={openCreateDialog}
+                                className="rounded bg-primary px-3 py-1.5 text-xs text-primary-foreground"
+                              >
+                                <Plus className="mr-1 inline h-3 w-3" />
+                                创建新项目
+                              </button>
+                            </div>
                           </>
                         );
-                      }
-                      if (sidebarFilter === 'trash') {
-                        return (
-                          <>
-                            <div className="mb-3 rounded-full bg-surface-container p-3">
-                              <Trash2 className="h-8 w-8 opacity-30" />
-                            </div>
-                            <p className="text-sm font-medium">回收站是空的</p>
-                            <p className="mt-1 text-xs text-muted-foreground/60">移入回收站的项目将在这里显示</p>
-                          </>
-                        );
-                      }
-                      if (sidebarFilter === 'favorites') {
-                        return (
-                          <>
-                            <div className="mb-3 rounded-full bg-surface-container p-3">
-                              <Star className="h-8 w-8 opacity-20" />
-                            </div>
-                            <p className="text-sm font-medium">还没有收藏的项目</p>
-                            <p className="mt-1 text-xs text-muted-foreground/60">点击项目卡片上的星标即可收藏</p>
-                          </>
-                        );
-                      }
-                      if (sidebarFilter === 'recent') {
-                        return (
-                          <>
-                            <div className="mb-3 rounded-full bg-surface-container p-3">
-                              <Clock className="h-8 w-8 opacity-20" />
-                            </div>
-                            <p className="text-sm font-medium">暂无最近编辑的项目</p>
-                            <p className="mt-1 text-xs text-muted-foreground/60">打开项目后将在这里显示</p>
-                          </>
-                        );
-                      }
-                      return (
-                        <>
-                          <div className="mb-3 rounded-full bg-surface-container p-3">
-                            <Folder className="h-8 w-8 opacity-30" />
-                          </div>
-                          <p className="text-sm font-medium">还没有项目</p>
-                          <p className="mt-1 text-xs text-muted-foreground/60">创建新项目或打开已有的 WebGAL 项目开始</p>
-                          <div className="mt-4 flex gap-2">
-                            <button type="button" onClick={handleOpenProject} className="rounded border border-border bg-surface-container px-3 py-1.5 text-xs hover:bg-surface-container-high">
-                              <FolderOpen className="mr-1 inline h-3 w-3" />
-                              打开项目
-                            </button>
-                            <button type="button" onClick={openCreateDialog} className="rounded bg-primary px-3 py-1.5 text-xs text-primary-foreground">
-                              <Plus className="mr-1 inline h-3 w-3" />
-                              创建新项目
-                            </button>
-                          </div>
-                        </>
-                      );
-                    })()}
-                  </div>
-                ) : viewMode === 'grid' ? (
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-                    {filteredProjects.map((project) => (
-                      <ProjectRecord
-                        key={project.id}
-                        project={project}
-                        deletedView={sidebarFilter === 'trash'}
-                        onOpen={() => !project.deleted && navigate(`/flow/${project.id}`)}
-                        onFavorite={toggleFavorite}
-                        onEdit={openEditDialog}
-                        onDelete={deleteProject}
-                        onRestore={restoreProject}
-                        onPermanentDelete={permanentlyDeleteProject}
-                      />
-                    ))}
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {filteredProjects.map((project) => (
-                      <ProjectRow
-                        key={project.id}
-                        project={project}
-                        deletedView={sidebarFilter === 'trash'}
-                        onOpen={() => !project.deleted && navigate(`/flow/${project.id}`)}
-                        onFavorite={toggleFavorite}
-                        onEdit={openEditDialog}
-                        onDelete={deleteProject}
-                        onRestore={restoreProject}
-                        onPermanentDelete={permanentlyDeleteProject}
-                      />
-                    ))}
-                  </div>
-                )}
+                      })()}
+                    </div>
+                  ) : viewMode === 'grid' ? (
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+                      {filteredProjects.map((project) => (
+                        <ProjectRecord
+                          key={project.id}
+                          project={project}
+                          deletedView={sidebarFilter === 'trash'}
+                          onOpen={() => !project.deleted && navigate(`/flow/${project.id}`)}
+                          onFavorite={toggleFavorite}
+                          onEdit={openEditDialog}
+                          onDelete={deleteProject}
+                          onRestore={restoreProject}
+                          onPermanentDelete={permanentlyDeleteProject}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {filteredProjects.map((project) => (
+                        <ProjectRow
+                          key={project.id}
+                          project={project}
+                          deletedView={sidebarFilter === 'trash'}
+                          onOpen={() => !project.deleted && navigate(`/flow/${project.id}`)}
+                          onFavorite={toggleFavorite}
+                          onEdit={openEditDialog}
+                          onDelete={deleteProject}
+                          onRestore={restoreProject}
+                          onPermanentDelete={permanentlyDeleteProject}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -606,22 +671,47 @@ function ProjectRecord({
         <div className="absolute right-3 top-3 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
           {deletedView ? (
             <>
-              <button type="button" onClick={(e) => onRestore(project.id, e)} className="rounded bg-background/80 p-1.5 text-tertiary" aria-label="还原项目">
+              <button
+                type="button"
+                onClick={(e) => onRestore(project.id, e)}
+                className="rounded bg-background/80 p-1.5 text-tertiary"
+                aria-label="还原项目"
+              >
                 <Edit className="h-3.5 w-3.5" />
               </button>
-              <button type="button" onClick={(e) => onPermanentDelete(project.id, e)} className="rounded bg-background/80 p-1.5 text-destructive" aria-label="永久删除项目">
+              <button
+                type="button"
+                onClick={(e) => onPermanentDelete(project.id, e)}
+                className="rounded bg-background/80 p-1.5 text-destructive"
+                aria-label="永久删除项目"
+              >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
             </>
           ) : (
             <>
-              <button type="button" onClick={(e) => onFavorite(project.id, e)} className={`rounded p-1.5 ${project.isFavorite ? 'bg-primary text-primary-foreground' : 'bg-background/80 text-muted-foreground'}`} aria-label="收藏项目">
+              <button
+                type="button"
+                onClick={(e) => onFavorite(project.id, e)}
+                className={`rounded p-1.5 ${project.isFavorite ? 'bg-primary text-primary-foreground' : 'bg-background/80 text-muted-foreground'}`}
+                aria-label="收藏项目"
+              >
                 <Star className={`h-3.5 w-3.5 ${project.isFavorite ? 'fill-current' : ''}`} />
               </button>
-              <button type="button" onClick={(e) => onEdit(project, e)} className="rounded bg-background/80 p-1.5 text-muted-foreground" aria-label="编辑项目">
+              <button
+                type="button"
+                onClick={(e) => onEdit(project, e)}
+                className="rounded bg-background/80 p-1.5 text-muted-foreground"
+                aria-label="编辑项目"
+              >
                 <Edit className="h-3.5 w-3.5" />
               </button>
-              <button type="button" onClick={(e) => onDelete(project.id, e)} className="rounded bg-background/80 p-1.5 text-destructive" aria-label="删除项目">
+              <button
+                type="button"
+                onClick={(e) => onDelete(project.id, e)}
+                className="rounded bg-background/80 p-1.5 text-destructive"
+                aria-label="删除项目"
+              >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
             </>
@@ -629,7 +719,9 @@ function ProjectRecord({
         </div>
       </div>
       <div className="p-3">
-        <div className="truncate text-base font-semibold group-hover:text-primary">{project.name}</div>
+        <div className="truncate text-base font-semibold group-hover:text-primary">
+          {project.name}
+        </div>
         <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{project.description}</p>
         <div className="mt-3 flex items-center gap-1.5 border-t border-border/60 pt-2 font-mono-family text-[10px] text-muted-foreground">
           <MapPin className="h-3 w-3 shrink-0 opacity-60" />
@@ -641,7 +733,16 @@ function ProjectRecord({
 }
 
 function ProjectRow(props: ProjectRecordProps) {
-  const { project, deletedView, onOpen, onFavorite, onEdit, onDelete, onRestore, onPermanentDelete } = props;
+  const {
+    project,
+    deletedView,
+    onOpen,
+    onFavorite,
+    onEdit,
+    onDelete,
+    onRestore,
+    onPermanentDelete,
+  } = props;
   return (
     <div
       role="button"
@@ -673,14 +774,51 @@ function ProjectRow(props: ProjectRecordProps) {
       <div className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
         {deletedView ? (
           <>
-            <button type="button" onClick={(e) => onRestore(project.id, e)} className="rounded p-1.5 text-tertiary hover:bg-tertiary/10" aria-label="还原项目"><Edit className="h-4 w-4" /></button>
-            <button type="button" onClick={(e) => onPermanentDelete(project.id, e)} className="rounded p-1.5 text-destructive hover:bg-destructive/10" aria-label="永久删除项目"><Trash2 className="h-4 w-4" /></button>
+            <button
+              type="button"
+              onClick={(e) => onRestore(project.id, e)}
+              className="rounded p-1.5 text-tertiary hover:bg-tertiary/10"
+              aria-label="还原项目"
+            >
+              <Edit className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={(e) => onPermanentDelete(project.id, e)}
+              className="rounded p-1.5 text-destructive hover:bg-destructive/10"
+              aria-label="永久删除项目"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
           </>
         ) : (
           <>
-            <button type="button" onClick={(e) => onFavorite(project.id, e)} className="rounded p-1.5 text-muted-foreground hover:bg-surface-container-high hover:text-primary" aria-label="收藏项目"><Star className={`h-4 w-4 ${project.isFavorite ? 'fill-current text-primary' : ''}`} /></button>
-            <button type="button" onClick={(e) => onEdit(project, e)} className="rounded p-1.5 text-muted-foreground hover:bg-surface-container-high" aria-label="编辑项目"><Edit className="h-4 w-4" /></button>
-            <button type="button" onClick={(e) => onDelete(project.id, e)} className="rounded p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label="删除项目"><Trash2 className="h-4 w-4" /></button>
+            <button
+              type="button"
+              onClick={(e) => onFavorite(project.id, e)}
+              className="rounded p-1.5 text-muted-foreground hover:bg-surface-container-high hover:text-primary"
+              aria-label="收藏项目"
+            >
+              <Star
+                className={`h-4 w-4 ${project.isFavorite ? 'fill-current text-primary' : ''}`}
+              />
+            </button>
+            <button
+              type="button"
+              onClick={(e) => onEdit(project, e)}
+              className="rounded p-1.5 text-muted-foreground hover:bg-surface-container-high"
+              aria-label="编辑项目"
+            >
+              <Edit className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={(e) => onDelete(project.id, e)}
+              className="rounded p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+              aria-label="删除项目"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
           </>
         )}
       </div>
@@ -728,14 +866,21 @@ function ProjectModal(props: ProjectModalProps) {
               <p className="text-sm text-muted-foreground">创建标准 WebGAL 项目目录结构</p>
             </div>
           </div>
-          <button type="button" onClick={onClose} className="rounded p-1.5 text-muted-foreground hover:bg-surface-container-high" aria-label="关闭">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded p-1.5 text-muted-foreground hover:bg-surface-container-high"
+            aria-label="关闭"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
 
         <div className="space-y-4 p-6">
           <div>
-            <label className="mb-1.5 block text-xs font-bold uppercase tracking-widest text-muted-foreground">项目名称</label>
+            <label className="mb-1.5 block text-xs font-bold uppercase tracking-widest text-muted-foreground">
+              项目名称
+            </label>
             <input
               type="text"
               autoFocus
@@ -746,7 +891,9 @@ function ProjectModal(props: ProjectModalProps) {
             />
           </div>
           <div>
-            <label className="mb-1.5 block text-xs font-bold uppercase tracking-widest text-muted-foreground">故事简介</label>
+            <label className="mb-1.5 block text-xs font-bold uppercase tracking-widest text-muted-foreground">
+              故事简介
+            </label>
             <textarea
               value={projectDesc}
               onChange={(e) => onDescChange(e.target.value)}
@@ -755,12 +902,19 @@ function ProjectModal(props: ProjectModalProps) {
             />
           </div>
           <div>
-            <label className="mb-1.5 block text-xs font-bold uppercase tracking-widest text-muted-foreground">存放位置</label>
+            <label className="mb-1.5 block text-xs font-bold uppercase tracking-widest text-muted-foreground">
+              存放位置
+            </label>
             <div className="flex gap-2">
               <div className="min-w-0 flex-1 truncate rounded border border-border bg-surface-container-low px-3 py-2 text-sm text-muted-foreground">
                 {selectedDir || '请选择文件夹...'}
               </div>
-              <button type="button" onClick={onPickDir} className="rounded border border-border bg-surface-container px-3 py-2 hover:bg-surface-container-high" aria-label="浏览文件夹">
+              <button
+                type="button"
+                onClick={onPickDir}
+                className="rounded border border-border bg-surface-container px-3 py-2 hover:bg-surface-container-high"
+                aria-label="浏览文件夹"
+              >
                 <FolderOpen className="h-4 w-4" />
               </button>
             </div>
@@ -770,14 +924,22 @@ function ProjectModal(props: ProjectModalProps) {
               </p>
             )}
           </div>
-          {createError && <div className="rounded border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{createError}</div>}
+          {createError && (
+            <div className="rounded border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+              {createError}
+            </div>
+          )}
           <button
             type="button"
             onClick={onCreate}
             disabled={!projectName.trim() || !selectedDir || isCreating}
             className="story-os-chamfer-tr flex w-full items-center justify-center gap-2 rounded bg-primary py-3 font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
           >
-            {isCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            {isCreating ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Plus className="h-4 w-4" />
+            )}
             {isCreating ? '创建中...' : '创建项目'}
           </button>
         </div>
@@ -806,17 +968,27 @@ function EditProjectDialog({
   onSave,
 }: EditProjectDialogProps) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-md" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-md"
+      onClick={onClose}
+    >
       <div className="story-os-panel w-full max-w-md" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <h2 className="text-base font-semibold">编辑项目信息</h2>
-          <button type="button" onClick={onClose} className="rounded p-1.5 text-muted-foreground hover:bg-surface-container-high" aria-label="关闭">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded p-1.5 text-muted-foreground hover:bg-surface-container-high"
+            aria-label="关闭"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
         <div className="space-y-4 p-6">
           <div>
-            <label className="mb-1.5 block text-xs font-bold uppercase tracking-widest text-muted-foreground">项目名称</label>
+            <label className="mb-1.5 block text-xs font-bold uppercase tracking-widest text-muted-foreground">
+              项目名称
+            </label>
             <input
               type="text"
               autoFocus
@@ -827,7 +999,9 @@ function EditProjectDialog({
             />
           </div>
           <div>
-            <label className="mb-1.5 block text-xs font-bold uppercase tracking-widest text-muted-foreground">简介</label>
+            <label className="mb-1.5 block text-xs font-bold uppercase tracking-widest text-muted-foreground">
+              简介
+            </label>
             <textarea
               value={editDesc}
               onChange={(e) => onDescChange(e.target.value)}
@@ -836,7 +1010,9 @@ function EditProjectDialog({
             />
           </div>
           <div>
-            <label className="mb-1.5 block text-xs font-bold uppercase tracking-widest text-muted-foreground">存放位置</label>
+            <label className="mb-1.5 block text-xs font-bold uppercase tracking-widest text-muted-foreground">
+              存放位置
+            </label>
             <div className="flex items-center gap-2 rounded border border-border/60 bg-surface-container-low px-3 py-2">
               <MapPin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               <span className="truncate text-xs text-muted-foreground">{project.path}</span>
@@ -844,8 +1020,21 @@ function EditProjectDialog({
           </div>
         </div>
         <div className="flex justify-end gap-2 border-t border-border px-6 py-4">
-          <button type="button" onClick={onClose} className="rounded bg-surface-container px-4 py-2 text-sm hover:bg-surface-container-high">取消</button>
-          <button type="button" onClick={onSave} disabled={!editName.trim()} className="rounded bg-primary px-4 py-2 text-sm text-primary-foreground hover:opacity-90 disabled:opacity-50">保存</button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded bg-surface-container px-4 py-2 text-sm hover:bg-surface-container-high"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={!editName.trim()}
+            className="rounded bg-primary px-4 py-2 text-sm text-primary-foreground hover:opacity-90 disabled:opacity-50"
+          >
+            保存
+          </button>
         </div>
       </div>
     </div>

@@ -23,10 +23,12 @@ function figureNode(overrides: Partial<WebGalNode> = {}): WebGalNode {
 describe('computeNodeDiff', () => {
   it('detects figure metadata being added without changing the sprite file', () => {
     const before = [figureNode()];
-    const after = [figureNode({
-      figureCharacter: '最上静香',
-      figureEmotion: 'default',
-    })];
+    const after = [
+      figureNode({
+        figureCharacter: '最上静香',
+        figureEmotion: 'default',
+      }),
+    ];
 
     const diff = computeNodeDiff(before, after);
 
@@ -39,14 +41,18 @@ describe('computeNodeDiff', () => {
   });
 
   it('detects figure emotion changes as a node modification', () => {
-    const before = [figureNode({
-      figureCharacter: '最上静香',
-      figureEmotion: 'default',
-    })];
-    const after = [figureNode({
-      figureCharacter: '最上静香',
-      figureEmotion: 'embarrassed',
-    })];
+    const before = [
+      figureNode({
+        figureCharacter: '最上静香',
+        figureEmotion: 'default',
+      }),
+    ];
+    const after = [
+      figureNode({
+        figureCharacter: '最上静香',
+        figureEmotion: 'embarrassed',
+      }),
+    ];
 
     expect(computeFullNodeDiff(before, after)).toMatchObject([
       {

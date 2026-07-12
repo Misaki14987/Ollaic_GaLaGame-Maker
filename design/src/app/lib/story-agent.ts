@@ -34,15 +34,18 @@ function uniqueByName(assets: AssetInfo[]): AssetInfo[] {
 
 export function buildNumberedScriptContext(script: string, maxLines = 120): string {
   const lines = script.split('\n');
-  const visible = lines.length > maxLines
-    ? [...lines.slice(0, 40), '; ...中间内容已省略...', ...lines.slice(-80)]
-    : lines;
+  const visible =
+    lines.length > maxLines
+      ? [...lines.slice(0, 40), '; ...中间内容已省略...', ...lines.slice(-80)]
+      : lines;
   const omitted = lines.length > maxLines ? lines.length - visible.length + 1 : 0;
-  return visible.map((line, index) => {
-    if (line === '; ...中间内容已省略...') return line;
-    const lineNo = lines.length > maxLines && index > 40 ? index + omitted : index + 1;
-    return `${lineNo}: ${line}`;
-  }).join('\n');
+  return visible
+    .map((line, index) => {
+      if (line === '; ...中间内容已省略...') return line;
+      const lineNo = lines.length > maxLines && index > 40 ? index + omitted : index + 1;
+      return `${lineNo}: ${line}`;
+    })
+    .join('\n');
 }
 
 export function buildAssetContext(assets: AssetInfo[], limitPerCategory = 24): string {
@@ -60,7 +63,8 @@ export function buildAssetContext(assets: AssetInfo[], limitPerCategory = 24): s
   const sections: string[] = [];
   for (const [category, list] of grouped) {
     const names = list.slice(0, limitPerCategory).map((asset) => asset.name);
-    const omitted = list.length > limitPerCategory ? `，另有 ${list.length - limitPerCategory} 个未列出` : '';
+    const omitted =
+      list.length > limitPerCategory ? `，另有 ${list.length - limitPerCategory} 个未列出` : '';
     sections.push(`- ${categoryLabels[category] ?? category}: ${names.join(', ')}${omitted}`);
   }
 
@@ -81,13 +85,16 @@ export function hasAssetContextTruncation(assets: AssetInfo[], limitPerCategory 
 export function createLineDiff(beforeContent: string, afterContent: string): DiffLine[] {
   const beforeLines = beforeContent.split('\n');
   const afterLines = afterContent.split('\n');
-  const table: number[][] = Array.from({ length: beforeLines.length + 1 }, () => Array(afterLines.length + 1).fill(0));
+  const table: number[][] = Array.from({ length: beforeLines.length + 1 }, () =>
+    Array(afterLines.length + 1).fill(0),
+  );
 
   for (let i = beforeLines.length - 1; i >= 0; i -= 1) {
     for (let j = afterLines.length - 1; j >= 0; j -= 1) {
-      table[i][j] = beforeLines[i] === afterLines[j]
-        ? table[i + 1][j + 1] + 1
-        : Math.max(table[i + 1][j], table[i][j + 1]);
+      table[i][j] =
+        beforeLines[i] === afterLines[j]
+          ? table[i + 1][j + 1] + 1
+          : Math.max(table[i + 1][j], table[i][j + 1]);
     }
   }
 
@@ -116,7 +123,8 @@ export function createLineDiff(beforeContent: string, afterContent: string): Dif
     j += 1;
   }
 
-  if (!full.some((line) => line.kind !== 'context')) return [{ kind: 'context', text: '无文本差异' }];
+  if (!full.some((line) => line.kind !== 'context'))
+    return [{ kind: 'context', text: '无文本差异' }];
 
   const keep = new Set<number>();
   full.forEach((line, index) => {
@@ -151,9 +159,8 @@ export function truncateContextMessages(
     .slice(-maxMessages)
     .map((message) => ({
       role: message.role,
-      content: message.role === 'assistant'
-        ? summarizeAssistantHistory(message.content)
-        : message.content,
+      content:
+        message.role === 'assistant' ? summarizeAssistantHistory(message.content) : message.content,
     }));
 }
 

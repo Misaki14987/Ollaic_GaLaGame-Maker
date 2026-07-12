@@ -16,13 +16,18 @@ describe('useProjectSnapshots', () => {
 
   it('saves before creating and refreshes the list', async () => {
     const ensureSaved = vi.fn().mockResolvedValue(true);
-    vi.mocked(createProjectSnapshot).mockResolvedValue({ id: '1', label: 'checkpoint' } as never);
+    vi.mocked(createProjectSnapshot).mockResolvedValue({
+      id: '1',
+      label: 'checkpoint',
+    } as never);
     vi.mocked(listProjectSnapshots).mockResolvedValue([]);
-    const { result } = renderHook(() => useProjectSnapshots({
-      projectPath: '/project',
-      ensureSaved,
-      onRestored: vi.fn(),
-    }));
+    const { result } = renderHook(() =>
+      useProjectSnapshots({
+        projectPath: '/project',
+        ensureSaved,
+        onRestored: vi.fn(),
+      }),
+    );
 
     await act(() => result.current.create('checkpoint'));
     expect(ensureSaved).toHaveBeenCalledOnce();

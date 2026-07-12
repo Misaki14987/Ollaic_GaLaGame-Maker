@@ -35,7 +35,10 @@ const TONE_CLASS: Record<EventTone, string> = {
   neutral: 'border-l-muted-foreground/45',
 };
 
-function eventDescription(event: PipelineEvent): { text: string; tone: EventTone } {
+function eventDescription(event: PipelineEvent): {
+  text: string;
+  tone: EventTone;
+} {
   switch (event.type) {
     case 'runStarted':
       return { text: '生产流程已启动', tone: 'active' };
@@ -76,7 +79,10 @@ export function PipelineEventLedger({ events, steps = [] }: PipelineEventLedgerP
   const stepKinds = new Map<string, string>(steps.map((step) => [step.id, KIND_LABEL[step.kind]]));
 
   return (
-    <section aria-label="生产事件账本" className="flex h-full min-h-0 flex-col bg-surface-container-lowest">
+    <section
+      aria-label="生产事件账本"
+      className="flex h-full min-h-0 flex-col bg-surface-container-lowest"
+    >
       <header className="flex h-9 shrink-0 items-center gap-2 border-b border-border bg-surface-container-low px-3">
         <Activity className="size-3.5 text-primary" aria-hidden="true" />
         <h2 className="text-xs font-semibold">生产事件</h2>
@@ -93,7 +99,8 @@ export function PipelineEventLedger({ events, steps = [] }: PipelineEventLedgerP
           className="min-h-0 flex-1 divide-y divide-border/70 overflow-y-auto"
         >
           {ordered.map(({ event, receivedAt, index }) => {
-            if (event.type === 'stepStarted') stepKinds.set(event.stepId, KIND_LABEL[event.kind as StepDef['kind']] ?? event.kind);
+            if (event.type === 'stepStarted')
+              stepKinds.set(event.stepId, KIND_LABEL[event.kind as StepDef['kind']] ?? event.kind);
             const stepId = 'stepId' in event ? event.stepId : null;
             const description = eventDescription(event);
 
@@ -105,7 +112,10 @@ export function PipelineEventLedger({ events, steps = [] }: PipelineEventLedgerP
                   TONE_CLASS[description.tone],
                 )}
               >
-                <time dateTime={new Date(receivedAt).toISOString()} className="font-mono-family text-[10px] text-muted-foreground">
+                <time
+                  dateTime={new Date(receivedAt).toISOString()}
+                  className="font-mono-family text-[10px] text-muted-foreground"
+                >
                   {eventTime(receivedAt)}
                 </time>
                 <span className="flex min-w-0 items-baseline gap-1.5">
@@ -116,7 +126,13 @@ export function PipelineEventLedger({ events, steps = [] }: PipelineEventLedgerP
                     {stepId ? (stepKinds.get(stepId) ?? '步骤') : '流程'}
                   </span>
                 </span>
-                <span className={cn('min-w-0 truncate text-foreground/80', description.tone === 'error' && 'text-destructive')} title={description.text}>
+                <span
+                  className={cn(
+                    'min-w-0 truncate text-foreground/80',
+                    description.tone === 'error' && 'text-destructive',
+                  )}
+                  title={description.text}
+                >
                   {description.text}
                 </span>
               </li>
@@ -124,7 +140,11 @@ export function PipelineEventLedger({ events, steps = [] }: PipelineEventLedgerP
           })}
         </ol>
       ) : (
-        <div role="status" aria-live="polite" className="flex min-h-20 flex-1 items-center justify-center px-4 text-xs text-muted-foreground">
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex min-h-20 flex-1 items-center justify-center px-4 text-xs text-muted-foreground"
+        >
           流程开始后，事件会记录在这里
         </div>
       )}

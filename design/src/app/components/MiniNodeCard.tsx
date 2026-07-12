@@ -11,7 +11,8 @@ export function MiniNodeCard({ entry }: { entry: NodeDiffEntry }) {
   const Icon = commandIcons[node.type];
   const typeColor = typeColors[node.type] ?? 'border-border bg-background/40';
   const summary = getNodeSummary(node);
-  const oldSummary = entry.kind === 'modified' && entry.before ? getNodeSummary(entry.before) : undefined;
+  const oldSummary =
+    entry.kind === 'modified' && entry.before ? getNodeSummary(entry.before) : undefined;
 
   const badge =
     entry.kind === 'added'
@@ -31,7 +32,9 @@ export function MiniNodeCard({ entry }: { entry: NodeDiffEntry }) {
     >
       {badge && <badge.Icon className={`h-3 w-3 shrink-0 ${badge.cls}`} />}
       {Icon && <Icon className="h-3 w-3 shrink-0 text-muted-foreground" />}
-      <span className="shrink-0 text-muted-foreground">{commandLabels[node.type] ?? node.type}</span>
+      <span className="shrink-0 text-muted-foreground">
+        {commandLabels[node.type] ?? node.type}
+      </span>
       {entry.kind === 'modified' && oldSummary !== undefined ? (
         <span className="min-w-0 flex-1 space-y-0.5">
           <span className="flex min-w-0 items-center gap-1 text-muted-foreground line-through decoration-red-400/50">
@@ -44,7 +47,9 @@ export function MiniNodeCard({ entry }: { entry: NodeDiffEntry }) {
           </span>
         </span>
       ) : (
-        <span className={`min-w-0 flex-1 truncate text-foreground ${entry.kind === 'removed' ? 'line-through' : ''}`}>
+        <span
+          className={`min-w-0 flex-1 truncate text-foreground ${entry.kind === 'removed' ? 'line-through' : ''}`}
+        >
           {summary}
         </span>
       )}

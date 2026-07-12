@@ -18,7 +18,7 @@
   --on-primary-container: #65002b;
   --secondary: #ded0df;
   --secondary-foreground: #ffffff;
-  --secondary-container: #F2B5B4;
+  --secondary-container: #f2b5b4;
   --on-secondary-container: #004d77;
   --nav-active: #371041;
   --scrollbar-thumb: var(--primary);
@@ -66,56 +66,56 @@
   --surface-dim: #d8dadd;
 
   /* Semantic instruction categories — story/scene/audio/control/effects. */
-  --color-story:        oklch(67% 0.12 5);
-  --color-story-soft:   oklch(67% 0.12 5 / 0.08);
-  --color-scene:        oklch(72% 0.10 230);
-  --color-scene-soft:   oklch(72% 0.10 230 / 0.08);
-  --color-audio:        oklch(70% 0.10 305);
-  --color-audio-soft:   oklch(70% 0.10 305 / 0.08);
-  --color-control:      oklch(75% 0.11 75);
+  --color-story: oklch(67% 0.12 5);
+  --color-story-soft: oklch(67% 0.12 5 / 0.08);
+  --color-scene: oklch(72% 0.1 230);
+  --color-scene-soft: oklch(72% 0.1 230 / 0.08);
+  --color-audio: oklch(70% 0.1 305);
+  --color-audio-soft: oklch(70% 0.1 305 / 0.08);
+  --color-control: oklch(75% 0.11 75);
   --color-control-soft: oklch(75% 0.11 75 / 0.08);
-  --color-effects:      oklch(60% 0.13 30);
+  --color-effects: oklch(60% 0.13 30);
   --color-effects-soft: oklch(60% 0.13 30 / 0.08);
 
   /* Emotion palette for CharacterPanel sprite labels. */
-  --color-emotion-happy:     oklch(78% 0.10 65);
-  --color-emotion-sad:       oklch(72% 0.10 235);
-  --color-emotion-angry:     oklch(65% 0.18 25);
+  --color-emotion-happy: oklch(78% 0.1 65);
+  --color-emotion-sad: oklch(72% 0.1 235);
+  --color-emotion-angry: oklch(65% 0.18 25);
   --color-emotion-surprised: oklch(72% 0.13 305);
-  --color-emotion-shy:       oklch(78% 0.10 0);
-  --color-emotion-serious:   oklch(72% 0.10 165);
-  --color-emotion-default:   oklch(70% 0.02 250);
+  --color-emotion-shy: oklch(78% 0.1 0);
+  --color-emotion-serious: oklch(72% 0.1 165);
+  --color-emotion-default: oklch(70% 0.02 250);
 
   /* Character identity palette (8 hues). */
-  --color-character-1: oklch(78% 0.10 65);
-  --color-character-2: oklch(72% 0.10 50);
+  --color-character-1: oklch(78% 0.1 65);
+  --color-character-2: oklch(72% 0.1 50);
   --color-character-3: oklch(72% 0.06 165);
-  --color-character-4: oklch(72% 0.10 235);
+  --color-character-4: oklch(72% 0.1 235);
   --color-character-5: oklch(70% 0.12 305);
   --color-character-6: oklch(80% 0.14 90);
   --color-character-7: oklch(75% 0.13 0);
-  --color-character-8: oklch(75% 0.10 160);
+  --color-character-8: oklch(75% 0.1 160);
 
   /* Warm glow used by pulse animations, ::selection, focus rings, amber shadows. */
   --color-warm-glow: oklch(75% 0.08 75);
 
   /* Drop shadows derived from --foreground so dark mode inverts naturally. */
-  --shadow-soft:  color-mix(in srgb, var(--foreground) 6%, transparent);
+  --shadow-soft: color-mix(in srgb, var(--foreground) 6%, transparent);
   --shadow-faint: color-mix(in srgb, var(--foreground) 2%, transparent);
-  --shadow-ink:   color-mix(in srgb, var(--foreground) 14%, transparent);
+  --shadow-ink: color-mix(in srgb, var(--foreground) 14%, transparent);
 
   /* Glass surface tints derived from --card so they follow dark mode. */
-  --glass-topbar:      color-mix(in srgb, var(--card) 82%, transparent);
-  --glass-panel:       color-mix(in srgb, var(--card) 76%, transparent);
+  --glass-topbar: color-mix(in srgb, var(--card) 82%, transparent);
+  --glass-panel: color-mix(in srgb, var(--card) 76%, transparent);
   --glass-panel-muted: color-mix(in srgb, var(--card) 70%, transparent);
-  --glass-sidenav:     color-mix(in srgb, var(--card) 92%, transparent);
-  --glass-overlay:     color-mix(in srgb, var(--card) 86%, transparent);
-  --glass-search:      color-mix(in srgb, var(--card) 88%, transparent);
+  --glass-sidenav: color-mix(in srgb, var(--card) 92%, transparent);
+  --glass-overlay: color-mix(in srgb, var(--card) 86%, transparent);
+  --glass-search: color-mix(in srgb, var(--card) 88%, transparent);
 
   /* Pre-mixed tints for the canvas grid lines. Computing these once at
    * variable resolution avoids re-running color-mix on every paint. */
-  --grid-dot:    color-mix(in srgb, var(--color-story) 18%, transparent);
-  --grid-line:   color-mix(in srgb, var(--color-scene) 12%, transparent);
+  --grid-dot: color-mix(in srgb, var(--color-story) 18%, transparent);
+  --grid-line: color-mix(in srgb, var(--color-scene) 12%, transparent);
 }
 
 /* Flow canvas grid background used by FlowCanvas component */
@@ -125,7 +125,10 @@
     radial-gradient(var(--grid-dot) 1px, transparent 1px),
     linear-gradient(var(--grid-line) 1px, transparent 1px),
     linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
-  background-size: 20px 20px, 40px 40px, 40px 40px;
+  background-size:
+    20px 20px,
+    40px 40px,
+    40px 40px;
 }
 
 .dark {
@@ -167,32 +170,32 @@
   /* Dark-mode category colors. Slightly higher L and lower C than light
    * mode to avoid retinal glow on dark backgrounds; hue is preserved so
    * light/dark swap feels like the same palette, not a different one. */
-  --color-story:        oklch(74% 0.10 5);
-  --color-story-soft:   oklch(74% 0.10 5 / 0.12);
-  --color-scene:        oklch(76% 0.08 230);
-  --color-scene-soft:   oklch(76% 0.08 230 / 0.12);
-  --color-audio:        oklch(76% 0.08 305);
-  --color-audio-soft:   oklch(76% 0.08 305 / 0.12);
-  --color-control:      oklch(80% 0.09 75);
+  --color-story: oklch(74% 0.1 5);
+  --color-story-soft: oklch(74% 0.1 5 / 0.12);
+  --color-scene: oklch(76% 0.08 230);
+  --color-scene-soft: oklch(76% 0.08 230 / 0.12);
+  --color-audio: oklch(76% 0.08 305);
+  --color-audio-soft: oklch(76% 0.08 305 / 0.12);
+  --color-control: oklch(80% 0.09 75);
   --color-control-soft: oklch(80% 0.09 75 / 0.12);
-  --color-effects:      oklch(74% 0.11 30);
+  --color-effects: oklch(74% 0.11 30);
   --color-effects-soft: oklch(74% 0.11 30 / 0.12);
 
-  --color-emotion-happy:     oklch(80% 0.08 65);
-  --color-emotion-sad:       oklch(78% 0.08 235);
-  --color-emotion-angry:     oklch(72% 0.14 25);
-  --color-emotion-surprised: oklch(78% 0.10 305);
-  --color-emotion-shy:       oklch(80% 0.08 0);
-  --color-emotion-serious:   oklch(76% 0.08 165);
-  --color-emotion-default:   oklch(72% 0.02 250);
+  --color-emotion-happy: oklch(80% 0.08 65);
+  --color-emotion-sad: oklch(78% 0.08 235);
+  --color-emotion-angry: oklch(72% 0.14 25);
+  --color-emotion-surprised: oklch(78% 0.1 305);
+  --color-emotion-shy: oklch(80% 0.08 0);
+  --color-emotion-serious: oklch(76% 0.08 165);
+  --color-emotion-default: oklch(72% 0.02 250);
 
   --color-character-1: oklch(80% 0.08 65);
   --color-character-2: oklch(74% 0.08 50);
   --color-character-3: oklch(74% 0.05 165);
   --color-character-4: oklch(76% 0.08 235);
-  --color-character-5: oklch(74% 0.10 305);
+  --color-character-5: oklch(74% 0.1 305);
   --color-character-6: oklch(82% 0.12 90);
-  --color-character-7: oklch(78% 0.10 0);
+  --color-character-7: oklch(78% 0.1 0);
   --color-character-8: oklch(78% 0.08 160);
 
   --color-warm-glow: oklch(80% 0.07 75);
@@ -368,13 +371,19 @@
   }
 
   button:not(:disabled),
-  [role="button"]:not([aria-disabled="true"]) {
+  [role='button']:not([aria-disabled='true']) {
     cursor: pointer;
-    transition: background 160ms ease, border-color 160ms ease, color 160ms ease, box-shadow 160ms ease, opacity 160ms ease, transform 120ms ease;
+    transition:
+      background 160ms ease,
+      border-color 160ms ease,
+      color 160ms ease,
+      box-shadow 160ms ease,
+      opacity 160ms ease,
+      transform 120ms ease;
   }
 
   button:disabled,
-  [aria-disabled="true"] {
+  [aria-disabled='true'] {
     cursor: not-allowed;
   }
 
@@ -383,7 +392,7 @@
   }
 
   button:focus-visible,
-  [role="button"]:focus-visible,
+  [role='button']:focus-visible,
   input:focus-visible,
   textarea:focus-visible,
   select:focus-visible {
@@ -438,7 +447,10 @@
       radial-gradient(var(--grid-dot) 1px, transparent 1px),
       linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
       linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
-    background-size: 20px 20px, 40px 40px, 40px 40px;
+    background-size:
+      20px 20px,
+      40px 40px,
+      40px 40px;
   }
 
   .story-os-topbar {
@@ -468,7 +480,12 @@
     font-size: 12px;
     font-weight: 600;
     letter-spacing: 0.04em;
-    transition: background 160ms ease, color 160ms ease, border-color 160ms ease, box-shadow 160ms ease, transform 120ms ease;
+    transition:
+      background 160ms ease,
+      color 160ms ease,
+      border-color 160ms ease,
+      box-shadow 160ms ease,
+      transform 120ms ease;
   }
 
   .story-os-top-action:hover,
@@ -490,7 +507,10 @@
     justify-content: center;
     border-radius: 4px;
     color: var(--muted-foreground);
-    transition: background 160ms ease, color 160ms ease, transform 120ms ease;
+    transition:
+      background 160ms ease,
+      color 160ms ease,
+      transform 120ms ease;
   }
 
   .story-os-top-search {
@@ -502,7 +522,9 @@
     border-radius: 4px;
     background: var(--surface-container-low);
     border-bottom: 1px solid var(--outline-variant);
-    transition: border-color 160ms ease, background 160ms ease;
+    transition:
+      border-color 160ms ease,
+      background 160ms ease;
   }
 
   .story-os-top-search:focus-within {
@@ -556,7 +578,11 @@
     font-size: 9px;
     font-weight: 700;
     letter-spacing: 0.06em;
-    transition: background 160ms ease, color 160ms ease, border-color 160ms ease, transform 120ms ease;
+    transition:
+      background 160ms ease,
+      color 160ms ease,
+      border-color 160ms ease,
+      transform 120ms ease;
   }
 
   .story-os-nav-item:hover {
@@ -597,7 +623,9 @@
     color: var(--primary-foreground);
     background: var(--primary);
     clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%);
-    transition: filter 160ms ease, transform 120ms ease;
+    transition:
+      filter 160ms ease,
+      transform 120ms ease;
   }
 
   .story-os-add-button:hover {
@@ -651,7 +679,11 @@
     color: var(--foreground);
     font-size: 12px;
     font-weight: 600;
-    transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease, transform 120ms ease;
+    transition:
+      background 160ms ease,
+      border-color 160ms ease,
+      box-shadow 160ms ease,
+      transform 120ms ease;
   }
 
   .story-os-command:hover {
@@ -684,7 +716,12 @@
   }
 
   .story-os-interactive {
-    transition: background 160ms ease, border-color 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 120ms ease;
+    transition:
+      background 160ms ease,
+      border-color 160ms ease,
+      color 160ms ease,
+      box-shadow 160ms ease,
+      transform 120ms ease;
   }
 
   .story-os-interactive:hover {

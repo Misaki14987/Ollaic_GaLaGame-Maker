@@ -1,9 +1,5 @@
 import { useMemo } from 'react';
-import {
-  Music,
-  Image as ImageIcon,
-  MessageCircle,
-} from 'lucide-react';
+import { Music, Image as ImageIcon, MessageCircle } from 'lucide-react';
 import type { WebGalNode } from '../lib/webgal-types';
 import { isMetadataComment } from '../lib/webgal-types';
 
@@ -18,9 +14,21 @@ const MARKER_DEFS: Array<{
   tone: string;
   label: (node: WebGalNode) => string;
 }> = [
-  { types: ['changeBg'], tone: 'bg-secondary', label: (n) => n.asset || n.content || '背景' },
-  { types: ['bgm'], tone: 'bg-tertiary', label: (n) => n.asset || n.content || 'BGM' },
-  { types: ['changeFigure', 'setAnimation', 'playEffect'], tone: 'bg-primary', label: (n) => n.asset || n.content || n.type },
+  {
+    types: ['changeBg'],
+    tone: 'bg-secondary',
+    label: (n) => n.asset || n.content || '背景',
+  },
+  {
+    types: ['bgm'],
+    tone: 'bg-tertiary',
+    label: (n) => n.asset || n.content || 'BGM',
+  },
+  {
+    types: ['changeFigure', 'setAnimation', 'playEffect'],
+    tone: 'bg-primary',
+    label: (n) => n.asset || n.content || n.type,
+  },
 ];
 
 const EVENT_TYPES = new Set(MARKER_DEFS.flatMap((d) => d.types));
@@ -60,7 +68,13 @@ export function PerformanceTimeline({
   onSelectNode,
 }: PerformanceTimelineProps) {
   const { markers, totalDuration } = useMemo(() => {
-    const result: Array<{ node: WebGalNode; index: number; position: number; tone: string; label: string }> = [];
+    const result: Array<{
+      node: WebGalNode;
+      index: number;
+      position: number;
+      tone: string;
+      label: string;
+    }> = [];
     let cursor = 0;
     nodes.forEach((node, index) => {
       const dur = estimateDuration(node);

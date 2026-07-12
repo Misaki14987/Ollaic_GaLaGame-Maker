@@ -4,7 +4,13 @@
  * is presentation on top of this state.
  */
 
-import type { PipelineEvent, RunState, RunStatus, StepRunHistory, StepStatus } from './pipeline-types';
+import type {
+  PipelineEvent,
+  RunState,
+  RunStatus,
+  StepRunHistory,
+  StepStatus,
+} from './pipeline-types';
 
 export interface FlowStepView {
   id: string;
@@ -31,7 +37,11 @@ export interface FlowState {
 }
 
 /** The P2 prompt-to-bound-assets production recipe. */
-export const DEFAULT_RECIPE_STEPS: ReadonlyArray<{ id: string; kind: string; dependsOn: string[] }> = [
+export const DEFAULT_RECIPE_STEPS: ReadonlyArray<{
+  id: string;
+  kind: string;
+  dependsOn: string[];
+}> = [
   { id: 'plan', kind: 'plan', dependsOn: [] },
   { id: 'memory', kind: 'memory', dependsOn: ['plan'] },
   { id: 'outline', kind: 'outline', dependsOn: ['memory'] },
@@ -66,9 +76,8 @@ export function initialFlowState(): FlowState {
   };
 }
 
-export type FlowAction = PipelineEvent
-  | { type: 'stateHydrated'; state: RunState }
-  | { type: 'reset' };
+export type FlowAction =
+  PipelineEvent | { type: 'stateHydrated'; state: RunState } | { type: 'reset' };
 
 export function reduceFlowEvent(state: FlowState, event: FlowAction): FlowState {
   if (event.type === 'stateHydrated') {

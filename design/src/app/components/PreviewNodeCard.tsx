@@ -14,7 +14,8 @@ export function PreviewNodeCard({ entry }: { entry: NodeDiffEntry }) {
   const Icon = commandIcons[node.type];
   const baseColor = typeColors[node.type] || 'border-border bg-surface-bright';
   const summary = getNodeSummary(node);
-  const oldSummary = entry.kind === 'modified' && entry.before ? getNodeSummary(entry.before) : undefined;
+  const oldSummary =
+    entry.kind === 'modified' && entry.before ? getNodeSummary(entry.before) : undefined;
 
   const accent =
     entry.kind === 'added'
@@ -25,13 +26,18 @@ export function PreviewNodeCard({ entry }: { entry: NodeDiffEntry }) {
           ? 'border-yellow-400 bg-yellow-400/10'
           : baseColor;
   const tag =
-    entry.kind === 'added' ? '新增'
-      : entry.kind === 'removed' ? '删除'
-        : entry.kind === 'modified' ? '修改'
+    entry.kind === 'added'
+      ? '新增'
+      : entry.kind === 'removed'
+        ? '删除'
+        : entry.kind === 'modified'
+          ? '修改'
           : null;
   const tagColor =
-    entry.kind === 'added' ? 'text-green-500'
-      : entry.kind === 'removed' ? 'text-red-500'
+    entry.kind === 'added'
+      ? 'text-green-500'
+      : entry.kind === 'removed'
+        ? 'text-red-500'
         : 'text-yellow-500';
 
   return (
@@ -44,7 +50,9 @@ export function PreviewNodeCard({ entry }: { entry: NodeDiffEntry }) {
           <div className="rounded bg-surface-container/60 p-1.5">
             {Icon && <Icon className="h-4 w-4 text-muted-foreground" />}
           </div>
-          <span className="text-xs text-muted-foreground">{commandLabels[node.type] ?? node.type}</span>
+          <span className="text-xs text-muted-foreground">
+            {commandLabels[node.type] ?? node.type}
+          </span>
           {tag && <span className={`ml-auto text-[10px] font-medium ${tagColor}`}>{tag}</span>}
         </div>
         {entry.kind === 'modified' && oldSummary !== undefined ? (
@@ -59,7 +67,9 @@ export function PreviewNodeCard({ entry }: { entry: NodeDiffEntry }) {
             </div>
           </div>
         ) : (
-          <div className={`text-sm text-foreground ${entry.kind === 'removed' ? 'line-through' : ''}`}>
+          <div
+            className={`text-sm text-foreground ${entry.kind === 'removed' ? 'line-through' : ''}`}
+          >
             {summary || '(空)'}
           </div>
         )}

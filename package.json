@@ -1,7 +1,20 @@
 {
   "name": "ollaic",
-  "private": true,
   "version": "0.1.0",
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.10.1",
+    "prettier": "^3.9.5"
+  },
+  "pnpm": {
+    "overrides": {
+      "vite": "6.3.5"
+    },
+    "onlyBuiltDependencies": [
+      "@tailwindcss/oxide",
+      "esbuild"
+    ]
+  },
+  "private": true,
   "scripts": {
     "dev": "pnpm --dir design dev",
     "build": "pnpm --dir design build",
@@ -13,18 +26,12 @@
     "verify": "pnpm build && pnpm test",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
-  },
-  "devDependencies": {
-    "@tauri-apps/cli": "^2.10.1"
-  },
-  "pnpm": {
-    "overrides": {
-      "vite": "6.3.5"
-    },
-    "onlyBuiltDependencies": [
-      "@tailwindcss/oxide",
-      "esbuild"
-    ]
+    "tauri:build": "tauri build",
+    "format:web": "prettier --write \"design/src/**/*.{ts,tsx,css,json,md}\"",
+    "format:web:check": "prettier --check \"design/src/**/*.{ts,tsx,css,json,md}\"",
+    "format:rust": "cargo fmt --manifest-path src-tauri/Cargo.toml --all",
+    "format:rust:check": "cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check",
+    "format": "pnpm format:web && pnpm format:rust",
+    "format:check": "pnpm format:web:check && pnpm format:rust:check"
   }
 }

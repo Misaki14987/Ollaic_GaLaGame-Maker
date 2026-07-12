@@ -83,7 +83,9 @@ function DataBlock({ value, tone = 'default' }: { value: string; tone?: 'default
     <pre
       className={cn(
         'max-h-72 overflow-auto whitespace-pre-wrap break-words border border-border/70 bg-surface-container-lowest p-3 font-mono-family text-[11px] leading-5',
-        tone === 'error' ? 'border-destructive/30 bg-destructive/5 text-destructive' : 'text-foreground/85',
+        tone === 'error'
+          ? 'border-destructive/30 bg-destructive/5 text-destructive'
+          : 'text-foreground/85',
       )}
     >
       {formatted(value)}
@@ -92,7 +94,11 @@ function DataBlock({ value, tone = 'default' }: { value: string; tone?: 'default
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
-  return <h3 className="mb-2 font-mono-family text-[10px] font-semibold text-muted-foreground">{children}</h3>;
+  return (
+    <h3 className="mb-2 font-mono-family text-[10px] font-semibold text-muted-foreground">
+      {children}
+    </h3>
+  );
 }
 
 export function FlowStepInspector({
@@ -125,11 +131,11 @@ export function FlowStepInspector({
   if (!selected) return null;
 
   const state = STATUS[selected.status];
-  const stepEvents = events.filter((record) => (
-    'stepId' in record.event && record.event.stepId === selected.id
-  ));
-  const showAssetQueue = selected.kind === 'asset'
-    && (selected.id === 'assetQueue' || selected.agent === 'assetQueue');
+  const stepEvents = events.filter(
+    (record) => 'stepId' in record.event && record.event.stepId === selected.id,
+  );
+  const showAssetQueue =
+    selected.kind === 'asset' && (selected.id === 'assetQueue' || selected.agent === 'assetQueue');
   const runArtifactAction = async (key: string, action: () => Promise<void>) => {
     setArtifactBusy(key);
     setArtifactError(null);
@@ -155,16 +161,28 @@ export function FlowStepInspector({
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center gap-2">
               <h2 className="truncate text-sm font-semibold">{selected.id}</h2>
-              <span className="shrink-0 font-mono-family text-[10px] text-muted-foreground">{selected.kind}</span>
+              <span className="shrink-0 font-mono-family text-[10px] text-muted-foreground">
+                {selected.kind}
+              </span>
             </div>
             <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-              <span className={cn('size-1.5 shrink-0 rounded-full', state.className)} aria-hidden="true" />
+              <span
+                className={cn('size-1.5 shrink-0 rounded-full', state.className)}
+                aria-hidden="true"
+              />
               <span>{state.label}</span>
               <span aria-hidden="true">/</span>
               <span>尝试 {selected.attempt}</span>
             </div>
           </div>
-          <Button type="button" variant="ghost" size="icon" onClick={onClose} aria-label="关闭步骤检查器" autoFocus>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={onClose}
+            aria-label="关闭步骤检查器"
+            autoFocus
+          >
             <X />
           </Button>
         </div>
@@ -172,16 +190,28 @@ export function FlowStepInspector({
 
       <Tabs defaultValue="details" className="min-h-0 flex-1 gap-0">
         <TabsList className="h-10 w-full shrink-0 justify-start rounded-none border-b border-border bg-surface-container-lowest p-0">
-          <TabsTrigger value="details" className="h-10 rounded-none border-0 px-4 text-xs data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
+          <TabsTrigger
+            value="details"
+            className="h-10 rounded-none border-0 px-4 text-xs data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent"
+          >
             <GitBranch /> 详情
           </TabsTrigger>
-          <TabsTrigger value="output" className="h-10 rounded-none border-0 px-4 text-xs data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
+          <TabsTrigger
+            value="output"
+            className="h-10 rounded-none border-0 px-4 text-xs data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent"
+          >
             <Braces /> 输出
           </TabsTrigger>
-          <TabsTrigger value="history" className="h-10 rounded-none border-0 px-4 text-xs data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
+          <TabsTrigger
+            value="history"
+            className="h-10 rounded-none border-0 px-4 text-xs data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent"
+          >
             <History /> 记录
           </TabsTrigger>
-          <TabsTrigger value="logs" className="h-10 rounded-none border-0 px-4 text-xs data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
+          <TabsTrigger
+            value="logs"
+            className="h-10 rounded-none border-0 px-4 text-xs data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent"
+          >
             <ListTree /> 日志
           </TabsTrigger>
         </TabsList>
@@ -194,7 +224,10 @@ export function FlowStepInspector({
                 {selected.dependsOn.length ? (
                   <div className="flex flex-wrap gap-1.5">
                     {selected.dependsOn.map((dependency) => (
-                      <code key={dependency} className="border border-border bg-surface-container-low px-2 py-1 text-[11px] text-foreground">
+                      <code
+                        key={dependency}
+                        className="border border-border bg-surface-container-low px-2 py-1 text-[11px] text-foreground"
+                      >
                         {dependency}
                       </code>
                     ))}
@@ -219,7 +252,9 @@ export function FlowStepInspector({
                   size="sm"
                   variant="outline"
                   className="mt-2"
-                  disabled={busy || selected.status === 'running' || promptDraft === selected.prompt}
+                  disabled={
+                    busy || selected.status === 'running' || promptDraft === selected.prompt
+                  }
                   onClick={() => onPromptRerun(selected.id, promptDraft)}
                 >
                   <PencilLine /> 保存并重跑
@@ -247,100 +282,164 @@ export function FlowStepInspector({
                 <section>
                   <SectionLabel>资产任务</SectionLabel>
                   {artifactError && (
-                    <div role="alert" className="mb-3 flex items-start gap-2 border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
+                    <div
+                      role="alert"
+                      className="mb-3 flex items-start gap-2 border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive"
+                    >
                       <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
                       <span className="break-words">{artifactError}</span>
                     </div>
                   )}
                   {assetQueue?.tasks.length ? (
-                    <ol className="divide-y divide-border border border-border" aria-label="资产任务列表">
+                    <ol
+                      className="divide-y divide-border border border-border"
+                      aria-label="资产任务列表"
+                    >
                       {assetQueue.tasks.map((task) => {
                         const status = ASSET_STATUS[task.status];
                         const error = task.error ?? task.attempts.at(-1)?.error;
                         return (
-                          <li key={task.id} className="space-y-2 bg-surface-container-lowest p-3 text-xs">
+                          <li
+                            key={task.id}
+                            className="space-y-2 bg-surface-container-lowest p-3 text-xs"
+                          >
                             <div className="flex min-w-0 items-center gap-2">
-                              <span className={cn('size-1.5 shrink-0 rounded-full', status.className)} aria-hidden="true" />
-                              <strong className="min-w-0 flex-1 truncate" title={task.targetStem}>{task.targetStem}</strong>
-                              <span className="shrink-0 text-[10px] text-muted-foreground">{task.kind} · {status.label}</span>
+                              <span
+                                className={cn('size-1.5 shrink-0 rounded-full', status.className)}
+                                aria-hidden="true"
+                              />
+                              <strong className="min-w-0 flex-1 truncate" title={task.targetStem}>
+                                {task.targetStem}
+                              </strong>
+                              <span className="shrink-0 text-[10px] text-muted-foreground">
+                                {task.kind} · {status.label}
+                              </span>
                             </div>
-                            <p className="break-words leading-5 text-foreground/85">{task.prompt}</p>
+                            <p className="break-words leading-5 text-foreground/85">
+                              {task.prompt}
+                            </p>
                             <div className="flex flex-wrap gap-x-3 gap-y-1 font-mono-family text-[10px] text-muted-foreground">
                               <span>场景 {task.sceneRef || '未指定'}</span>
                               {task.characterRef && <span>角色 {task.characterRef}</span>}
                               <span>重试 {Math.max(0, task.attempts.length - 1)}</span>
                             </div>
-                            {task.assetFile && <p className="break-all font-mono-family text-[10px] text-emerald-700 dark:text-emerald-400">正式素材 {task.assetFile}</p>}
-                            {task.attempts.filter((attempt) => attempt.artifact).map((attempt) => {
-                              const key = `${task.id}:${attempt.attempt}`;
-                              const preview = artifactPreviews[key];
-                              return (
-                                <div key={key} className="space-y-2 border-t border-border/70 pt-2">
-                                  <p className="break-all font-mono-family text-[10px] text-muted-foreground">
-                                    候选 {attempt.attempt} · {attempt.artifact}
-                                  </p>
-                                  <div className="flex flex-wrap gap-1.5">
-                                    {onPreviewAssetArtifact && (
-                                      <Button
-                                        type="button"
-                                        size="sm"
-                                        variant="outline"
-                                        disabled={artifactBusy !== null}
-                                        aria-label={`预览 ${task.targetStem} 候选 ${attempt.attempt}`}
-                                        onClick={() => void runArtifactAction(`preview:${key}`, async () => {
-                                          const data = await onPreviewAssetArtifact(task.id, attempt.attempt);
-                                          setArtifactPreviews((current) => ({ ...current, [key]: data }));
-                                        })}
-                                      >
-                                        {artifactBusy === `preview:${key}` ? <Loader2 className="animate-spin" /> : <Eye />}
-                                        预览
-                                      </Button>
+                            {task.assetFile && (
+                              <p className="break-all font-mono-family text-[10px] text-emerald-700 dark:text-emerald-400">
+                                正式素材 {task.assetFile}
+                              </p>
+                            )}
+                            {task.attempts
+                              .filter((attempt) => attempt.artifact)
+                              .map((attempt) => {
+                                const key = `${task.id}:${attempt.attempt}`;
+                                const preview = artifactPreviews[key];
+                                return (
+                                  <div
+                                    key={key}
+                                    className="space-y-2 border-t border-border/70 pt-2"
+                                  >
+                                    <p className="break-all font-mono-family text-[10px] text-muted-foreground">
+                                      候选 {attempt.attempt} · {attempt.artifact}
+                                    </p>
+                                    <div className="flex flex-wrap gap-1.5">
+                                      {onPreviewAssetArtifact && (
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant="outline"
+                                          disabled={artifactBusy !== null}
+                                          aria-label={`预览 ${task.targetStem} 候选 ${attempt.attempt}`}
+                                          onClick={() =>
+                                            void runArtifactAction(`preview:${key}`, async () => {
+                                              const data = await onPreviewAssetArtifact(
+                                                task.id,
+                                                attempt.attempt,
+                                              );
+                                              setArtifactPreviews((current) => ({
+                                                ...current,
+                                                [key]: data,
+                                              }));
+                                            })
+                                          }
+                                        >
+                                          {artifactBusy === `preview:${key}` ? (
+                                            <Loader2 className="animate-spin" />
+                                          ) : (
+                                            <Eye />
+                                          )}
+                                          预览
+                                        </Button>
+                                      )}
+                                      {onPromoteAssetArtifact && (
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant="outline"
+                                          disabled={artifactBusy !== null}
+                                          aria-label={`提升 ${task.targetStem} 候选 ${attempt.attempt}`}
+                                          onClick={() =>
+                                            void runArtifactAction(`promote:${key}`, () =>
+                                              onPromoteAssetArtifact(task.id, attempt.attempt),
+                                            )
+                                          }
+                                        >
+                                          {artifactBusy === `promote:${key}` ? (
+                                            <Loader2 className="animate-spin" />
+                                          ) : (
+                                            <Upload />
+                                          )}
+                                          提升
+                                        </Button>
+                                      )}
+                                      {onDeleteAssetArtifact && (
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant="outline"
+                                          className="text-destructive"
+                                          disabled={artifactBusy !== null}
+                                          aria-label={`删除 ${task.targetStem} 候选 ${attempt.attempt}`}
+                                          onClick={() =>
+                                            void runArtifactAction(`delete:${key}`, async () => {
+                                              await onDeleteAssetArtifact(task.id, attempt.attempt);
+                                              setArtifactPreviews((current) => {
+                                                const next = { ...current };
+                                                delete next[key];
+                                                return next;
+                                              });
+                                            })
+                                          }
+                                        >
+                                          {artifactBusy === `delete:${key}` ? (
+                                            <Loader2 className="animate-spin" />
+                                          ) : (
+                                            <Trash2 />
+                                          )}
+                                          删除
+                                        </Button>
+                                      )}
+                                    </div>
+                                    {preview?.startsWith('data:image/') && (
+                                      <img
+                                        src={preview}
+                                        alt={`${task.targetStem} 候选 ${attempt.attempt}`}
+                                        className="max-h-48 w-full object-contain"
+                                      />
                                     )}
-                                    {onPromoteAssetArtifact && (
-                                      <Button
-                                        type="button"
-                                        size="sm"
-                                        variant="outline"
-                                        disabled={artifactBusy !== null}
-                                        aria-label={`提升 ${task.targetStem} 候选 ${attempt.attempt}`}
-                                        onClick={() => void runArtifactAction(`promote:${key}`, () => onPromoteAssetArtifact(task.id, attempt.attempt))}
-                                      >
-                                        {artifactBusy === `promote:${key}` ? <Loader2 className="animate-spin" /> : <Upload />}
-                                        提升
-                                      </Button>
-                                    )}
-                                    {onDeleteAssetArtifact && (
-                                      <Button
-                                        type="button"
-                                        size="sm"
-                                        variant="outline"
-                                        className="text-destructive"
-                                        disabled={artifactBusy !== null}
-                                        aria-label={`删除 ${task.targetStem} 候选 ${attempt.attempt}`}
-                                        onClick={() => void runArtifactAction(`delete:${key}`, async () => {
-                                          await onDeleteAssetArtifact(task.id, attempt.attempt);
-                                          setArtifactPreviews((current) => {
-                                            const next = { ...current };
-                                            delete next[key];
-                                            return next;
-                                          });
-                                        })}
-                                      >
-                                        {artifactBusy === `delete:${key}` ? <Loader2 className="animate-spin" /> : <Trash2 />}
-                                        删除
-                                      </Button>
+                                    {preview?.startsWith('data:audio/') && (
+                                      <audio
+                                        src={preview}
+                                        controls
+                                        className="w-full"
+                                        aria-label={`${task.targetStem} 候选 ${attempt.attempt} 音频预览`}
+                                      />
                                     )}
                                   </div>
-                                  {preview?.startsWith('data:image/') && (
-                                    <img src={preview} alt={`${task.targetStem} 候选 ${attempt.attempt}`} className="max-h-48 w-full object-contain" />
-                                  )}
-                                  {preview?.startsWith('data:audio/') && (
-                                    <audio src={preview} controls className="w-full" aria-label={`${task.targetStem} 候选 ${attempt.attempt} 音频预览`} />
-                                  )}
-                                </div>
-                              );
-                            })}
-                            {error && <p className="break-words text-[11px] text-destructive">{error}</p>}
+                                );
+                              })}
+                            {error && (
+                              <p className="break-words text-[11px] text-destructive">{error}</p>
+                            )}
                           </li>
                         );
                       })}
@@ -351,8 +450,12 @@ export function FlowStepInspector({
                 </section>
               )}
               <section>
-              <SectionLabel>结构化输出</SectionLabel>
-              {selected.output ? <DataBlock value={selected.output} /> : <p className="text-xs text-muted-foreground">暂无输出</p>}
+                <SectionLabel>结构化输出</SectionLabel>
+                {selected.output ? (
+                  <DataBlock value={selected.output} />
+                ) : (
+                  <p className="text-xs text-muted-foreground">暂无输出</p>
+                )}
               </section>
             </div>
           </ScrollArea>
@@ -363,9 +466,23 @@ export function FlowStepInspector({
             {selected.history.length ? (
               <div className="divide-y divide-border">
                 {[...selected.history].reverse().map((attempt) => (
-                  <details key={attempt.attempt} className="group px-4 py-3" open={attempt.attempt === selected.attempt}>
+                  <details
+                    key={attempt.attempt}
+                    className="group px-4 py-3"
+                    open={attempt.attempt === selected.attempt}
+                  >
                     <summary className="flex cursor-pointer list-none items-center gap-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50">
-                      <span className={cn('size-1.5 rounded-full', attempt.error ? 'bg-destructive' : attempt.finishedAt ? 'bg-emerald-500' : 'bg-blue-500')} aria-hidden="true" />
+                      <span
+                        className={cn(
+                          'size-1.5 rounded-full',
+                          attempt.error
+                            ? 'bg-destructive'
+                            : attempt.finishedAt
+                              ? 'bg-emerald-500'
+                              : 'bg-blue-500',
+                        )}
+                        aria-hidden="true"
+                      />
                       <span className="font-semibold">尝试 {attempt.attempt}</span>
                       <span className="ml-auto flex items-center gap-1 font-mono-family text-[10px] text-muted-foreground">
                         <Clock3 className="size-3" aria-hidden="true" />
@@ -376,19 +493,27 @@ export function FlowStepInspector({
                       <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-[11px]">
                         <div>
                           <dt className="text-muted-foreground">开始</dt>
-                          <dd className="mt-0.5 font-mono-family">{timestamp(attempt.startedAt)}</dd>
+                          <dd className="mt-0.5 font-mono-family">
+                            {timestamp(attempt.startedAt)}
+                          </dd>
                         </div>
                         <div>
                           <dt className="text-muted-foreground">结束</dt>
-                          <dd className="mt-0.5 font-mono-family">{timestamp(attempt.finishedAt)}</dd>
+                          <dd className="mt-0.5 font-mono-family">
+                            {timestamp(attempt.finishedAt)}
+                          </dd>
                         </div>
                         <div>
                           <dt className="text-muted-foreground">成本</dt>
-                          <dd className="mt-0.5 font-mono-family">{attempt.cost == null ? '未记录' : attempt.cost}</dd>
+                          <dd className="mt-0.5 font-mono-family">
+                            {attempt.cost == null ? '未记录' : attempt.cost}
+                          </dd>
                         </div>
                         <div>
                           <dt className="text-muted-foreground">Token</dt>
-                          <dd className="mt-0.5 font-mono-family">{(attempt.promptTokens ?? 0) + (attempt.completionTokens ?? 0)}</dd>
+                          <dd className="mt-0.5 font-mono-family">
+                            {(attempt.promptTokens ?? 0) + (attempt.completionTokens ?? 0)}
+                          </dd>
                         </div>
                         <div>
                           <dt className="text-muted-foreground">降级</dt>
@@ -396,7 +521,9 @@ export function FlowStepInspector({
                         </div>
                         <div className="col-span-2">
                           <dt className="text-muted-foreground">回滚快照</dt>
-                          <dd className="mt-0.5 break-all font-mono-family">{attempt.rollbackSnapshot ?? '无'}</dd>
+                          <dd className="mt-0.5 break-all font-mono-family">
+                            {attempt.rollbackSnapshot ?? '无'}
+                          </dd>
                         </div>
                       </dl>
                       <section>
@@ -425,7 +552,9 @@ export function FlowStepInspector({
                         <section>
                           <SectionLabel>警告</SectionLabel>
                           <ul className="space-y-1 text-xs text-amber-700 dark:text-amber-300">
-                            {attempt.warnings.map((warning, index) => <li key={`${index}-${warning}`}>{warning}</li>)}
+                            {attempt.warnings.map((warning, index) => (
+                              <li key={`${index}-${warning}`}>{warning}</li>
+                            ))}
                           </ul>
                         </section>
                       )}
@@ -444,9 +573,14 @@ export function FlowStepInspector({
             {stepEvents.length ? (
               <ol className="divide-y divide-border">
                 {stepEvents.map(({ event, receivedAt }, index) => (
-                  <li key={`${receivedAt}-${event.type}-${index}`} className="grid grid-cols-[5rem_minmax(0,1fr)] gap-3 px-4 py-3 text-xs">
+                  <li
+                    key={`${receivedAt}-${event.type}-${index}`}
+                    className="grid grid-cols-[5rem_minmax(0,1fr)] gap-3 px-4 py-3 text-xs"
+                  >
                     <time className="font-mono-family text-[10px] text-muted-foreground">
-                      {new Date(receivedAt).toLocaleTimeString('zh-CN', { hour12: false })}
+                      {new Date(receivedAt).toLocaleTimeString('zh-CN', {
+                        hour12: false,
+                      })}
                     </time>
                     <span>
                       {event.type === 'stepStarted' && '开始执行'}
@@ -465,19 +599,37 @@ export function FlowStepInspector({
       </Tabs>
 
       <footer className="flex shrink-0 flex-wrap gap-2 border-t border-border bg-surface-container-low px-4 py-3">
-        {selected.status === 'succeeded' && onOpenArtifact && (['character', 'asset'].includes(selected.kind) || selected.id === 'scene') && (
-          <Button type="button" size="sm" onClick={() => onOpenArtifact(selected)}>
-            <SquareArrowOutUpRight />
-            {selected.kind === 'character' ? '打开角色' : selected.kind === 'asset' ? '打开资源库' : '打开场景'}
-          </Button>
-        )}
+        {selected.status === 'succeeded' &&
+          onOpenArtifact &&
+          (['character', 'asset'].includes(selected.kind) || selected.id === 'scene') && (
+            <Button type="button" size="sm" onClick={() => onOpenArtifact(selected)}>
+              <SquareArrowOutUpRight />
+              {selected.kind === 'character'
+                ? '打开角色'
+                : selected.kind === 'asset'
+                  ? '打开资源库'
+                  : '打开场景'}
+            </Button>
+          )}
         {selected.status !== 'running' && (
-          <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => onRetry(selected.id)}>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => onRetry(selected.id)}
+          >
             <RotateCcw /> 从此步重跑
           </Button>
         )}
         {selected.status === 'pending' && !detached && (
-          <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => onSkip(selected.id)}>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => onSkip(selected.id)}
+          >
             <SkipForward /> 跳过
           </Button>
         )}

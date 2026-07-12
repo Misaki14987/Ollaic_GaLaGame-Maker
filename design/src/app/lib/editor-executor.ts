@@ -21,12 +21,22 @@ function splitInsertText(text: string): string[] {
 }
 
 function assertRange(startLine: number, endLine: number, total: number): void {
-  if (!Number.isInteger(startLine) || !Number.isInteger(endLine) || startLine < 1 || endLine < startLine || endLine > total) {
+  if (
+    !Number.isInteger(startLine) ||
+    !Number.isInteger(endLine) ||
+    startLine < 1 ||
+    endLine < startLine ||
+    endLine > total
+  ) {
     throw new Error(`行号范围 ${startLine}-${endLine} 超出当前脚本范围 1-${total}`);
   }
 }
 
-export function resolveLineWithAnchor(lines: string[], lineNo: number, anchorText?: string): ResolvedLine {
+export function resolveLineWithAnchor(
+  lines: string[],
+  lineNo: number,
+  anchorText?: string,
+): ResolvedLine {
   if (!Number.isInteger(lineNo) || lineNo < 1) throw new Error(`行号 ${lineNo} 不是有效正整数`);
   if (!anchorText) {
     if (lineNo > lines.length) throw new Error(`行号 ${lineNo} 超出当前脚本范围 1-${lines.length}`);
@@ -60,11 +70,19 @@ export function applyEditorPatch(content: string, patch: EditorPatch): AppliedEd
     const inserted = splitInsertText(patch.text);
     if (patch.afterLine === 'end') {
       lines.push(...inserted);
-      return { content: lines.join('\n'), lineDelta: inserted.length, corrected: false };
+      return {
+        content: lines.join('\n'),
+        lineDelta: inserted.length,
+        corrected: false,
+      };
     }
     const resolved = resolveLineWithAnchor(lines, patch.afterLine, patch.anchorText);
     lines.splice(resolved.line, 0, ...inserted);
-    return { content: lines.join('\n'), lineDelta: inserted.length, corrected: resolved.corrected };
+    return {
+      content: lines.join('\n'),
+      lineDelta: inserted.length,
+      corrected: resolved.corrected,
+    };
   }
 
   const resolvedStart = resolveLineWithAnchor(lines, patch.startLine, patch.anchorText);
@@ -74,12 +92,20 @@ export function applyEditorPatch(content: string, patch: EditorPatch): AppliedEd
 
   if (patch.type === 'delete') {
     lines.splice(resolvedStart.line - 1, length);
-    return { content: lines.join('\n'), lineDelta: -length, corrected: resolvedStart.corrected };
+    return {
+      content: lines.join('\n'),
+      lineDelta: -length,
+      corrected: resolvedStart.corrected,
+    };
   }
 
   const inserted = splitInsertText(patch.text);
   lines.splice(resolvedStart.line - 1, length, ...inserted);
-  return { content: lines.join('\n'), lineDelta: inserted.length - length, corrected: resolvedStart.corrected };
+  return {
+    content: lines.join('\n'),
+    lineDelta: inserted.length - length,
+    corrected: resolvedStart.corrected,
+  };
 }
 
 function offsetPatch(patch: EditorPatch, offset: number): EditorPatch {
@@ -93,7 +119,10 @@ function offsetPatch(patch: EditorPatch, offset: number): EditorPatch {
   };
 }
 
-export function applyEditorPatches(content: string, patches: EditorPatch[]): { content: string; correctedAnchors: number } {
+export function applyEditorPatches(
+  content: string,
+  patches: EditorPatch[],
+): { content: string; correctedAnchors: number } {
   let next = content;
   let offset = 0;
   let correctedAnchors = 0;

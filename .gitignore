@@ -10,8 +10,9 @@
 /src-tauri/models/*.onnx
 /.codex
 /.claude
+/.agent
 /stitch_exports
 /.DS_Store
 .DS_Store
-/docs
+/doc
 /skills

@@ -2,13 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Image, Search, Loader2, Music, Volume2 } from 'lucide-react';
 import { listAssets, type AssetInfo } from '../lib/assets-ipc';
 import { convertFileSrc } from '@tauri-apps/api/core';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from './ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
 
 interface Props {
   projectPath: string;
@@ -19,11 +13,13 @@ interface Props {
 }
 
 function isImageExt(ext: string): boolean {
-  return ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg'].some(e => ext.toLowerCase().endsWith(e));
+  return ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg'].some((e) =>
+    ext.toLowerCase().endsWith(e),
+  );
 }
 
 function isAudioExt(ext: string): boolean {
-  return ['.mp3', '.ogg', '.wav', '.flac', '.aac'].some(e => ext.toLowerCase().endsWith(e));
+  return ['.mp3', '.ogg', '.wav', '.flac', '.aac'].some((e) => ext.toLowerCase().endsWith(e));
 }
 
 function titleForCategory(category: string): string {
@@ -43,7 +39,13 @@ function formatDuration(seconds?: number): string {
   return `${Math.floor(total / 60)}:${(total % 60).toString().padStart(2, '0')}`;
 }
 
-export function AssetPickerButton({ projectPath, category, currentValue, onSelect, aliases = {} }: Props) {
+export function AssetPickerButton({
+  projectPath,
+  category,
+  currentValue,
+  onSelect,
+  aliases = {},
+}: Props) {
   const [open, setOpen] = useState(false);
   const [assets, setAssets] = useState<AssetInfo[]>([]);
   const [loading, setLoading] = useState(false);
@@ -121,7 +123,9 @@ export function AssetPickerButton({ projectPath, category, currentValue, onSelec
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-2xl p-0 overflow-hidden">
           <DialogHeader className="px-5 pt-5 pb-3 border-b border-border">
-            <DialogTitle className="text-base font-display-family">{titleForCategory(category)}</DialogTitle>
+            <DialogTitle className="text-base font-display-family">
+              {titleForCategory(category)}
+            </DialogTitle>
             <DialogDescription className="text-xs">
               选择后仍会写入原始文件名，显示名称只用于编辑器。
             </DialogDescription>
@@ -162,7 +166,7 @@ export function AssetPickerButton({ projectPath, category, currentValue, onSelec
                   （无 / 清除）
                 </button>
 
-                {filtered.map(asset => {
+                {filtered.map((asset) => {
                   const thumb = isImageExt(asset.extension) ? convertFileSrc(asset.path) : null;
                   const alias = aliases[asset.name];
                   const label = alias || asset.name;
@@ -176,42 +180,64 @@ export function AssetPickerButton({ projectPath, category, currentValue, onSelec
                       onMouseEnter={() => playPreview(asset)}
                       onMouseLeave={stopPreview}
                       className={`group text-left rounded-md border overflow-hidden hover:bg-secondary/50 transition-all ${
-                        isSelected ? 'bg-primary/10 text-primary border-primary/40' : 'border-border bg-card/60'
+                        isSelected
+                          ? 'bg-primary/10 text-primary border-primary/40'
+                          : 'border-border bg-card/60'
                       } ${imageLike ? '' : 'w-full flex items-center gap-3 p-3'}`}
                     >
                       {imageLike ? (
                         <>
                           <div className="aspect-video bg-secondary/30 flex items-center justify-center overflow-hidden">
                             {thumb ? (
-                              <img src={thumb} alt="" className="w-full h-full object-cover transition-transform group-hover:scale-[1.03]" />
+                              <img
+                                src={thumb}
+                                alt=""
+                                className="w-full h-full object-cover transition-transform group-hover:scale-[1.03]"
+                              />
                             ) : (
                               <Image className="w-8 h-8 text-muted-foreground/40" />
                             )}
                           </div>
                           <div className="p-3 min-w-0">
                             <div className="truncate text-sm font-medium">{label}</div>
-                            {alias && <div className="mt-1 truncate text-[11px] text-muted-foreground font-mono-family">{asset.name}</div>}
+                            {alias && (
+                              <div className="mt-1 truncate text-[11px] text-muted-foreground font-mono-family">
+                                {asset.name}
+                              </div>
+                            )}
                           </div>
                         </>
                       ) : (
                         <>
                           <div className="w-11 h-11 rounded-md bg-secondary/40 flex-shrink-0 flex items-center justify-center">
-                            {isAudio ? <Music className="w-5 h-5 text-muted-foreground" /> : <Image className="w-5 h-5 text-muted-foreground/40" />}
+                            {isAudio ? (
+                              <Music className="w-5 h-5 text-muted-foreground" />
+                            ) : (
+                              <Image className="w-5 h-5 text-muted-foreground/40" />
+                            )}
                           </div>
                           <div className="min-w-0 flex-1">
                             <div className="truncate text-sm font-medium">{label}</div>
                             <div className="mt-0.5 truncate text-xs text-muted-foreground font-mono-family">
-                              {asset.name}{isAudio ? ` · ${formatDuration(durations[asset.path])}` : ''}
+                              {asset.name}
+                              {isAudio ? ` · ${formatDuration(durations[asset.path])}` : ''}
                             </div>
                           </div>
-                          {isAudio && <Volume2 className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />}
+                          {isAudio && (
+                            <Volume2 className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                          )}
                           {isAudio && durations[asset.path] === undefined && (
                             <audio
                               preload="metadata"
                               src={convertFileSrc(asset.path)}
                               onLoadedMetadata={(event) => {
-                                const duration = Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0;
-                                setDurations(prev => ({ ...prev, [asset.path]: duration }));
+                                const duration = Number.isFinite(event.currentTarget.duration)
+                                  ? event.currentTarget.duration
+                                  : 0;
+                                setDurations((prev) => ({
+                                  ...prev,
+                                  [asset.path]: duration,
+                                }));
                               }}
                               className="hidden"
                             />

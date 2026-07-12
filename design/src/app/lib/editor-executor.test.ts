@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  applyEditorPatch,
-  applyEditorPatches,
-  resolveLineWithAnchor,
-} from './editor-executor';
+import { applyEditorPatch, applyEditorPatches, resolveLineWithAnchor } from './editor-executor';
 import type { EditorPatch } from './editor-patch';
 
 const SCRIPT = ['line1;', 'line2;', 'line3;', 'line4;'].join('\n');
@@ -12,15 +8,24 @@ describe('resolveLineWithAnchor', () => {
   const lines = ['a;', 'b;', 'c;', 'd;'];
 
   it('returns the line as-is when no anchor is given', () => {
-    expect(resolveLineWithAnchor(lines, 2)).toEqual({ line: 2, corrected: false });
+    expect(resolveLineWithAnchor(lines, 2)).toEqual({
+      line: 2,
+      corrected: false,
+    });
   });
 
   it('does not correct when the anchor already matches', () => {
-    expect(resolveLineWithAnchor(lines, 3, 'c;')).toEqual({ line: 3, corrected: false });
+    expect(resolveLineWithAnchor(lines, 3, 'c;')).toEqual({
+      line: 3,
+      corrected: false,
+    });
   });
 
   it('corrects a drifted line number using a nearby anchor', () => {
-    expect(resolveLineWithAnchor(lines, 2, 'c;')).toEqual({ line: 3, corrected: true });
+    expect(resolveLineWithAnchor(lines, 2, 'c;')).toEqual({
+      line: 3,
+      corrected: true,
+    });
   });
 
   it('throws on an out-of-range line without an anchor', () => {
@@ -35,27 +40,52 @@ describe('resolveLineWithAnchor', () => {
 
 describe('applyEditorPatch', () => {
   it('inserts after a line', () => {
-    const patch: EditorPatch = { type: 'insert', file: 'a.txt', afterLine: 2, text: 'NEW;' };
-    expect(applyEditorPatch(SCRIPT, patch).content).toBe(['line1;', 'line2;', 'NEW;', 'line3;', 'line4;'].join('\n'));
+    const patch: EditorPatch = {
+      type: 'insert',
+      file: 'a.txt',
+      afterLine: 2,
+      text: 'NEW;',
+    };
+    expect(applyEditorPatch(SCRIPT, patch).content).toBe(
+      ['line1;', 'line2;', 'NEW;', 'line3;', 'line4;'].join('\n'),
+    );
   });
 
   it('appends at end', () => {
-    const patch: EditorPatch = { type: 'insert', file: 'a.txt', afterLine: 'end', text: 'TAIL;' };
+    const patch: EditorPatch = {
+      type: 'insert',
+      file: 'a.txt',
+      afterLine: 'end',
+      text: 'TAIL;',
+    };
     const applied = applyEditorPatch(SCRIPT, patch);
     expect(applied.content.endsWith('TAIL;')).toBe(true);
     expect(applied.lineDelta).toBe(1);
   });
 
   it('deletes a range', () => {
-    const patch: EditorPatch = { type: 'delete', file: 'a.txt', startLine: 2, endLine: 3 };
+    const patch: EditorPatch = {
+      type: 'delete',
+      file: 'a.txt',
+      startLine: 2,
+      endLine: 3,
+    };
     const applied = applyEditorPatch(SCRIPT, patch);
     expect(applied.content).toBe(['line1;', 'line4;'].join('\n'));
     expect(applied.lineDelta).toBe(-2);
   });
 
   it('replaces a line', () => {
-    const patch: EditorPatch = { type: 'replace', file: 'a.txt', startLine: 1, endLine: 1, text: 'R;' };
-    expect(applyEditorPatch(SCRIPT, patch).content).toBe(['R;', 'line2;', 'line3;', 'line4;'].join('\n'));
+    const patch: EditorPatch = {
+      type: 'replace',
+      file: 'a.txt',
+      startLine: 1,
+      endLine: 1,
+      text: 'R;',
+    };
+    expect(applyEditorPatch(SCRIPT, patch).content).toBe(
+      ['R;', 'line2;', 'line3;', 'line4;'].join('\n'),
+    );
   });
 });
 
@@ -73,7 +103,14 @@ describe('applyEditorPatches (multi-patch offset composition)', () => {
 
   it('counts corrected anchors', () => {
     const patches: EditorPatch[] = [
-      { type: 'replace', file: 'a.txt', startLine: 1, endLine: 1, text: 'R;', anchorText: 'line3;' },
+      {
+        type: 'replace',
+        file: 'a.txt',
+        startLine: 1,
+        endLine: 1,
+        text: 'R;',
+        anchorText: 'line3;',
+      },
     ];
     const { content, correctedAnchors } = applyEditorPatches(SCRIPT, patches);
     expect(correctedAnchors).toBe(1);

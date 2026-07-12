@@ -57,7 +57,8 @@ export interface SceneHeader {
  * WebGAL commands (changeScene, edit_scene, etc.).
  */
 export function sceneDisplayName(file: string, header?: SceneHeader): string {
-  if (header?.chapter) return header.outline ? `${header.chapter} — ${header.outline}` : header.chapter;
+  if (header?.chapter)
+    return header.outline ? `${header.chapter} — ${header.outline}` : header.chapter;
   return header?.outline ?? file;
 }
 
@@ -107,7 +108,8 @@ export function parseSceneHeader(text: string): SceneHeader {
     const value = content.slice(colon + 1).trim();
     if (!value) continue;
     if (key === '章节' || key === 'chapter') header.chapter = value;
-    else if (key === '大纲' || key === 'outline' || key === '描述' || key === 'desc') header.outline = value;
+    else if (key === '大纲' || key === 'outline' || key === '描述' || key === 'desc')
+      header.outline = value;
   }
   return header;
 }
@@ -133,7 +135,10 @@ export async function openProject(path: string): Promise<ProjectInfo> {
 }
 
 /** Update config.txt for a project. */
-export async function saveConfig(projectPath: string, config: Record<string, string>): Promise<void> {
+export async function saveConfig(
+  projectPath: string,
+  config: Record<string, string>,
+): Promise<void> {
   return invoke<void>('save_config', { projectPath, config });
 }
 
@@ -201,7 +206,10 @@ export async function readProjectMetadata(projectPath: string): Promise<ProjectM
 }
 
 /** Persist editor/project metadata at the project root. */
-export async function saveProjectMetadata(projectPath: string, metadata: ProjectMetadata): Promise<void> {
+export async function saveProjectMetadata(
+  projectPath: string,
+  metadata: ProjectMetadata,
+): Promise<void> {
   return invoke<void>('save_project_metadata', { projectPath, metadata });
 }
 
@@ -241,17 +249,27 @@ export async function listProjectSnapshots(projectPath: string): Promise<Snapsho
 }
 
 /** Rename a persistent project snapshot. */
-export async function renameProjectSnapshot(projectPath: string, snapshotId: string, label: string): Promise<SnapshotInfo> {
+export async function renameProjectSnapshot(
+  projectPath: string,
+  snapshotId: string,
+  label: string,
+): Promise<SnapshotInfo> {
   return invoke<SnapshotInfo>('rename_project_snapshot', { projectPath, snapshotId, label });
 }
 
 /** Delete a persistent project snapshot. */
-export async function deleteProjectSnapshot(projectPath: string, snapshotId: string): Promise<void> {
+export async function deleteProjectSnapshot(
+  projectPath: string,
+  snapshotId: string,
+): Promise<void> {
   return invoke<void>('delete_project_snapshot', { projectPath, snapshotId });
 }
 
 /** Restore a persistent project snapshot. */
-export async function restoreProjectSnapshot(projectPath: string, snapshotId: string): Promise<void> {
+export async function restoreProjectSnapshot(
+  projectPath: string,
+  snapshotId: string,
+): Promise<void> {
   return invoke<void>('restore_project_snapshot', { projectPath, snapshotId });
 }
 

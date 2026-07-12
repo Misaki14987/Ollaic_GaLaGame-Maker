@@ -66,7 +66,11 @@ export async function importAsset(
   projectPath: string,
   category: string,
 ): Promise<AssetInfo> {
-  return invoke<AssetInfo>('import_asset', { sourcePath, projectPath, category });
+  return invoke<AssetInfo>('import_asset', {
+    sourcePath,
+    projectPath,
+    category,
+  });
 }
 
 /** Save generated media bytes to a project's asset directory with a fixed filename. */
@@ -76,7 +80,12 @@ export async function saveGeneratedAsset(
   filename: string,
   base64Data: string,
 ): Promise<AssetInfo> {
-  return invoke<AssetInfo>('save_generated_asset', { projectPath, category, filename, base64Data });
+  return invoke<AssetInfo>('save_generated_asset', {
+    projectPath,
+    category,
+    filename,
+    base64Data,
+  });
 }
 
 /** Delete an asset file from the project. */
@@ -95,7 +104,12 @@ export async function renameAsset(
   oldName: string,
   newName: string,
 ): Promise<AssetInfo> {
-  return invoke<AssetInfo>('rename_asset', { projectPath, category, oldName, newName });
+  return invoke<AssetInfo>('rename_asset', {
+    projectPath,
+    category,
+    oldName,
+    newName,
+  });
 }
 
 /** Find scene-script lines that reference an asset filename. */
@@ -104,7 +118,11 @@ export async function findAssetUsages(
   filename: string,
   category?: string,
 ): Promise<AssetUsage[]> {
-  return invoke<AssetUsage[]>('find_asset_usages', { projectPath, filename, category: category ?? null });
+  return invoke<AssetUsage[]>('find_asset_usages', {
+    projectPath,
+    filename,
+    category: category ?? null,
+  });
 }
 
 /** Load editor-owned metadata stored with the project. */
@@ -125,7 +143,10 @@ export async function syncSceneVoiceCards(
   projectPath: string,
   sceneFile: string,
 ): Promise<VoiceAssetCard[]> {
-  return invoke<VoiceAssetCard[]>('sync_scene_voice_cards', { projectPath, sceneFile });
+  return invoke<VoiceAssetCard[]>('sync_scene_voice_cards', {
+    projectPath,
+    sceneFile,
+  });
 }
 
 /** Link an imported audio file to a voice card slot. */
@@ -134,13 +155,14 @@ export async function fillVoiceCard(
   voiceCardId: string,
   assetFilename: string,
 ): Promise<VoiceAssetCard> {
-  return invoke<VoiceAssetCard>('fill_voice_card', { projectPath, voiceCardId, assetFilename });
+  return invoke<VoiceAssetCard>('fill_voice_card', {
+    projectPath,
+    voiceCardId,
+    assetFilename,
+  });
 }
 
 /** Mark a voice card as deleted (won't be re-created on future syncs). */
-export async function deleteVoiceCard(
-  projectPath: string,
-  voiceCardId: string,
-): Promise<void> {
+export async function deleteVoiceCard(projectPath: string, voiceCardId: string): Promise<void> {
   return invoke<void>('delete_voice_card', { projectPath, voiceCardId });
 }

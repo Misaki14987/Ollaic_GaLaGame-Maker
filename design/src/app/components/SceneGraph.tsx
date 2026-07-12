@@ -56,7 +56,12 @@ function computeSceneGraphLayout(
   const edges: SceneGraphEdge[] = [];
 
   if (scenes.length === 0) {
-    return { positions, edges, width: graphWidth, height: TOP_PAD + BOTTOM_PAD };
+    return {
+      positions,
+      edges,
+      width: graphWidth,
+      height: TOP_PAD + BOTTOM_PAD,
+    };
   }
 
   // Fixed start so positions are stable regardless of which scene is open.
@@ -123,9 +128,10 @@ function computeSceneGraphLayout(
   }
   edges.push(...edgeByKey.values());
 
-  const height = byDepth.length > 0
-    ? TOP_PAD + CARD_H + (byDepth.length - 1) * ROW_H + BOTTOM_PAD
-    : TOP_PAD + BOTTOM_PAD;
+  const height =
+    byDepth.length > 0
+      ? TOP_PAD + CARD_H + (byDepth.length - 1) * ROW_H + BOTTOM_PAD
+      : TOP_PAD + BOTTOM_PAD;
   return { positions, edges, width, height };
 }
 
@@ -155,7 +161,11 @@ function buildOrthogonalPath(from: NodePos, to: NodePos, contentWidth: number): 
   return `M ${from.x},${startY} V ${exitY} H ${sideX} V ${enterY} H ${to.x} V ${endY}`;
 }
 
-function edgeMarkerPosition(from: NodePos, to: NodePos, contentWidth: number): { x: number; y: number } {
+function edgeMarkerPosition(
+  from: NodePos,
+  to: NodePos,
+  contentWidth: number,
+): { x: number; y: number } {
   const halfH = CARD_H / 2;
   const startY = from.y + halfH + 1;
   const endY = to.y - halfH - 2;
@@ -235,16 +245,13 @@ export const SceneGraph = memo(function SceneGraph({
 
   const { width, height } = layout;
 
-  const wrapperStyle = fitToWidth
-    ? { aspectRatio: `${width} / ${height}` }
-    : { width, height };
+  const wrapperStyle = fitToWidth ? { aspectRatio: `${width} / ${height}` } : { width, height };
 
   return (
-    <div className={`relative overflow-auto ${fitToWidth ? 'overflow-x-hidden' : ''} ${className ?? ''}`}>
-      <div
-        className={`relative ${fitToWidth ? 'w-full' : 'shrink-0'}`}
-        style={wrapperStyle}
-      >
+    <div
+      className={`relative overflow-auto ${fitToWidth ? 'overflow-x-hidden' : ''} ${className ?? ''}`}
+    >
+      <div className={`relative ${fitToWidth ? 'w-full' : 'shrink-0'}`} style={wrapperStyle}>
         {/* Edges — mapped 1:1 onto the box (matching aspect ratio → uniform scale). */}
         <svg
           viewBox={`0 0 ${width} ${height}`}
@@ -252,7 +259,14 @@ export const SceneGraph = memo(function SceneGraph({
           className="pointer-events-none absolute inset-0 h-full w-full"
         >
           <defs>
-            <marker id="scene-arrow" markerWidth="7" markerHeight="7" refX="5.5" refY="3" orient="auto">
+            <marker
+              id="scene-arrow"
+              markerWidth="7"
+              markerHeight="7"
+              refX="5.5"
+              refY="3"
+              orient="auto"
+            >
               <path d="M0,0 L6,3 L0,6 z" fill="var(--color-primary)" />
             </marker>
           </defs>
@@ -276,44 +290,46 @@ export const SceneGraph = memo(function SceneGraph({
           })}
         </svg>
 
-        {layout.edges.filter((edge) => edge.isChoice).map((edge, i) => {
-          const from = layout.positions.get(edge.from)!;
-          const to = layout.positions.get(edge.to)!;
-          const marker = edgeMarkerPosition(from, to, width);
-          const labels = edge.labels.length > 0 ? edge.labels : ['选项分支'];
-          const title = labels.join('\n');
+        {layout.edges
+          .filter((edge) => edge.isChoice)
+          .map((edge, i) => {
+            const from = layout.positions.get(edge.from)!;
+            const to = layout.positions.get(edge.to)!;
+            const marker = edgeMarkerPosition(from, to, width);
+            const labels = edge.labels.length > 0 ? edge.labels : ['选项分支'];
+            const title = labels.join('\n');
 
-          return (
-            <div
-              key={`${edge.from}->${edge.to}-label-${i}`}
-              title={title}
-              aria-label={title}
-              style={{
-                left: `${(marker.x / width) * 100}%`,
-                top: `${(marker.y / height) * 100}%`,
-              }}
-              className="group pointer-events-auto absolute z-20 -translate-x-1/2 -translate-y-1/2"
-            >
-              <div className="flex h-5 min-w-5 items-center justify-center gap-1 rounded-full border border-primary/50 bg-surface-container-high px-1.5 text-primary shadow-sm">
-                <Split className="h-3 w-3" />
-                {labels.length > 1 && (
-                  <span className="font-mono text-[9px] font-semibold leading-none">
-                    {labels.length}
-                  </span>
-                )}
-              </div>
-              <div className="pointer-events-none absolute left-1/2 top-full z-30 mt-1 hidden -translate-x-1/2 rounded-md border border-outline-variant/40 bg-surface-container-high px-2 py-1 text-[10px] font-medium text-foreground shadow-lg group-hover:block">
-                <div className="max-w-[180px] space-y-0.5">
-                  {labels.map((label) => (
-                    <div key={label} className="truncate whitespace-nowrap">
-                      {label}
-                    </div>
-                  ))}
+            return (
+              <div
+                key={`${edge.from}->${edge.to}-label-${i}`}
+                title={title}
+                aria-label={title}
+                style={{
+                  left: `${(marker.x / width) * 100}%`,
+                  top: `${(marker.y / height) * 100}%`,
+                }}
+                className="group pointer-events-auto absolute z-20 -translate-x-1/2 -translate-y-1/2"
+              >
+                <div className="flex h-5 min-w-5 items-center justify-center gap-1 rounded-full border border-primary/50 bg-surface-container-high px-1.5 text-primary shadow-sm">
+                  <Split className="h-3 w-3" />
+                  {labels.length > 1 && (
+                    <span className="font-mono text-[9px] font-semibold leading-none">
+                      {labels.length}
+                    </span>
+                  )}
+                </div>
+                <div className="pointer-events-none absolute left-1/2 top-full z-30 mt-1 hidden -translate-x-1/2 rounded-md border border-outline-variant/40 bg-surface-container-high px-2 py-1 text-[10px] font-medium text-foreground shadow-lg group-hover:block">
+                  <div className="max-w-[180px] space-y-0.5">
+                    {labels.map((label) => (
+                      <div key={label} className="truncate whitespace-nowrap">
+                        {label}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
 
         {/* Nodes — HTML cards laid over the edges, positioned in viewBox %. */}
         {[...layout.positions.entries()].map(([name, pos]) => {
@@ -329,8 +345,8 @@ export const SceneGraph = memo(function SceneGraph({
             : isChoice
               ? `${outgoing.length}`
               : header?.chapter || '场景';
-          const title = header?.chapter?.replace(/[;：:]\s.*$/, '').trim()
-            || name.replace(/\.txt$/i, '');
+          const title =
+            header?.chapter?.replace(/[;：:]\s.*$/, '').trim() || name.replace(/\.txt$/i, '');
 
           const borderClass = isCurrent
             ? 'border-primary ring-2 ring-primary/30'
@@ -351,7 +367,14 @@ export const SceneGraph = memo(function SceneGraph({
               tabIndex={0}
               title={titleParts.join('\n')}
               onClick={() => onSwitchScene?.(name)}
-              onContextMenu={onNodeContextMenu ? (ev) => { ev.preventDefault(); onNodeContextMenu(name, ev); } : undefined}
+              onContextMenu={
+                onNodeContextMenu
+                  ? (ev) => {
+                      ev.preventDefault();
+                      onNodeContextMenu(name, ev);
+                    }
+                  : undefined
+              }
               style={{
                 left: `${((pos.x - pos.w / 2) / width) * 100}%`,
                 top: `${((pos.y - CARD_H / 2) / height) * 100}%`,

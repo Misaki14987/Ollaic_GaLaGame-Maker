@@ -17,10 +17,12 @@ describe('useProjectExport', () => {
       warnings: [],
       outputPath: '/release/game.zip',
     });
-    const { result } = renderHook(() => useProjectExport({
-      projectPath: '/project',
-      ensureSaved,
-    }));
+    const { result } = renderHook(() =>
+      useProjectExport({
+        projectPath: '/project',
+        ensureSaved,
+      }),
+    );
     const metadata = {
       synopsis: '',
       description: '',

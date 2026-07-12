@@ -1,8 +1,11 @@
 import { useState, useCallback } from 'react';
+import { X, Plus, FolderOpen, Pencil, Check, Trash2 } from 'lucide-react';
 import {
-  X, Plus, FolderOpen, Pencil, Check, Trash2,
-} from 'lucide-react';
-import { getScenePath, updateSceneHeader, type ProjectInfo, type SceneHeader } from '../lib/webgal-ipc';
+  getScenePath,
+  updateSceneHeader,
+  type ProjectInfo,
+  type SceneHeader,
+} from '../lib/webgal-ipc';
 
 export interface SceneManagerPanelProps {
   open: boolean;
@@ -38,28 +41,37 @@ export function SceneManagerPanel({
 
   const scenes = projectInfo?.scenes ?? [];
 
-  const handleEdit = useCallback((sceneName: string) => {
-    const header = sceneHeaders[sceneName] || {};
-    setEditingScene(sceneName);
-    setEditChapter(header.chapter || '');
-    setEditOutline(header.outline || '');
-  }, [sceneHeaders]);
+  const handleEdit = useCallback(
+    (sceneName: string) => {
+      const header = sceneHeaders[sceneName] || {};
+      setEditingScene(sceneName);
+      setEditChapter(header.chapter || '');
+      setEditOutline(header.outline || '');
+    },
+    [sceneHeaders],
+  );
 
-  const handleSaveHeader = useCallback(async (sceneName: string) => {
-    if (!projectPath) return;
-    setSaving(true);
-    try {
-      const path = await getScenePath(projectPath, sceneName);
-      const header: SceneHeader = { chapter: editChapter.trim(), outline: editOutline.trim() };
-      await updateSceneHeader(path, header);
-      onHeaderUpdated(sceneName, header);
-      setEditingScene(null);
-    } catch (e) {
-      console.error('Failed to update scene header:', e);
-    } finally {
-      setSaving(false);
-    }
-  }, [projectPath, editChapter, editOutline, onHeaderUpdated]);
+  const handleSaveHeader = useCallback(
+    async (sceneName: string) => {
+      if (!projectPath) return;
+      setSaving(true);
+      try {
+        const path = await getScenePath(projectPath, sceneName);
+        const header: SceneHeader = {
+          chapter: editChapter.trim(),
+          outline: editOutline.trim(),
+        };
+        await updateSceneHeader(path, header);
+        onHeaderUpdated(sceneName, header);
+        setEditingScene(null);
+      } catch (e) {
+        console.error('Failed to update scene header:', e);
+      } finally {
+        setSaving(false);
+      }
+    },
+    [projectPath, editChapter, editOutline, onHeaderUpdated],
+  );
 
   if (!open) return null;
 
@@ -115,7 +127,9 @@ export function SceneManagerPanel({
                       <div className="flex gap-2">
                         <button
                           type="button"
-                          onClick={() => { void handleSaveHeader(sceneName); }}
+                          onClick={() => {
+                            void handleSaveHeader(sceneName);
+                          }}
                           disabled={saving}
                           className="flex items-center gap-1 rounded bg-secondary-container/60 px-3 py-1 text-[10px] font-semibold text-secondary hover:bg-secondary-container disabled:opacity-50"
                         >
@@ -133,7 +147,9 @@ export function SceneManagerPanel({
                     </div>
                   ) : (
                     <div className="flex items-start gap-3 px-3 py-3 hover:bg-surface-container-low transition-colors">
-                      <div className={`mt-0.5 h-2 w-2 shrink-0 rounded-full ${isCurrent ? 'bg-secondary' : 'bg-outline-variant/40'}`} />
+                      <div
+                        className={`mt-0.5 h-2 w-2 shrink-0 rounded-full ${isCurrent ? 'bg-secondary' : 'bg-outline-variant/40'}`}
+                      />
                       <button
                         type="button"
                         onClick={() => onSwitchScene(sceneName)}
@@ -148,7 +164,10 @@ export function SceneManagerPanel({
                       </button>
                       <button
                         type="button"
-                        onClick={(e) => { e.stopPropagation(); handleEdit(sceneName); }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleEdit(sceneName);
+                        }}
                         className="shrink-0 rounded p-1 text-outline-variant/60 hover:bg-surface-container-low hover:text-foreground"
                         title="编辑章节信息"
                         aria-label="编辑章节信息"
@@ -181,7 +200,9 @@ export function SceneManagerPanel({
       <div className="space-y-2 border-t border-border p-3">
         <button
           type="button"
-          onClick={() => { void onNewScene(); }}
+          onClick={() => {
+            void onNewScene();
+          }}
           className="flex w-full items-center justify-center gap-2 rounded border border-dashed border-outline-variant/50 py-2 text-sm text-muted-foreground hover:border-secondary hover:text-secondary transition-colors"
         >
           <Plus className="h-4 w-4" />

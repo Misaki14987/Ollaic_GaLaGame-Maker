@@ -38,19 +38,22 @@ export function useSceneDocument() {
     setSaveStatus('idle');
   }, []);
 
-  const commitEditedNodes = useCallback((nextNodes: WebGalNode[]) => {
-    nodesRef.current = nextNodes;
-    setNodes(nextNodes);
-    void syncScript(nextNodes);
-    markDirty();
-  }, [markDirty, syncScript]);
+  const commitEditedNodes = useCallback(
+    (nextNodes: WebGalNode[]) => {
+      nodesRef.current = nextNodes;
+      setNodes(nextNodes);
+      void syncScript(nextNodes);
+      markDirty();
+    },
+    [markDirty, syncScript],
+  );
 
   // Undo / Redo
   const [history, setHistory] = useState<WebGalNode[][]>([]);
   const [redoHistory, setRedoHistory] = useState<WebGalNode[][]>([]);
 
   const pushHistory = useCallback((nodesSnapshot: WebGalNode[]) => {
-    setHistory(prev => {
+    setHistory((prev) => {
       const next = [...prev, nodesSnapshot];
       return next.length > 50 ? next.slice(-50) : next;
     });
@@ -74,16 +77,16 @@ export function useSceneDocument() {
     const current = nodesRef.current;
     const pending = flushPendingHistory();
     if (pending) {
-      setHistory(prev => prev.slice(0, -1));
-      setRedoHistory(prev => [...prev, current].slice(-50));
+      setHistory((prev) => prev.slice(0, -1));
+      setRedoHistory((prev) => [...prev, current].slice(-50));
       commitEditedNodes(pending);
       setSelectedNode(null);
       return;
     }
     const prevNodes = history[history.length - 1];
     if (!prevNodes) return;
-    setHistory(prev => prev.slice(0, -1));
-    setRedoHistory(prev => [...prev, current].slice(-50));
+    setHistory((prev) => prev.slice(0, -1));
+    setRedoHistory((prev) => [...prev, current].slice(-50));
     commitEditedNodes(prevNodes);
     setSelectedNode(null);
   }, [commitEditedNodes, flushPendingHistory, history]);
@@ -93,8 +96,8 @@ export function useSceneDocument() {
     const nextNodes = redoHistory[redoHistory.length - 1];
     if (!nextNodes) return;
     const current = nodesRef.current;
-    setRedoHistory(prev => prev.slice(0, -1));
-    setHistory(prev => [...prev, current].slice(-50));
+    setRedoHistory((prev) => prev.slice(0, -1));
+    setHistory((prev) => [...prev, current].slice(-50));
     commitEditedNodes(nextNodes);
     setSelectedNode(null);
   }, [commitEditedNodes, flushPendingHistory, redoHistory]);
@@ -102,77 +105,102 @@ export function useSceneDocument() {
   // ---------------------------------------------------------------------------
   // Node CRUD
   // ---------------------------------------------------------------------------
-  const insertNode = useCallback((type: WebGalCommandType, atIndex: number) => {
-    const current = nodesRef.current;
-    flushPendingHistory();
-    pushHistory(current);
-    const { nodes: updated, inserted } = insertSceneNode(current, type, atIndex, Date.now().toString());
-    commitEditedNodes(updated);
-    setSelectedNode(inserted);
-  }, [commitEditedNodes, flushPendingHistory, pushHistory]);
+  const insertNode = useCallback(
+    (type: WebGalCommandType, atIndex: number) => {
+      const current = nodesRef.current;
+      flushPendingHistory();
+      pushHistory(current);
+      const { nodes: updated, inserted } = insertSceneNode(
+        current,
+        type,
+        atIndex,
+        Date.now().toString(),
+      );
+      commitEditedNodes(updated);
+      setSelectedNode(inserted);
+    },
+    [commitEditedNodes, flushPendingHistory, pushHistory],
+  );
 
-  const createUnlockNode = useCallback((sourceNode: WebGalNode, atIndex: number) => {
-    const asset = (sourceNode.asset || sourceNode.content || '').trim();
-    if (!asset || asset === 'none') return;
-    const unlockType: WebGalCommandType | null = sourceNode.type === 'changeBg'
-      ? 'unlockCg'
-      : sourceNode.type === 'bgm'
-        ? 'unlockBgm'
-        : null;
-    if (!unlockType) return;
+  const createUnlockNode = useCallback(
+    (sourceNode: WebGalNode, atIndex: number) => {
+      const asset = (sourceNode.asset || sourceNode.content || '').trim();
+      if (!asset || asset === 'none') return;
+      const unlockType: WebGalCommandType | null =
+        sourceNode.type === 'changeBg'
+          ? 'unlockCg'
+          : sourceNode.type === 'bgm'
+            ? 'unlockBgm'
+            : null;
+      if (!unlockType) return;
 
-    const current = nodesRef.current;
-    const existing = current[atIndex];
-    if (existing?.type === unlockType && (existing.asset || existing.content || '').trim() === asset) {
-      setSelectedNode(existing);
-      return;
-    }
+      const current = nodesRef.current;
+      const existing = current[atIndex];
+      if (
+        existing?.type === unlockType &&
+        (existing.asset || existing.content || '').trim() === asset
+      ) {
+        setSelectedNode(existing);
+        return;
+      }
 
-    const displayName = asset.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ');
-    flushPendingHistory();
-    pushHistory(current);
-    const { nodes: insertedNodes, inserted } = insertSceneNode(current, unlockType, atIndex, Date.now().toString());
-    const updated = insertedNodes.map((node) => node.id === inserted.id
-      ? {
-          ...node,
-          content: asset,
-          asset,
-          displayName,
-        }
-      : node);
-    const selected = updated.find((node) => node.id === inserted.id) ?? inserted;
-    commitEditedNodes(updated);
-    setSelectedNode(selected);
-  }, [commitEditedNodes, flushPendingHistory, pushHistory]);
+      const displayName = asset.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ');
+      flushPendingHistory();
+      pushHistory(current);
+      const { nodes: insertedNodes, inserted } = insertSceneNode(
+        current,
+        unlockType,
+        atIndex,
+        Date.now().toString(),
+      );
+      const updated = insertedNodes.map((node) =>
+        node.id === inserted.id
+          ? {
+              ...node,
+              content: asset,
+              asset,
+              displayName,
+            }
+          : node,
+      );
+      const selected = updated.find((node) => node.id === inserted.id) ?? inserted;
+      commitEditedNodes(updated);
+      setSelectedNode(selected);
+    },
+    [commitEditedNodes, flushPendingHistory, pushHistory],
+  );
 
-  const updateSelectedNode = useCallback((updates: Partial<WebGalNode>) => {
-    const current = nodesRef.current;
-    const selected = selectedNode;
-    if (!selected) return;
+  const updateSelectedNode = useCallback(
+    (updates: Partial<WebGalNode>) => {
+      const current = nodesRef.current;
+      const selected = selectedNode;
+      if (!selected) return;
 
-    if (!pendingRecordRef.current) {
-      pendingRecordRef.current = current;
-    }
-    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
-    debounceTimerRef.current = setTimeout(() => {
-      const pending = pendingRecordRef.current;
-      if (pending) pushHistory(pending);
-      pendingRecordRef.current = null;
-    }, 800);
+      if (!pendingRecordRef.current) {
+        pendingRecordRef.current = current;
+      }
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = setTimeout(() => {
+        const pending = pendingRecordRef.current;
+        if (pending) pushHistory(pending);
+        pendingRecordRef.current = null;
+      }, 800);
 
-    let nextSelected: WebGalNode | null = null;
-    const updated = current.map((node) => {
-      if (node.id !== selected.id) return node;
-      nextSelected = { ...node, ...updates };
-      return nextSelected;
-    });
-    if (!nextSelected) return;
-    nodesRef.current = updated;
-    setNodes(updated);
-    setSelectedNode(nextSelected);
-    void syncScript(updated);
-    markDirty();
-  }, [markDirty, pushHistory, selectedNode, syncScript]);
+      let nextSelected: WebGalNode | null = null;
+      const updated = current.map((node) => {
+        if (node.id !== selected.id) return node;
+        nextSelected = { ...node, ...updates };
+        return nextSelected;
+      });
+      if (!nextSelected) return;
+      nodesRef.current = updated;
+      setNodes(updated);
+      setSelectedNode(nextSelected);
+      void syncScript(updated);
+      markDirty();
+    },
+    [markDirty, pushHistory, selectedNode, syncScript],
+  );
 
   const deleteSelectedNode = useCallback(() => {
     const selected = selectedNode;
@@ -188,47 +216,64 @@ export function useSceneDocument() {
   // ---------------------------------------------------------------------------
   // Per-node operations (for context menu / drag handle)
   // ---------------------------------------------------------------------------
-  const deleteNode = useCallback((nodeId: string) => {
-    const current = nodesRef.current;
-    flushPendingHistory();
-    pushHistory(current);
-    const updated = current.filter((node) => node.id !== nodeId);
-    commitEditedNodes(updated);
-    if (selectedNode?.id === nodeId) setSelectedNode(null);
-  }, [commitEditedNodes, flushPendingHistory, pushHistory, selectedNode]);
+  const deleteNode = useCallback(
+    (nodeId: string) => {
+      const current = nodesRef.current;
+      flushPendingHistory();
+      pushHistory(current);
+      const updated = current.filter((node) => node.id !== nodeId);
+      commitEditedNodes(updated);
+      if (selectedNode?.id === nodeId) setSelectedNode(null);
+    },
+    [commitEditedNodes, flushPendingHistory, pushHistory, selectedNode],
+  );
 
   const copyNode = useCallback((nodeId: string) => {
     const current = nodesRef.current;
     const target = current.find((node) => node.id === nodeId);
     if (!target) return;
-    setClipboardNode({ ...target, id: `${target.id}__copy__${Date.now().toString()}` });
+    setClipboardNode({
+      ...target,
+      id: `${target.id}__copy__${Date.now().toString()}`,
+    });
   }, []);
 
-  const cutNode = useCallback((nodeId: string) => {
-    const current = nodesRef.current;
-    const target = current.find((node) => node.id === nodeId);
-    if (!target) return;
-    setClipboardNode({ ...target, id: `${target.id}__cut__${Date.now().toString()}` });
-    deleteNode(nodeId);
-  }, [deleteNode]);
+  const cutNode = useCallback(
+    (nodeId: string) => {
+      const current = nodesRef.current;
+      const target = current.find((node) => node.id === nodeId);
+      if (!target) return;
+      setClipboardNode({
+        ...target,
+        id: `${target.id}__cut__${Date.now().toString()}`,
+      });
+      deleteNode(nodeId);
+    },
+    [deleteNode],
+  );
 
-  const reorderNodes = useCallback((fromIndex: number, toIndex: number) => {
-    const current = nodesRef.current;
-    flushPendingHistory();
-    pushHistory(current);
-    const updated = reorderSceneNodes(current, fromIndex, toIndex);
-    commitEditedNodes(updated);
-  }, [commitEditedNodes, flushPendingHistory, pushHistory]);
+  const reorderNodes = useCallback(
+    (fromIndex: number, toIndex: number) => {
+      const current = nodesRef.current;
+      flushPendingHistory();
+      pushHistory(current);
+      const updated = reorderSceneNodes(current, fromIndex, toIndex);
+      commitEditedNodes(updated);
+    },
+    [commitEditedNodes, flushPendingHistory, pushHistory],
+  );
 
-  const pasteNode = useCallback((atIndex: number) => {
-    if (!clipboardNode) return;
-    const current = nodesRef.current;
-    flushPendingHistory();
-    pushHistory(current);
-    const updated = pasteSceneNode(current, clipboardNode, atIndex, Date.now().toString());
-    commitEditedNodes(updated);
-  }, [clipboardNode, commitEditedNodes, flushPendingHistory, pushHistory]);
-
+  const pasteNode = useCallback(
+    (atIndex: number) => {
+      if (!clipboardNode) return;
+      const current = nodesRef.current;
+      flushPendingHistory();
+      pushHistory(current);
+      const updated = pasteSceneNode(current, clipboardNode, atIndex, Date.now().toString());
+      commitEditedNodes(updated);
+    },
+    [clipboardNode, commitEditedNodes, flushPendingHistory, pushHistory],
+  );
 
   return {
     nodes,

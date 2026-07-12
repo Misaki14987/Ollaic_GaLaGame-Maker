@@ -40,13 +40,15 @@ export function layoutFlowSteps(
   }
 
   const rows = new Map<number, number>();
-  return Object.fromEntries(steps.map((step) => {
-    const level = levels.get(step.id) ?? 0;
-    const row = rows.get(level) ?? 0;
-    rows.set(level, row + 1);
-    const saved = savedPositions[step.id];
-    return [step.id, isPosition(saved) ? saved : { x: level * COLUMN_GAP, y: row * ROW_GAP }];
-  }));
+  return Object.fromEntries(
+    steps.map((step) => {
+      const level = levels.get(step.id) ?? 0;
+      const row = rows.get(level) ?? 0;
+      rows.set(level, row + 1);
+      const saved = savedPositions[step.id];
+      return [step.id, isPosition(saved) ? saved : { x: level * COLUMN_GAP, y: row * ROW_GAP }];
+    }),
+  );
 }
 
 export function flowLayoutStorageKey(projectPath: string, runId: string | null): string {
@@ -60,10 +62,14 @@ export function loadFlowPositions(
 ): FlowNodePositions {
   if (!storage) return {};
   try {
-    const parsed: unknown = JSON.parse(storage.getItem(flowLayoutStorageKey(projectPath, runId)) ?? '{}');
+    const parsed: unknown = JSON.parse(
+      storage.getItem(flowLayoutStorageKey(projectPath, runId)) ?? '{}',
+    );
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
     return Object.fromEntries(
-      Object.entries(parsed).filter((entry): entry is [string, FlowNodePosition] => isPosition(entry[1])),
+      Object.entries(parsed).filter((entry): entry is [string, FlowNodePosition] =>
+        isPosition(entry[1]),
+      ),
     );
   } catch {
     return {};
@@ -78,7 +84,9 @@ export function saveFlowPositions(
 ): void {
   if (!storage) return;
   try {
-    const valid = Object.fromEntries(Object.entries(positions).filter(([, value]) => isPosition(value)));
+    const valid = Object.fromEntries(
+      Object.entries(positions).filter(([, value]) => isPosition(value)),
+    );
     storage.setItem(flowLayoutStorageKey(projectPath, runId), JSON.stringify(valid));
   } catch {
     // localStorage may be disabled or full; the default layout remains usable.

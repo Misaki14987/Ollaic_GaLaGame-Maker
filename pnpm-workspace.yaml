@@ -1,2 +1,5 @@
 packages:
   - design
+allowBuilds:
+  '@tailwindcss/oxide': false
+  esbuild: false

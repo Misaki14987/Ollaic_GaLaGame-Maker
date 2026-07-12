@@ -11,8 +11,10 @@ function reconnectSequentialNodes(nodes: WebGalNode[]): WebGalNode[] {
     const next = nodes[index + 1];
     const connections = next && !isTerminalNode(node.type) ? [next.id] : [];
     if (
-      connections.length === node.connections.length
-      && connections.every((connection, connectionIndex) => connection === node.connections[connectionIndex])
+      connections.length === node.connections.length &&
+      connections.every(
+        (connection, connectionIndex) => connection === node.connections[connectionIndex],
+      )
     ) {
       return node;
     }
@@ -51,7 +53,11 @@ export function insertSceneNode(
 ): { nodes: WebGalNode[]; inserted: WebGalNode } {
   const index = Math.max(0, Math.min(atIndex, nodes.length));
   const inserted = createSceneNode(type, id, index);
-  const next = reconnectSequentialNodes([...nodes.slice(0, index), inserted, ...nodes.slice(index)]);
+  const next = reconnectSequentialNodes([
+    ...nodes.slice(0, index),
+    inserted,
+    ...nodes.slice(index),
+  ]);
   return {
     nodes: next,
     inserted: next.find((node) => node.id === id) ?? inserted,

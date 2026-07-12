@@ -10,7 +10,14 @@ describe('flow-state reducer', () => {
     expect(s.runStatus).toBe('idle');
     expect(s.runId).toBeNull();
     expect(s.steps.map((x) => x.id)).toEqual([
-      'plan', 'memory', 'outline', 'character', 'dialogist', 'assetPlan', 'scene', 'assetQueue',
+      'plan',
+      'memory',
+      'outline',
+      'character',
+      'dialogist',
+      'assetPlan',
+      'scene',
+      'assetQueue',
     ]);
     expect(s.steps.every((x) => x.status === 'pending')).toBe(true);
   });
@@ -21,16 +28,28 @@ describe('flow-state reducer', () => {
     expect(s.runId).toBe('run_1');
     expect(s.runStatus).toBe('running');
 
-    s = reduceFlowEvent(s, ev({ type: 'stepStarted', runId: 'run_1', stepId: 'plan', kind: 'plan' }));
+    s = reduceFlowEvent(
+      s,
+      ev({ type: 'stepStarted', runId: 'run_1', stepId: 'plan', kind: 'plan' }),
+    );
     expect(statusOf(s, 'plan')).toBe('running');
 
-    s = reduceFlowEvent(s, ev({ type: 'stepSucceeded', runId: 'run_1', stepId: 'plan', output: null }));
+    s = reduceFlowEvent(
+      s,
+      ev({ type: 'stepSucceeded', runId: 'run_1', stepId: 'plan', output: null }),
+    );
     expect(statusOf(s, 'plan')).toBe('succeeded');
 
-    s = reduceFlowEvent(s, ev({ type: 'stepStarted', runId: 'run_1', stepId: 'outline', kind: 'outline' }));
+    s = reduceFlowEvent(
+      s,
+      ev({ type: 'stepStarted', runId: 'run_1', stepId: 'outline', kind: 'outline' }),
+    );
     expect(statusOf(s, 'outline')).toBe('running');
 
-    s = reduceFlowEvent(s, ev({ type: 'stepSucceeded', runId: 'run_1', stepId: 'outline', output: null }));
+    s = reduceFlowEvent(
+      s,
+      ev({ type: 'stepSucceeded', runId: 'run_1', stepId: 'outline', output: null }),
+    );
     expect(statusOf(s, 'outline')).toBe('succeeded');
 
     s = reduceFlowEvent(s, ev({ type: 'runCompleted', runId: 'run_1' }));
@@ -40,8 +59,14 @@ describe('flow-state reducer', () => {
   it('marks a step failed and the run failed', () => {
     let s = initialFlowState();
     s = reduceFlowEvent(s, ev({ type: 'runStarted', runId: 'run_1' }));
-    s = reduceFlowEvent(s, ev({ type: 'stepStarted', runId: 'run_1', stepId: 'plan', kind: 'plan' }));
-    s = reduceFlowEvent(s, ev({ type: 'stepFailed', runId: 'run_1', stepId: 'plan', error: 'boom' }));
+    s = reduceFlowEvent(
+      s,
+      ev({ type: 'stepStarted', runId: 'run_1', stepId: 'plan', kind: 'plan' }),
+    );
+    s = reduceFlowEvent(
+      s,
+      ev({ type: 'stepFailed', runId: 'run_1', stepId: 'plan', error: 'boom' }),
+    );
     expect(statusOf(s, 'plan')).toBe('failed');
     s = reduceFlowEvent(s, ev({ type: 'runFailed', runId: 'run_1', error: 'boom' }));
     expect(s.runStatus).toBe('failed');
@@ -75,7 +100,10 @@ describe('flow-state reducer', () => {
   it('ignores events from a different run once bound', () => {
     let s = initialFlowState();
     s = reduceFlowEvent(s, ev({ type: 'runStarted', runId: 'run_1' }));
-    s = reduceFlowEvent(s, ev({ type: 'stepStarted', runId: 'run_other', stepId: 'plan', kind: 'plan' }));
+    s = reduceFlowEvent(
+      s,
+      ev({ type: 'stepStarted', runId: 'run_other', stepId: 'plan', kind: 'plan' }),
+    );
     expect(statusOf(s, 'plan')).toBe('pending');
   });
 

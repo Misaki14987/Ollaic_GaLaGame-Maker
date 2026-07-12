@@ -12,7 +12,9 @@ function DiffViewer({ lines }: { lines: DiffLine[] }) {
   const extra = lines.length - visible.length;
 
   return (
-    <div className={`mt-2 overflow-y-auto rounded-md bg-background/60 p-2 font-mono-family text-[11px] ${expanded ? 'max-h-none' : 'max-h-48'}`}>
+    <div
+      className={`mt-2 overflow-y-auto rounded-md bg-background/60 p-2 font-mono-family text-[11px] ${expanded ? 'max-h-none' : 'max-h-48'}`}
+    >
       {visible.map((line, index) => (
         <div
           key={`${line.kind}-${index}`}
@@ -20,11 +22,13 @@ function DiffViewer({ lines }: { lines: DiffLine[] }) {
             line.kind === 'added'
               ? 'bg-green-950/40 text-green-300'
               : line.kind === 'removed'
-              ? 'bg-red-950/40 text-red-300'
-              : 'text-muted-foreground'
+                ? 'bg-red-950/40 text-red-300'
+                : 'text-muted-foreground'
           }`}
         >
-          <span className="mr-2">{line.kind === 'added' ? '+' : line.kind === 'removed' ? '-' : ' '}</span>
+          <span className="mr-2">
+            {line.kind === 'added' ? '+' : line.kind === 'removed' ? '-' : ' '}
+          </span>
           {line.text}
         </div>
       ))}
@@ -59,7 +63,9 @@ function SceneNodeDiff({ edit }: { edit: SceneEdit }) {
     <>
       {edit.warnings.length > 0 && (
         <div className="mt-2 rounded border border-primary/20 bg-background/50 p-1.5 text-muted-foreground">
-          {edit.warnings.map((w) => <div key={w}>{w}</div>)}
+          {edit.warnings.map((w) => (
+            <div key={w}>{w}</div>
+          ))}
         </div>
       )}
       <div className="mt-2 flex items-center gap-2 text-[10px] font-mono-family">
@@ -69,7 +75,9 @@ function SceneNodeDiff({ edit }: { edit: SceneEdit }) {
       </div>
       {entries.length > 0 ? (
         <div className="mt-1.5 space-y-1">
-          {entries.map((entry, i) => <MiniNodeCard key={i} entry={entry} />)}
+          {entries.map((entry, i) => (
+            <MiniNodeCard key={i} entry={entry} />
+          ))}
         </div>
       ) : (
         <div className="mt-1.5 text-[11px] text-muted-foreground">无节点变化</div>
@@ -88,10 +96,19 @@ function SceneNodeDiff({ edit }: { edit: SceneEdit }) {
   );
 }
 
-function EditRow({ edit, sceneHeaders }: { edit: ChangeEdit; sceneHeaders?: Record<string, SceneHeader> }) {
-  const assetCategoryLabel = (category: string) => category === 'cg' ? 'CG' : '背景';
+function EditRow({
+  edit,
+  sceneHeaders,
+}: {
+  edit: ChangeEdit;
+  sceneHeaders?: Record<string, SceneHeader>;
+}) {
+  const assetCategoryLabel = (category: string) => (category === 'cg' ? 'CG' : '背景');
   const renderValue = (value: unknown): string => {
-    if (Array.isArray(value)) return value.map((item) => typeof item === 'string' ? item : JSON.stringify(item)).join('、');
+    if (Array.isArray(value))
+      return value
+        .map((item) => (typeof item === 'string' ? item : JSON.stringify(item)))
+        .join('、');
     if (value && typeof value === 'object') return JSON.stringify(value);
     return String(value ?? '');
   };
@@ -100,28 +117,32 @@ function EditRow({ edit, sceneHeaders }: { edit: ChangeEdit; sceneHeaders?: Reco
       ? `场景「${sceneDisplayName(edit.file, sceneHeaders?.[edit.file])}」${edit.isCurrent ? '（当前）' : ''}`
       : edit.kind === 'create_character'
         ? `新建角色 ${edit.draft.name}`
-      : edit.kind === 'character'
-        ? `角色 ${edit.name}`
-        : edit.kind === 'create_scene'
-          ? `新建场景「${edit.chapter || edit.file}」`
-        : edit.kind === 'asset_plan'
-          ? `待生成素材 ${edit.cards.length} 个`
-          : '项目记忆';
+        : edit.kind === 'character'
+          ? `角色 ${edit.name}`
+          : edit.kind === 'create_scene'
+            ? `新建场景「${edit.chapter || edit.file}」`
+            : edit.kind === 'asset_plan'
+              ? `待生成素材 ${edit.cards.length} 个`
+              : '项目记忆';
   const detail =
     edit.kind === 'scene'
       ? edit.summary
       : edit.kind === 'create_character'
         ? `设定 ${edit.changedFields.join('、') || '基础字段'}`
-      : edit.kind === 'create_scene'
-        ? `文件 ${edit.file}${edit.outline ? ` · 大纲：${edit.outline}` : ''}${edit.initialContent ? ' · 含初始剧情' : ''}`
-      : edit.kind === 'asset_plan'
-        ? edit.cards.map((card) => `${assetCategoryLabel(card.category)}：${card.title}`).join('、')
-        : `修改 ${edit.changedFields.join('、') || '（无变化）'}`;
+        : edit.kind === 'create_scene'
+          ? `文件 ${edit.file}${edit.outline ? ` · 大纲：${edit.outline}` : ''}${edit.initialContent ? ' · 含初始剧情' : ''}`
+          : edit.kind === 'asset_plan'
+            ? edit.cards
+                .map((card) => `${assetCategoryLabel(card.category)}：${card.title}`)
+                .join('、')
+            : `修改 ${edit.changedFields.join('、') || '（无变化）'}`;
   return (
     <div className="mt-2 rounded-md border border-border bg-background/40 p-2">
       <div className="flex items-center justify-between gap-2">
         <span className="font-medium text-foreground">{label}</span>
-        <span className="shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">{edit.kind}</span>
+        <span className="shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">
+          {edit.kind}
+        </span>
       </div>
       <div className="mt-1 text-muted-foreground">{detail}</div>
       {edit.kind === 'scene' && <SceneNodeDiff edit={edit} />}
@@ -133,20 +154,29 @@ function EditRow({ edit, sceneHeaders }: { edit: ChangeEdit; sceneHeaders?: Reco
                 {assetCategoryLabel(card.category)} · {card.title}
               </div>
               <div className="mt-0.5 text-muted-foreground">
-                目标：{card.targetStem}.png{card.sceneFile ? ` · 场景：${card.sceneFile}` : ''}
+                目标：{card.targetStem}.png
+                {card.sceneFile ? ` · 场景：${card.sceneFile}` : ''}
               </div>
               <div className="mt-0.5 text-muted-foreground">{card.prompt}</div>
             </div>
           ))}
         </div>
       )}
-      {(edit.kind === 'character' || edit.kind === 'create_character' || edit.kind === 'memory') && (
+      {(edit.kind === 'character' ||
+        edit.kind === 'create_character' ||
+        edit.kind === 'memory') && (
         <div className="mt-2 space-y-1 font-mono-family text-[11px]">
           {edit.changedFields.map((field) => (
             <div key={field} className="rounded bg-background/60 p-1">
               <span className="text-muted-foreground">{field}: </span>
               <span className="text-foreground">
-                {renderValue(((edit.kind === 'create_character' ? edit.draft : edit.after) as unknown as Record<string, unknown>)[field])}
+                {renderValue(
+                  (
+                    (edit.kind === 'create_character'
+                      ? edit.draft
+                      : edit.after) as unknown as Record<string, unknown>
+                  )[field],
+                )}
               </span>
             </div>
           ))}
@@ -157,7 +187,12 @@ function EditRow({ edit, sceneHeaders }: { edit: ChangeEdit; sceneHeaders?: Reco
 }
 
 /** Approval card for a multi-edit change set (scenes + characters + memory). */
-export function ChangeSetCard({ changeSet, sceneHeaders, onAccept, onRevert }: {
+export function ChangeSetCard({
+  changeSet,
+  sceneHeaders,
+  onAccept,
+  onRevert,
+}: {
   changeSet: PendingChangeSet;
   sceneHeaders?: Record<string, SceneHeader>;
   onAccept: () => void;
@@ -165,25 +200,37 @@ export function ChangeSetCard({ changeSet, sceneHeaders, onAccept, onRevert }: {
 }) {
   const { status, edits } = changeSet;
   return (
-    <div className={`rounded-lg border p-3 text-xs ${
-      status === 'pending'
-        ? 'border-primary/30 bg-primary/10'
-        : status === 'accepted'
-        ? 'border-chart-5/30 bg-chart-5/10'
-        : status === 'failed'
-        ? 'border-destructive/30 bg-destructive/10'
-        : 'border-border bg-secondary/40'
-    }`}>
+    <div
+      className={`rounded-lg border p-3 text-xs ${
+        status === 'pending'
+          ? 'border-primary/30 bg-primary/10'
+          : status === 'accepted'
+            ? 'border-chart-5/30 bg-chart-5/10'
+            : status === 'failed'
+              ? 'border-destructive/30 bg-destructive/10'
+              : 'border-border bg-secondary/40'
+      }`}
+    >
       <div className="font-medium text-foreground">
         {edits.length > 1 ? `共 ${edits.length} 处修改` : '修改方案'}
       </div>
-      {edits.map((edit, index) => <EditRow key={`${edit.kind}-${index}`} edit={edit} sceneHeaders={sceneHeaders} />)}
+      {edits.map((edit, index) => (
+        <EditRow key={`${edit.kind}-${index}`} edit={edit} sceneHeaders={sceneHeaders} />
+      ))}
       {status === 'pending' && (
         <div className="mt-3 grid grid-cols-2 gap-2">
-          <button type="button" onClick={onAccept} className="rounded-md bg-primary px-3 py-2 text-primary-foreground transition-all hover:opacity-90">
+          <button
+            type="button"
+            onClick={onAccept}
+            className="rounded-md bg-primary px-3 py-2 text-primary-foreground transition-all hover:opacity-90"
+          >
             同意
           </button>
-          <button type="button" onClick={onRevert} className="rounded-md bg-secondary px-3 py-2 transition-colors hover:bg-secondary/70">
+          <button
+            type="button"
+            onClick={onRevert}
+            className="rounded-md bg-secondary px-3 py-2 transition-colors hover:bg-secondary/70"
+          >
             拒绝
           </button>
         </div>

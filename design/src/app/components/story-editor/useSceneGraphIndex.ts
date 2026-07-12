@@ -1,10 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getScenePath, loadScene, parseSceneHeader, readFileText, type SceneHeader } from '../../lib/webgal-ipc';
+import {
+  getScenePath,
+  loadScene,
+  parseSceneHeader,
+  readFileText,
+  type SceneHeader,
+} from '../../lib/webgal-ipc';
 import { extractSceneLinks, type SceneLink, type WebGalNode } from '../../lib/webgal-types';
 
 function linksEqual(left: SceneLink[], right: SceneLink[]) {
-  return left.length === right.length
-    && left.every((link, index) => link.kind === right[index]?.kind && link.target === right[index]?.target);
+  return (
+    left.length === right.length &&
+    left.every(
+      (link, index) => link.kind === right[index]?.kind && link.target === right[index]?.target,
+    )
+  );
 }
 
 export function useSceneGraphIndex(currentSceneName: string, nodes: WebGalNode[]) {
@@ -13,15 +23,17 @@ export function useSceneGraphIndex(currentSceneName: string, nodes: WebGalNode[]
   const previousNodesRef = useRef(nodes);
 
   const refresh = useCallback(async (projectPath: string, scenes: string[]) => {
-    const entries = await Promise.all(scenes.map(async (name) => {
-      try {
-        const path = await getScenePath(projectPath, name);
-        const [text, sceneNodes] = await Promise.all([readFileText(path), loadScene(path)]);
-        return [name, parseSceneHeader(text), extractSceneLinks(sceneNodes)] as const;
-      } catch {
-        return [name, {}, [] as SceneLink[]] as const;
-      }
-    }));
+    const entries = await Promise.all(
+      scenes.map(async (name) => {
+        try {
+          const path = await getScenePath(projectPath, name);
+          const [text, sceneNodes] = await Promise.all([readFileText(path), loadScene(path)]);
+          return [name, parseSceneHeader(text), extractSceneLinks(sceneNodes)] as const;
+        } catch {
+          return [name, {}, [] as SceneLink[]] as const;
+        }
+      }),
+    );
     setHeaders(Object.fromEntries(entries.map(([name, header]) => [name, header])));
     setLinks(Object.fromEntries(entries.map(([name, , sceneLinks]) => [name, sceneLinks])));
   }, []);
@@ -43,7 +55,10 @@ export function useSceneGraphIndex(currentSceneName: string, nodes: WebGalNode[]
   }, []);
 
   const updateCurrentLinks = useCallback((sceneName: string, sceneNodes: WebGalNode[]) => {
-    setLinks((existing) => ({ ...existing, [sceneName]: extractSceneLinks(sceneNodes) }));
+    setLinks((existing) => ({
+      ...existing,
+      [sceneName]: extractSceneLinks(sceneNodes),
+    }));
   }, []);
 
   return { headers, links, refresh, updateHeader, updateCurrentLinks };

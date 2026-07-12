@@ -59,9 +59,7 @@ function asBool(value: unknown): boolean | undefined {
 
 function asStringArray(value: unknown): string[] | undefined {
   if (Array.isArray(value)) {
-    const out = value
-      .map((item) => asString(item))
-      .filter((item): item is string => Boolean(item));
+    const out = value.map((item) => asString(item)).filter((item): item is string => Boolean(item));
     return out.length > 0 ? out : undefined;
   }
   const single = asString(value);
@@ -75,8 +73,9 @@ function asStringArray(value: unknown): string[] | undefined {
 
 function asRecordArray(value: unknown): Record<string, unknown>[] | undefined {
   if (!Array.isArray(value)) return undefined;
-  const out = value.filter((item): item is Record<string, unknown> =>
-    typeof item === 'object' && item !== null && !Array.isArray(item),
+  const out = value.filter(
+    (item): item is Record<string, unknown> =>
+      typeof item === 'object' && item !== null && !Array.isArray(item),
   );
   return out.length > 0 ? out : undefined;
 }
@@ -97,7 +96,11 @@ function requireProject(ctx: ToolContext): string {
   return ctx.projectPath;
 }
 
-function numberScript(content: string, fromLine = 1, maxLines = SCENE_READ_MAX_LINES): {
+function numberScript(
+  content: string,
+  fromLine = 1,
+  maxLines = SCENE_READ_MAX_LINES,
+): {
   text: string;
   totalLines: number;
   truncated: boolean;
@@ -135,24 +138,28 @@ function buildFigureMeta(characters: Character[], assets: AssetInfo[]): Map<stri
     for (const sprite of character.sprites) {
       const file = resolveSpriteFile(character, sprite, figures);
       if (!file) continue;
-      byTail.set(figureFileTail(file), { character: character.name, emotion: sprite.emotion || '默认' });
+      byTail.set(figureFileTail(file), {
+        character: character.name,
+        emotion: sprite.emotion || '默认',
+      });
     }
   }
   return byTail;
 }
 
-function summarizeAssets(assets: AssetInfo[], query?: string, figureMeta?: Map<string, FigureMeta>): unknown {
+function summarizeAssets(
+  assets: AssetInfo[],
+  query?: string,
+  figureMeta?: Map<string, FigureMeta>,
+): unknown {
   let list = assets;
   if (query) {
     const q = query.toLowerCase();
     list = list.filter((a) => {
       const meta = a.category === 'figure' ? figureMeta?.get(figureFileTail(a.name)) : undefined;
-      return [
-        a.name,
-        a.category,
-        meta?.character ?? '',
-        meta?.emotion ?? '',
-      ].some((value) => value.toLowerCase().includes(q));
+      return [a.name, a.category, meta?.character ?? '', meta?.emotion ?? ''].some((value) =>
+        value.toLowerCase().includes(q),
+      );
     });
   }
   const truncated = list.length > ASSET_LIST_LIMIT;
@@ -162,13 +169,21 @@ function summarizeAssets(assets: AssetInfo[], query?: string, figureMeta?: Map<s
     assets: list.slice(0, ASSET_LIST_LIMIT).map((a) => {
       const meta = a.category === 'figure' ? figureMeta?.get(figureFileTail(a.name)) : undefined;
       return meta
-        ? { name: a.name, category: a.category, character: meta.character, emotion: meta.emotion }
+        ? {
+            name: a.name,
+            category: a.category,
+            character: meta.character,
+            emotion: meta.emotion,
+          }
         : { name: a.name, category: a.category };
     }),
   };
 }
 
-function summarizeCharacterForAi(character: Character, figureAssets: AssetInfo[]): Character & { sprites: FigureSpriteSummary[] } {
+function summarizeCharacterForAi(
+  character: Character,
+  figureAssets: AssetInfo[],
+): Character & { sprites: FigureSpriteSummary[] } {
   return {
     ...character,
     sprites: character.sprites.map((sprite) => {
@@ -192,21 +207,30 @@ function summarizeCharacterForAi(character: Character, figureAssets: AssetInfo[]
 const readTools: AgentTool[] = [
   {
     name: 'list_scenes',
-    description: '列出项目中所有场景，给出文件名与对应的章节名/大纲。调用其它工具（read_scene/edit_scene）时用 file 文件名；章节名/大纲仅供你理解剧情结构。',
+    description:
+      '列出项目中所有场景，给出文件名与对应的章节名/大纲。调用其它工具（read_scene/edit_scene）时用 file 文件名；章节名/大纲仅供你理解剧情结构。',
     kind: 'read',
     schema: { type: 'object', properties: {}, required: [] },
     run: async (_args, ctx) => {
       const projectPath = requireProject(ctx);
       const files = await listScenes(sceneDir(projectPath));
       // Pair each filename with its chapter/outline header for comprehension.
-      const scenes = await Promise.all(files.map(async (file) => {
-        try {
-          const header = parseSceneHeader(await readFileText(await getScenePath(projectPath, file)));
-          return { file, chapter: header.chapter ?? '', outline: header.outline ?? '' };
-        } catch {
-          return { file, chapter: '', outline: '' };
-        }
-      }));
+      const scenes = await Promise.all(
+        files.map(async (file) => {
+          try {
+            const header = parseSceneHeader(
+              await readFileText(await getScenePath(projectPath, file)),
+            );
+            return {
+              file,
+              chapter: header.chapter ?? '',
+              outline: header.outline ?? '',
+            };
+          } catch {
+            return { file, chapter: '', outline: '' };
+          }
+        }),
+      );
       return { scenes };
     },
   },
@@ -220,7 +244,10 @@ const readTools: AgentTool[] = [
       properties: {
         name: { type: 'string', description: '场景文件名，如 start.txt' },
         fromLine: { type: 'integer', description: '起始行号（默认 1）' },
-        maxLines: { type: 'integer', description: `最多返回行数（默认 ${SCENE_READ_MAX_LINES}）` },
+        maxLines: {
+          type: 'integer',
+          description: `最多返回行数（默认 ${SCENE_READ_MAX_LINES}）`,
+        },
       },
       required: ['name'],
     },
@@ -230,7 +257,11 @@ const readTools: AgentTool[] = [
       if (!name) throw new Error('read_scene 需要场景文件名 name。');
       const path = await getScenePath(projectPath, name);
       const content = await readFileText(path);
-      const numbered = numberScript(content, asInt(args.fromLine) ?? 1, asInt(args.maxLines) ?? SCENE_READ_MAX_LINES);
+      const numbered = numberScript(
+        content,
+        asInt(args.fromLine) ?? 1,
+        asInt(args.maxLines) ?? SCENE_READ_MAX_LINES,
+      );
       return { name, ...numbered };
     },
   },
@@ -250,7 +281,9 @@ const readTools: AgentTool[] = [
     run: async (args, ctx) => {
       const projectPath = requireProject(ctx);
       const category = asString(args.category);
-      const assets = category ? await listAssets(projectPath, category) : await listAllAssets(projectPath);
+      const assets = category
+        ? await listAssets(projectPath, category)
+        : await listAllAssets(projectPath);
       // For figures, annotate each file with its owning character + emotion so
       // the model picks expressions, not bare filenames.
       const wantsFigures = !category || category === 'figure' || category.startsWith('figure');
@@ -273,11 +306,14 @@ const readTools: AgentTool[] = [
   },
   {
     name: 'get_character',
-    description: '获取单个角色的完整设定（性格、对话风格、关系等），含 sprites 立绘列表。每个 sprite 都会给出 emotion、原始 file、resolvedFile/scriptFile（可写入脚本的真实文件）与 available；即使原始 file 为空，也可能通过角色素材库解析出可用 resolvedFile。',
+    description:
+      '获取单个角色的完整设定（性格、对话风格、关系等），含 sprites 立绘列表。每个 sprite 都会给出 emotion、原始 file、resolvedFile/scriptFile（可写入脚本的真实文件）与 available；即使原始 file 为空，也可能通过角色素材库解析出可用 resolvedFile。',
     kind: 'read',
     schema: {
       type: 'object',
-      properties: { id: { type: 'string', description: '角色 id（也接受角色名或别名）' } },
+      properties: {
+        id: { type: 'string', description: '角色 id（也接受角色名或别名）' },
+      },
       required: ['id'],
     },
     run: async (args, ctx) => {
@@ -315,9 +351,26 @@ const readTools: AgentTool[] = [
 /** Staged write payloads, discriminated by the originating tool name. */
 export type StagedWrite =
   | { tool: 'edit_scene'; file: string; patches: EditorPatch[] }
-  | { tool: 'set_scene_header'; file: string; chapter?: string; outline?: string }
-  | { tool: 'insert_dialogue_block'; file: string; afterLine: number | 'end'; anchorText?: string; lines: Record<string, unknown>[] }
-  | { tool: 'create_branch'; file: string; afterLine: number | 'end'; anchorText?: string; choices: Record<string, unknown>[] }
+  | {
+      tool: 'set_scene_header';
+      file: string;
+      chapter?: string;
+      outline?: string;
+    }
+  | {
+      tool: 'insert_dialogue_block';
+      file: string;
+      afterLine: number | 'end';
+      anchorText?: string;
+      lines: Record<string, unknown>[];
+    }
+  | {
+      tool: 'create_branch';
+      file: string;
+      afterLine: number | 'end';
+      anchorText?: string;
+      choices: Record<string, unknown>[];
+    }
   | {
       tool: 'insert_figure';
       file: string;
@@ -330,7 +383,11 @@ export type StagedWrite =
       figureId?: string;
     }
   | { tool: 'create_character'; draft: Record<string, unknown> }
-  | { tool: 'plan_character_sprites'; character: string; sprites: Record<string, unknown>[] }
+  | {
+      tool: 'plan_character_sprites';
+      character: string;
+      sprites: Record<string, unknown>[];
+    }
   | { tool: 'plan_assets'; assets: Record<string, unknown>[] }
   | { tool: 'edit_character'; id: string; partial: Record<string, unknown> }
   | { tool: 'edit_memory'; partial: Record<string, unknown> }
@@ -358,14 +415,33 @@ const writeTools: AgentTool[] = [
           items: {
             type: 'object',
             properties: {
-              type: { type: 'string', enum: ['insert', 'delete', 'replace'], description: '补丁类型' },
-              afterLine: {
-                description: 'insert 专用：在该 txt 行号之后插入；可为正整数，或字符串 "end" 表示文件末尾',
+              type: {
+                type: 'string',
+                enum: ['insert', 'delete', 'replace'],
+                description: '补丁类型',
               },
-              startLine: { type: 'integer', minimum: 1, description: 'delete/replace 专用：起始 txt 行号（含）' },
-              endLine: { type: 'integer', minimum: 1, description: 'delete/replace 专用：结束 txt 行号（含）' },
-              anchorText: { type: 'string', description: '目标行原文，用于行号漂移兜底' },
-              text: { type: 'string', description: 'insert/replace 专用：写入的 WebGAL txt，多行用 \\n 分隔' },
+              afterLine: {
+                description:
+                  'insert 专用：在该 txt 行号之后插入；可为正整数，或字符串 "end" 表示文件末尾',
+              },
+              startLine: {
+                type: 'integer',
+                minimum: 1,
+                description: 'delete/replace 专用：起始 txt 行号（含）',
+              },
+              endLine: {
+                type: 'integer',
+                minimum: 1,
+                description: 'delete/replace 专用：结束 txt 行号（含）',
+              },
+              anchorText: {
+                type: 'string',
+                description: '目标行原文，用于行号漂移兜底',
+              },
+              text: {
+                type: 'string',
+                description: 'insert/replace 专用：写入的 WebGAL txt，多行用 \\n 分隔',
+              },
             },
             required: ['type'],
           },
@@ -389,11 +465,15 @@ const writeTools: AgentTool[] = [
       if (invalid >= 0) {
         throw new Error(
           `patches[${invalid}] 字段不合法。每个 patch 必须含 type，且：` +
-          'insert 需 afterLine(正整数或"end")与 text；delete 需 startLine 与 endLine(正整数)；' +
-          'replace 需 startLine、endLine(正整数)与 text。行号必须是从 1 开始的整数，不能省略或为 null。',
+            'insert 需 afterLine(正整数或"end")与 text；delete 需 startLine 与 endLine(正整数)；' +
+            'replace 需 startLine、endLine(正整数)与 text。行号必须是从 1 开始的整数，不能省略或为 null。',
         );
       }
-      return { tool: 'edit_scene', file, patches: patches as EditorPatch[] } satisfies StagedWrite;
+      return {
+        tool: 'edit_scene',
+        file,
+        patches: patches as EditorPatch[],
+      } satisfies StagedWrite;
     },
   },
   {
@@ -416,7 +496,12 @@ const writeTools: AgentTool[] = [
       const chapter = asString(args.chapter);
       const outline = asString(args.outline);
       if (!chapter && !outline) throw new Error('set_scene_header 至少需要 chapter 或 outline。');
-      return { tool: 'set_scene_header', file, chapter, outline } satisfies StagedWrite;
+      return {
+        tool: 'set_scene_header',
+        file,
+        chapter,
+        outline,
+      } satisfies StagedWrite;
     },
   },
   {
@@ -428,23 +513,58 @@ const writeTools: AgentTool[] = [
       type: 'object',
       properties: {
         file: { type: 'string', description: '目标场景文件名' },
-        afterLine: { description: '在该 txt 行号之后插入；可为正整数，或字符串 "end" 表示文件末尾' },
-        anchorText: { type: 'string', description: 'afterLine 对应行原文，用于行号漂移兜底' },
+        afterLine: {
+          description: '在该 txt 行号之后插入；可为正整数，或字符串 "end" 表示文件末尾',
+        },
+        anchorText: {
+          type: 'string',
+          description: 'afterLine 对应行原文，用于行号漂移兜底',
+        },
         lines: {
           type: 'array',
           description: '剧情行数组',
           items: {
             type: 'object',
             properties: {
-              type: { type: 'string', enum: ['narrator', 'dialogue', 'intro', 'background', 'figure', 'bgm', 'effect', 'video', 'jump', 'call', 'label', 'end', 'comment'] },
+              type: {
+                type: 'string',
+                enum: [
+                  'narrator',
+                  'dialogue',
+                  'intro',
+                  'background',
+                  'figure',
+                  'bgm',
+                  'effect',
+                  'video',
+                  'jump',
+                  'call',
+                  'label',
+                  'end',
+                  'comment',
+                ],
+              },
               text: { type: 'string', description: '旁白/对白/intro/注释文本' },
-              character: { type: 'string', description: 'dialogue/figure 专用角色名' },
+              character: {
+                type: 'string',
+                description: 'dialogue/figure 专用角色名',
+              },
               emotion: { type: 'string', description: 'figure 专用表情名' },
               position: { type: 'string', enum: ['left', 'center', 'right'] },
-              asset: { type: 'string', description: 'background/bgm/effect/video/figure 专用素材文件名；background 可用真实文件名，或同一轮 plan_assets 返回的 scriptAsset；figure 可省略，由角色+表情解析' },
-              target: { type: 'string', description: 'jump/call 目标场景文件名' },
+              asset: {
+                type: 'string',
+                description:
+                  'background/bgm/effect/video/figure 专用素材文件名；background 可用真实文件名，或同一轮 plan_assets 返回的 scriptAsset；figure 可省略，由角色+表情解析',
+              },
+              target: {
+                type: 'string',
+                description: 'jump/call 目标场景文件名',
+              },
               label: { type: 'string', description: 'label 名称' },
-              next: { type: 'boolean', description: '素材命令是否加 -next，默认 true' },
+              next: {
+                type: 'boolean',
+                description: '素材命令是否加 -next，默认 true',
+              },
             },
             required: ['type'],
           },
@@ -459,7 +579,13 @@ const writeTools: AgentTool[] = [
       if (!afterLine) throw new Error('insert_dialogue_block 需要 afterLine（正整数或 "end"）。');
       const lines = asRecordArray(args.lines);
       if (!lines) throw new Error('insert_dialogue_block 需要非空 lines。');
-      return { tool: 'insert_dialogue_block', file, afterLine, anchorText: asString(args.anchorText), lines } satisfies StagedWrite;
+      return {
+        tool: 'insert_dialogue_block',
+        file,
+        afterLine,
+        anchorText: asString(args.anchorText),
+        lines,
+      } satisfies StagedWrite;
     },
   },
   {
@@ -471,18 +597,30 @@ const writeTools: AgentTool[] = [
       type: 'object',
       properties: {
         file: { type: 'string', description: '插入 choose 的源场景文件名' },
-        afterLine: { description: '在该 txt 行号之后插入 choose；可为正整数，或字符串 "end" 表示文件末尾' },
-        anchorText: { type: 'string', description: 'afterLine 对应行原文，用于行号漂移兜底' },
+        afterLine: {
+          description: '在该 txt 行号之后插入 choose；可为正整数，或字符串 "end" 表示文件末尾',
+        },
+        anchorText: {
+          type: 'string',
+          description: 'afterLine 对应行原文，用于行号漂移兜底',
+        },
         choices: {
           type: 'array',
           items: {
             type: 'object',
             properties: {
               text: { type: 'string', description: '选项显示文本' },
-              targetScene: { type: 'string', description: '目标场景文件名，可不含 .txt' },
+              targetScene: {
+                type: 'string',
+                description: '目标场景文件名，可不含 .txt',
+              },
               chapter: { type: 'string', description: '目标场景章节名' },
               outline: { type: 'string', description: '目标场景大纲' },
-              contentLines: { type: 'array', description: '可选：目标场景初始剧情行，格式同 insert_dialogue_block.lines', items: { type: 'object' } },
+              contentLines: {
+                type: 'array',
+                description: '可选：目标场景初始剧情行，格式同 insert_dialogue_block.lines',
+                items: { type: 'object' },
+              },
             },
             required: ['text', 'targetScene'],
           },
@@ -497,7 +635,13 @@ const writeTools: AgentTool[] = [
       if (!afterLine) throw new Error('create_branch 需要 afterLine（正整数或 "end"）。');
       const choices = asRecordArray(args.choices);
       if (!choices || choices.length < 2) throw new Error('create_branch 至少需要两个 choices。');
-      return { tool: 'create_branch', file, afterLine, anchorText: asString(args.anchorText), choices } satisfies StagedWrite;
+      return {
+        tool: 'create_branch',
+        file,
+        afterLine,
+        anchorText: asString(args.anchorText),
+        choices,
+      } satisfies StagedWrite;
     },
   },
   {
@@ -513,12 +657,25 @@ const writeTools: AgentTool[] = [
         afterLine: {
           description: '在该 txt 行号之后插入；可为正整数，或字符串 "end" 表示文件末尾',
         },
-        anchorText: { type: 'string', description: 'afterLine 对应行原文，用于行号漂移兜底' },
+        anchorText: {
+          type: 'string',
+          description: 'afterLine 对应行原文，用于行号漂移兜底',
+        },
         character: { type: 'string', description: '角色名、角色 id 或别名' },
-        emotion: { type: 'string', description: '角色 sprites 中的表情名，如 默认、微笑、生气' },
-        position: { type: 'string', enum: ['left', 'center', 'right'], description: '立绘位置，默认 center' },
+        emotion: {
+          type: 'string',
+          description: '角色 sprites 中的表情名，如 默认、微笑、生气',
+        },
+        position: {
+          type: 'string',
+          enum: ['left', 'center', 'right'],
+          description: '立绘位置，默认 center',
+        },
         next: { type: 'boolean', description: '是否追加 -next，默认 true' },
-        figureId: { type: 'string', description: '可选：WebGAL figure id（对应 -id=xxx）' },
+        figureId: {
+          type: 'string',
+          description: '可选：WebGAL figure id（对应 -id=xxx）',
+        },
       },
       required: ['file', 'afterLine', 'character', 'emotion'],
     },
@@ -553,12 +710,23 @@ const writeTools: AgentTool[] = [
       type: 'object',
       properties: {
         name: { type: 'string', description: '角色主名称，会用于脚本对白' },
-        aliases: { type: 'array', items: { type: 'string' }, description: '别名/昵称' },
+        aliases: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '别名/昵称',
+        },
         description: { type: 'string', description: '外观、身份或背景简述' },
         personality: { type: 'string', description: '性格特征' },
         stance: { type: 'string', description: '立场/阵营/道德倾向' },
-        keywords: { type: 'array', items: { type: 'string' }, description: '标签关键词' },
-        dialogueStyle: { type: 'string', description: '说话方式/口癖/语气指南' },
+        keywords: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '标签关键词',
+        },
+        dialogueStyle: {
+          type: 'string',
+          description: '说话方式/口癖/语气指南',
+        },
         gender: { type: 'string', description: '性别或性别表达' },
         age: { type: 'string', description: '年龄或年龄段' },
         voiceTimbre: { type: 'string', description: '可选 TTS 音色 id' },
@@ -570,7 +738,10 @@ const writeTools: AgentTool[] = [
           items: {
             type: 'object',
             properties: {
-              emotion: { type: 'string', description: '表情名，如 默认、微笑、生气' },
+              emotion: {
+                type: 'string',
+                description: '表情名，如 默认、微笑、生气',
+              },
               prompt: { type: 'string', description: '该表情的生成提示词' },
             },
             required: ['emotion'],
@@ -619,7 +790,10 @@ const writeTools: AgentTool[] = [
           items: {
             type: 'object',
             properties: {
-              emotion: { type: 'string', description: '表情名，如 默认、微笑、生气' },
+              emotion: {
+                type: 'string',
+                description: '表情名，如 默认、微笑、生气',
+              },
               prompt: { type: 'string', description: '该表情的生图提示词' },
             },
             required: ['emotion', 'prompt'],
@@ -633,7 +807,11 @@ const writeTools: AgentTool[] = [
       if (!character) throw new Error('plan_character_sprites 需要 character。');
       const sprites = asRecordArray(args.sprites);
       if (!sprites) throw new Error('plan_character_sprites 需要非空 sprites。');
-      return { tool: 'plan_character_sprites', character, sprites } satisfies StagedWrite;
+      return {
+        tool: 'plan_character_sprites',
+        character,
+        sprites,
+      } satisfies StagedWrite;
     },
   },
   {
@@ -652,7 +830,9 @@ const writeTools: AgentTool[] = [
     run: async (args) => {
       const id = asString(args.id);
       if (!id) throw new Error('edit_character 需要角色 id。');
-      const partial = (args.partial && typeof args.partial === 'object' ? args.partial : {}) as Record<string, unknown>;
+      const partial = (
+        args.partial && typeof args.partial === 'object' ? args.partial : {}
+      ) as Record<string, unknown>;
       return { tool: 'edit_character', id, partial } satisfies StagedWrite;
     },
   },
@@ -669,13 +849,30 @@ const writeTools: AgentTool[] = [
           items: {
             type: 'object',
             properties: {
-              category: { type: 'string', enum: ['background', 'cg'], description: '素材类型；背景用 background，剧情画用 cg' },
+              category: {
+                type: 'string',
+                enum: ['background', 'cg'],
+                description: '素材类型；背景用 background，剧情画用 cg',
+              },
               title: { type: 'string', description: '素材卡标题/用途名' },
-              sceneFile: { type: 'string', description: '可选：关联场景文件名，如 start.txt' },
-              targetStem: { type: 'string', description: '可选：建议生成文件名 stem，不含扩展名；脚本引用时使用 <targetStem>.png' },
-              prompt: { type: 'string', description: '图片生成提示词，包含地点/时间/天气/氛围/镜头/主体' },
+              sceneFile: {
+                type: 'string',
+                description: '可选：关联场景文件名，如 start.txt',
+              },
+              targetStem: {
+                type: 'string',
+                description:
+                  '可选：建议生成文件名 stem，不含扩展名；脚本引用时使用 <targetStem>.png',
+              },
+              prompt: {
+                type: 'string',
+                description: '图片生成提示词，包含地点/时间/天气/氛围/镜头/主体',
+              },
               style: { type: 'string', description: '可选：画风约束' },
-              negativePrompt: { type: 'string', description: '可选：负面提示词' },
+              negativePrompt: {
+                type: 'string',
+                description: '可选：负面提示词',
+              },
             },
             required: ['category', 'title', 'prompt'],
           },
@@ -702,7 +899,9 @@ const writeTools: AgentTool[] = [
       required: ['partial'],
     },
     run: async (args) => {
-      const partial = (args.partial && typeof args.partial === 'object' ? args.partial : {}) as Record<string, unknown>;
+      const partial = (
+        args.partial && typeof args.partial === 'object' ? args.partial : {}
+      ) as Record<string, unknown>;
       return { tool: 'edit_memory', partial } satisfies StagedWrite;
     },
   },
@@ -714,7 +913,10 @@ const writeTools: AgentTool[] = [
     schema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: '场景文件名，可不含 .txt（会自动补全）' },
+        name: {
+          type: 'string',
+          description: '场景文件名，可不含 .txt（会自动补全）',
+        },
         chapter: { type: 'string', description: '可选：章节名' },
         outline: { type: 'string', description: '可选：本章大纲/简述' },
       },
@@ -743,5 +945,9 @@ export function getTool(name: string): AgentTool | undefined {
 
 /** Tool definitions sent to the model. */
 export function toolDefs(): ToolDef[] {
-  return AGENT_TOOLS.map((t) => ({ name: t.name, description: t.description, parameters: t.schema }));
+  return AGENT_TOOLS.map((t) => ({
+    name: t.name,
+    description: t.description,
+    parameters: t.schema,
+  }));
 }

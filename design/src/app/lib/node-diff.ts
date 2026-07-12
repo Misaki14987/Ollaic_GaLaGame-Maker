@@ -40,12 +40,15 @@ function nodeFingerprint(n: WebGalNode): string {
 function lcsDiff(before: WebGalNode[], after: WebGalNode[]): NodeDiffEntry[] {
   const bKeys = before.map(nodeFingerprint);
   const aKeys = after.map(nodeFingerprint);
-  const table: number[][] = Array.from({ length: before.length + 1 }, () => Array(after.length + 1).fill(0));
+  const table: number[][] = Array.from({ length: before.length + 1 }, () =>
+    Array(after.length + 1).fill(0),
+  );
   for (let i = before.length - 1; i >= 0; i -= 1) {
     for (let j = after.length - 1; j >= 0; j -= 1) {
-      table[i][j] = bKeys[i] === aKeys[j]
-        ? table[i + 1][j + 1] + 1
-        : Math.max(table[i + 1][j], table[i][j + 1]);
+      table[i][j] =
+        bKeys[i] === aKeys[j]
+          ? table[i + 1][j + 1] + 1
+          : Math.max(table[i + 1][j], table[i][j + 1]);
     }
   }
   const out: NodeDiffEntry[] = [];
@@ -54,7 +57,8 @@ function lcsDiff(before: WebGalNode[], after: WebGalNode[]): NodeDiffEntry[] {
   while (i < before.length && j < after.length) {
     if (bKeys[i] === aKeys[j]) {
       out.push({ kind: 'context', before: before[i], after: after[j] });
-      i += 1; j += 1;
+      i += 1;
+      j += 1;
     } else if (table[i + 1][j] >= table[i][j + 1]) {
       out.push({ kind: 'removed', before: before[i] });
       i += 1;
@@ -63,8 +67,14 @@ function lcsDiff(before: WebGalNode[], after: WebGalNode[]): NodeDiffEntry[] {
       j += 1;
     }
   }
-  while (i < before.length) { out.push({ kind: 'removed', before: before[i] }); i += 1; }
-  while (j < after.length) { out.push({ kind: 'added', after: after[j] }); j += 1; }
+  while (i < before.length) {
+    out.push({ kind: 'removed', before: before[i] });
+    i += 1;
+  }
+  while (j < after.length) {
+    out.push({ kind: 'added', after: after[j] });
+    j += 1;
+  }
   return out;
 }
 
@@ -76,7 +86,8 @@ function collapseModified(entries: NodeDiffEntry[]): NodeDiffEntry[] {
     const next = entries[k + 1];
     if (
       next &&
-      ((cur.kind === 'removed' && next.kind === 'added') || (cur.kind === 'added' && next.kind === 'removed'))
+      ((cur.kind === 'removed' && next.kind === 'added') ||
+        (cur.kind === 'added' && next.kind === 'removed'))
     ) {
       const removed = cur.kind === 'removed' ? cur.before : next.before;
       const added = cur.kind === 'added' ? cur.after : next.after;
@@ -113,7 +124,11 @@ export function computeNodeDiff(before: WebGalNode[], after: WebGalNode[]): Node
 }
 
 /** Counts for the summary badge (+added ✏modified -removed). */
-export function summarizeNodeDiff(entries: NodeDiffEntry[]): { added: number; removed: number; modified: number } {
+export function summarizeNodeDiff(entries: NodeDiffEntry[]): {
+  added: number;
+  removed: number;
+  modified: number;
+} {
   return {
     added: entries.filter((e) => e.kind === 'added').length,
     removed: entries.filter((e) => e.kind === 'removed').length,

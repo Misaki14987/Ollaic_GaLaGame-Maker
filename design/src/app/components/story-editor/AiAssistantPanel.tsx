@@ -1,6 +1,14 @@
 import { memo, useEffect, useState } from 'react';
 import {
-  Loader2, MessageCircle, MessageSquarePlus, MoreHorizontal, Pencil, Send, Trash2, Wand2, X,
+  Loader2,
+  MessageCircle,
+  MessageSquarePlus,
+  MoreHorizontal,
+  Pencil,
+  Send,
+  Trash2,
+  Wand2,
+  X,
 } from 'lucide-react';
 import type { SceneHeader } from '../../lib/webgal-ipc';
 import { useAiAgent } from '../../hooks/useAiAgent';
@@ -9,11 +17,20 @@ import { AiMessageBubble } from '../AiMessageBubble';
 import { ChangeSetCard } from '../AiPendingCard';
 import { ConflictCard, ErrorCard } from '../AiStatusCard';
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
-  DropdownMenuSeparator, DropdownMenuTrigger,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
 import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from '../ui/dialog';
 
 interface AiAssistantPanelProps {
@@ -35,13 +52,24 @@ interface AiInputBoxProps {
 
 // Keeps the draft in local state so typing only re-renders this small box,
 // not the whole StoryEditor tree (script list, worldline, timeline, ...).
-const AiInputBox = memo(function AiInputBox({ value, busy, pending, onSubmit, onStop }: AiInputBoxProps) {
+const AiInputBox = memo(function AiInputBox({
+  value,
+  busy,
+  pending,
+  onSubmit,
+  onStop,
+}: AiInputBoxProps) {
   const [draft, setDraft] = useState(value);
   // Sync when the agent changes input externally (regenerate prefills, send clears).
-  useEffect(() => { setDraft(value); }, [value]);
+  useEffect(() => {
+    setDraft(value);
+  }, [value]);
 
   const submit = () => {
-    if (busy) { onStop(); return; }
+    if (busy) {
+      onStop();
+      return;
+    }
     const text = draft.trim();
     if (!text || pending) return;
     onSubmit(text);
@@ -61,7 +89,9 @@ const AiInputBox = memo(function AiInputBox({ value, busy, pending, onSubmit, on
         }}
         disabled={busy || pending}
         className="mt-3 h-20 w-full resize-none rounded-sm border border-border bg-surface-container-lowest p-2 text-sm focus:border-secondary focus:outline-none focus:ring-2 focus:ring-secondary-container/30 disabled:opacity-60"
-        placeholder={busy ? '生成中...' : pending ? '请先同意或拒绝当前 AI 修改...' : '输入你的创作想法...'}
+        placeholder={
+          busy ? '生成中...' : pending ? '请先同意或拒绝当前 AI 修改...' : '输入你的创作想法...'
+        }
         aria-label="AI 创作输入"
       />
       <button
@@ -85,9 +115,15 @@ export function AiAssistantPanel({
   onSend,
 }: AiAssistantPanelProps) {
   const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
-  const [renameTarget, setRenameTarget] = useState<{ id: string; title: string } | null>(null);
+  const [renameTarget, setRenameTarget] = useState<{
+    id: string;
+    title: string;
+  } | null>(null);
   const [renameValue, setRenameValue] = useState('');
-  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{
+    id: string;
+    title: string;
+  } | null>(null);
   const activeSession = aiAgent.sessions.find((session) => session.id === aiAgent.activeId);
   const statusText = aiAgent.busy
     ? '生成中'
@@ -104,11 +140,16 @@ export function AiAssistantPanel({
           <div className="flex h-6 w-6 items-center justify-center rounded-full bg-secondary-container/35 text-[var(--nav-active)]">
             <Wand2 className="h-3.5 w-3.5" />
           </div>
-          <span className="truncate text-sm font-semibold text-on-surface" title={activeSession?.title}>
+          <span
+            className="truncate text-sm font-semibold text-on-surface"
+            title={activeSession?.title}
+          >
             {activeSession?.title ?? 'AI 创作助手'}
           </span>
           <span className="flex items-center gap-1 font-mono-family text-[10px] text-muted-foreground">
-            <span className={`block h-1.5 w-1.5 rounded-full ${aiAgent.busy ? 'bg-primary' : 'bg-tertiary-container'}`} />
+            <span
+              className={`block h-1.5 w-1.5 rounded-full ${aiAgent.busy ? 'bg-primary' : 'bg-tertiary-container'}`}
+            />
             {statusText}
           </span>
         </div>
@@ -136,7 +177,12 @@ export function AiAssistantPanel({
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-64">
-              <DropdownMenuItem onClick={() => { setSessionMenuOpen(false); aiAgent.startNewSession(); }}>
+              <DropdownMenuItem
+                onClick={() => {
+                  setSessionMenuOpen(false);
+                  aiAgent.startNewSession();
+                }}
+              >
                 <MessageSquarePlus className="h-4 w-4" />
                 <span>新建会话</span>
               </DropdownMenuItem>
@@ -148,7 +194,10 @@ export function AiAssistantPanel({
                     key={session.id}
                     role="button"
                     tabIndex={0}
-                    onClick={() => { setSessionMenuOpen(false); aiAgent.selectSession(session.id); }}
+                    onClick={() => {
+                      setSessionMenuOpen(false);
+                      aiAgent.selectSession(session.id);
+                    }}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter' || event.key === ' ') {
                         event.preventDefault();
@@ -196,7 +245,10 @@ export function AiAssistantPanel({
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
         {aiAgent.messages.map((message) => (
-          <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+          <div
+            key={message.id}
+            className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+          >
             <AiMessageBubble
               role={message.role}
               content={message.content}
@@ -217,14 +269,18 @@ export function AiAssistantPanel({
           <ChangeSetCard
             changeSet={aiAgent.pendingChangeSet}
             sceneHeaders={sceneHeaders}
-            onAccept={() => { void aiAgent.acceptChange(); }}
+            onAccept={() => {
+              void aiAgent.acceptChange();
+            }}
             onRevert={aiAgent.revertChange}
           />
         )}
         {aiAgent.status === 'conflict' && (
           <ConflictCard
             onKeepManual={aiAgent.revertChange}
-            onApplyAi={() => { void aiAgent.forceApplyChange(); }}
+            onApplyAi={() => {
+              void aiAgent.forceApplyChange();
+            }}
             onRegenerate={aiAgent.regenerateAfterConflict}
           />
         )}
@@ -255,7 +311,12 @@ export function AiAssistantPanel({
         />
       </div>
 
-      <Dialog open={renameTarget !== null} onOpenChange={(open) => { if (!open) setRenameTarget(null); }}>
+      <Dialog
+        open={renameTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setRenameTarget(null);
+        }}
+      >
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>重命名会话</DialogTitle>
@@ -275,7 +336,11 @@ export function AiAssistantPanel({
             aria-label="会话名称"
           />
           <DialogFooter>
-            <button type="button" onClick={() => setRenameTarget(null)} className="rounded-md bg-secondary px-3 py-2 text-sm transition-colors hover:bg-secondary/70">
+            <button
+              type="button"
+              onClick={() => setRenameTarget(null)}
+              className="rounded-md bg-secondary px-3 py-2 text-sm transition-colors hover:bg-secondary/70"
+            >
               取消
             </button>
             <button
@@ -294,7 +359,12 @@ export function AiAssistantPanel({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={deleteTarget !== null} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+      <Dialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+      >
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>删除会话</DialogTitle>
@@ -303,7 +373,11 @@ export function AiAssistantPanel({
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <button type="button" onClick={() => setDeleteTarget(null)} className="rounded-md bg-secondary px-3 py-2 text-sm transition-colors hover:bg-secondary/70">
+            <button
+              type="button"
+              onClick={() => setDeleteTarget(null)}
+              className="rounded-md bg-secondary px-3 py-2 text-sm transition-colors hover:bg-secondary/70"
+            >
               取消
             </button>
             <button

@@ -26,7 +26,8 @@ import {
 
 import { Switch } from './ui/switch';
 
-type StoryOsSection = 'home' | 'flow' | 'script' | 'world' | 'characters' | 'assets' | 'preview' | 'build';
+type StoryOsSection =
+  'home' | 'flow' | 'script' | 'world' | 'characters' | 'assets' | 'preview' | 'build';
 
 export type StoryOsSaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -104,7 +105,13 @@ export function StoryOsTopBar({
     { label: '运行预览', icon: Play, handler: onRun },
     { label: '打包发布', icon: Upload, handler: onPublish },
     // Manual save button - dimmed when auto-save is on, but still functional
-    { label: '保存', icon: Save, handler: onSave, primary: true, dimWhenAutoSave: true },
+    {
+      label: '保存',
+      icon: Save,
+      handler: onSave,
+      primary: true,
+      dimWhenAutoSave: true,
+    },
   ].filter((action) => action.handler);
 
   const secondaryActions = [
@@ -115,11 +122,7 @@ export function StoryOsTopBar({
   ].filter((action) => action.handler);
 
   const SaveIndicatorIcon =
-    saveStatus === 'saving'
-      ? Loader2
-      : saveStatus === 'error'
-        ? CloudOff
-        : Cloud;
+    saveStatus === 'saving' ? Loader2 : saveStatus === 'error' ? CloudOff : Cloud;
   const saveIndicatorTitle =
     saveStatus === 'saving'
       ? '保存中...'
@@ -212,11 +215,7 @@ export function StoryOsTopBar({
         {onAutoSaveChange && (
           <div className="flex items-center gap-2 pl-2 border-l border-border/40">
             <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
-              <Switch
-                checked={autoSave}
-                onCheckedChange={onAutoSaveChange}
-                className="scale-75"
-              />
+              <Switch checked={autoSave} onCheckedChange={onAutoSaveChange} className="scale-75" />
               <span>自动保存</span>
             </label>
             {saveStatus !== 'idle' && (
@@ -233,7 +232,12 @@ export function StoryOsTopBar({
           </div>
         )}
         {onSettings && (
-          <button type="button" onClick={onSettings} className="story-os-icon-button" aria-label="设置">
+          <button
+            type="button"
+            onClick={onSettings}
+            className="story-os-icon-button"
+            aria-label="设置"
+          >
             <Settings className="h-5 w-5" />
           </button>
         )}
@@ -242,7 +246,12 @@ export function StoryOsTopBar({
   );
 }
 
-export function StoryOsSideNav({ active, projectId, projectLabel = 'ALPHA', onBeforeNavigate }: StoryOsSideNavProps) {
+export function StoryOsSideNav({
+  active,
+  projectId,
+  projectLabel = 'ALPHA',
+  onBeforeNavigate,
+}: StoryOsSideNavProps) {
   const navigate = useNavigate();
 
   const doNavigate = (target: StoryOsSection) => {
@@ -283,7 +292,10 @@ export function StoryOsSideNav({ active, projectId, projectLabel = 'ALPHA', onBe
 
   return (
     <aside className="story-os-sidenav">
-      <div className="mb-4 mt-2 flex flex-col items-center gap-1 px-1 text-center" title={projectLabel}>
+      <div
+        className="mb-4 mt-2 flex flex-col items-center gap-1 px-1 text-center"
+        title={projectLabel}
+      >
         <div className="story-os-avatar">
           {active === 'home' ? <Home className="h-6 w-6" /> : <UserCircle className="h-6 w-6" />}
         </div>
@@ -293,17 +305,17 @@ export function StoryOsSideNav({ active, projectId, projectLabel = 'ALPHA', onBe
         {navItems
           .filter(({ id }) => projectId || id === active)
           .map(({ id, label, icon: Icon }) => (
-          <button
-            type="button"
-            key={id}
-            onClick={() => handleNavigate(id)}
-            className={`story-os-nav-item ${active === id ? 'story-os-nav-item-active' : ''}`}
-            aria-current={active === id ? 'page' : undefined}
-          >
-            <Icon className="h-5 w-5" />
-            <span>{label}</span>
-          </button>
-        ))}
+            <button
+              type="button"
+              key={id}
+              onClick={() => handleNavigate(id)}
+              className={`story-os-nav-item ${active === id ? 'story-os-nav-item-active' : ''}`}
+              aria-current={active === id ? 'page' : undefined}
+            >
+              <Icon className="h-5 w-5" />
+              <span>{label}</span>
+            </button>
+          ))}
       </nav>
     </aside>
   );

@@ -40,13 +40,10 @@ describe('flow layout', () => {
   });
 
   it('preserves valid user positions and replaces invalid saved positions', () => {
-    const positions = layoutFlowSteps(
-      [step('plan'), step('outline', ['plan'])],
-      {
-        plan: { x: 42, y: 84 },
-        outline: { x: Number.NaN, y: 2 },
-      },
-    );
+    const positions = layoutFlowSteps([step('plan'), step('outline', ['plan'])], {
+      plan: { x: 42, y: 84 },
+      outline: { x: Number.NaN, y: 2 },
+    });
 
     expect(positions.plan).toEqual({ x: 42, y: 84 });
     expect(positions.outline).toEqual({ x: 300, y: 0 });
@@ -66,16 +63,21 @@ describe('flow layout storage', () => {
     expect(flowLayoutStorageKey('/project one', 'run/1')).not.toBe(
       flowLayoutStorageKey('/project one', 'run/2'),
     );
-    expect(loadFlowPositions('/project one', 'run/1', storage)).toEqual({ plan: { x: 10, y: 20 } });
+    expect(loadFlowPositions('/project one', 'run/1', storage)).toEqual({
+      plan: { x: 10, y: 20 },
+    });
   });
 
   it('tolerates corrupt storage and discards malformed coordinates', () => {
     expect(loadFlowPositions('/project', 'run', { getItem: () => '{broken' })).toEqual({});
-    expect(loadFlowPositions('/project', 'run', {
-      getItem: () => JSON.stringify({
-        plan: { x: 1, y: 2 },
-        bad: { x: 'left', y: 2 },
+    expect(
+      loadFlowPositions('/project', 'run', {
+        getItem: () =>
+          JSON.stringify({
+            plan: { x: 1, y: 2 },
+            bad: { x: 'left', y: 2 },
+          }),
       }),
-    })).toEqual({ plan: { x: 1, y: 2 } });
+    ).toEqual({ plan: { x: 1, y: 2 } });
   });
 });

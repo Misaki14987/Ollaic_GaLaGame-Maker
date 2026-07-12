@@ -8,9 +8,15 @@ use serde::Serialize;
 use std::sync::Mutex;
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
-#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum PipelineEvent {
-    RunStarted { run_id: String },
+    RunStarted {
+        run_id: String,
+    },
     StepStarted {
         run_id: String,
         step_id: String,
@@ -26,12 +32,26 @@ pub enum PipelineEvent {
         step_id: String,
         error: String,
     },
-    StepSkipped { run_id: String, step_id: String },
-    RunPaused { run_id: String },
-    RunResumed { run_id: String },
-    RunCompleted { run_id: String },
-    RunFailed { run_id: String, error: String },
-    RunStopped { run_id: String },
+    StepSkipped {
+        run_id: String,
+        step_id: String,
+    },
+    RunPaused {
+        run_id: String,
+    },
+    RunResumed {
+        run_id: String,
+    },
+    RunCompleted {
+        run_id: String,
+    },
+    RunFailed {
+        run_id: String,
+        error: String,
+    },
+    RunStopped {
+        run_id: String,
+    },
 }
 
 impl PipelineEvent {

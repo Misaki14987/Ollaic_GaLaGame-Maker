@@ -130,7 +130,9 @@ function migrateLegacy(projectId: string | undefined): SessionIndex | null {
         legacyMessages = parsed.messages;
         break;
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
   if (!legacyMessages) return null;
   const meta = makeMeta('历史对话');
@@ -138,7 +140,10 @@ function migrateLegacy(projectId: string | undefined): SessionIndex | null {
   writeIndex(projectId, index);
   safeSetItem(
     sessionKey(projectId, meta.id),
-    JSON.stringify({ messages: trimMessages(legacyMessages), lastUpdatedAt: nowIso() } satisfies PersistedChatSession),
+    JSON.stringify({
+      messages: trimMessages(legacyMessages),
+      lastUpdatedAt: nowIso(),
+    } satisfies PersistedChatSession),
   );
   return index;
 }
@@ -181,12 +186,14 @@ export function useChatSession(projectId: string | undefined, initialMessage: Ch
   // Re-bootstrap when the project changes.
   useEffect(() => {
     const existing = readIndex(projectId) ?? migrateLegacy(projectId);
-    const next = existing ?? (() => {
-      const meta = makeMeta();
-      const fresh: SessionIndex = { activeId: meta.id, sessions: [meta] };
-      writeIndex(projectId, fresh);
-      return fresh;
-    })();
+    const next =
+      existing ??
+      (() => {
+        const meta = makeMeta();
+        const fresh: SessionIndex = { activeId: meta.id, sessions: [meta] };
+        writeIndex(projectId, fresh);
+        return fresh;
+      })();
     setIndex(next);
     setMessagesState(loadSessionMessages(projectId, next.activeId, initialMessage));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -195,90 +202,129 @@ export function useChatSession(projectId: string | undefined, initialMessage: Ch
   const activeIdRef = useRef(index.activeId);
   activeIdRef.current = index.activeId;
 
-  const persistMessages = useCallback((sessionId: string, next: ChatMessage[]) => {
-    const body = trimMessages(next.filter((m) => m.id !== initialMessage.id));
-    const ts = nowIso();
-    safeSetItem(
-      sessionKey(projectId, sessionId),
-      JSON.stringify({ messages: body, lastUpdatedAt: ts } satisfies PersistedChatSession),
-    );
-    setIndex((prev) => {
-      const updated = { ...prev, sessions: prev.sessions.map((s) => (s.id === sessionId ? { ...s, updatedAt: ts } : s)) };
-      writeIndex(projectId, updated);
-      return updated;
-    });
-  }, [initialMessage.id, projectId]);
+  const persistMessages = useCallback(
+    (sessionId: string, next: ChatMessage[]) => {
+      const body = trimMessages(next.filter((m) => m.id !== initialMessage.id));
+      const ts = nowIso();
+      safeSetItem(
+        sessionKey(projectId, sessionId),
+        JSON.stringify({
+          messages: body,
+          lastUpdatedAt: ts,
+        } satisfies PersistedChatSession),
+      );
+      setIndex((prev) => {
+        const updated = {
+          ...prev,
+          sessions: prev.sessions.map((s) => (s.id === sessionId ? { ...s, updatedAt: ts } : s)),
+        };
+        writeIndex(projectId, updated);
+        return updated;
+      });
+    },
+    [initialMessage.id, projectId],
+  );
 
-  const setMessages = useCallback((next: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
-    setMessagesState((prev) => {
-      const resolved = typeof next === 'function' ? next(prev) : next;
-      persistMessages(activeIdRef.current, resolved);
-      return resolved;
-    });
-  }, [persistMessages]);
+  const setMessages = useCallback(
+    (next: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
+      setMessagesState((prev) => {
+        const resolved = typeof next === 'function' ? next(prev) : next;
+        persistMessages(activeIdRef.current, resolved);
+        return resolved;
+      });
+    },
+    [persistMessages],
+  );
 
-  const switchSession = useCallback((id: string) => {
-    if (id === activeIdRef.current) return;
-    setIndex((prev) => {
-      if (!prev.sessions.some((s) => s.id === id)) return prev;
-      const updated = { ...prev, activeId: id };
-      writeIndex(projectId, updated);
-      return updated;
-    });
-    setMessagesState(loadSessionMessages(projectId, id, initialMessage));
-  }, [initialMessage, projectId]);
+  const switchSession = useCallback(
+    (id: string) => {
+      if (id === activeIdRef.current) return;
+      setIndex((prev) => {
+        if (!prev.sessions.some((s) => s.id === id)) return prev;
+        const updated = { ...prev, activeId: id };
+        writeIndex(projectId, updated);
+        return updated;
+      });
+      setMessagesState(loadSessionMessages(projectId, id, initialMessage));
+    },
+    [initialMessage, projectId],
+  );
 
   const newSession = useCallback(() => {
     const meta = makeMeta();
     setIndex((prev) => {
-      const updated: SessionIndex = { activeId: meta.id, sessions: [meta, ...prev.sessions] };
+      const updated: SessionIndex = {
+        activeId: meta.id,
+        sessions: [meta, ...prev.sessions],
+      };
       writeIndex(projectId, updated);
       return updated;
     });
     setMessagesState([initialMessage]);
   }, [initialMessage, projectId]);
 
-  const deleteSession = useCallback((id: string) => {
-    safeRemoveItem(sessionKey(projectId, id));
-    setIndex((prev) => {
-      const remaining = prev.sessions.filter((s) => s.id !== id);
-      if (remaining.length === 0) {
-        const meta = makeMeta();
-        const fresh: SessionIndex = { activeId: meta.id, sessions: [meta] };
-        writeIndex(projectId, fresh);
-        setMessagesState([initialMessage]);
-        return fresh;
-      }
-      const nextActive = prev.activeId === id ? remaining[0].id : prev.activeId;
-      const updated: SessionIndex = { activeId: nextActive, sessions: remaining };
-      writeIndex(projectId, updated);
-      if (prev.activeId === id) setMessagesState(loadSessionMessages(projectId, nextActive, initialMessage));
-      return updated;
-    });
-  }, [initialMessage, projectId]);
+  const deleteSession = useCallback(
+    (id: string) => {
+      safeRemoveItem(sessionKey(projectId, id));
+      setIndex((prev) => {
+        const remaining = prev.sessions.filter((s) => s.id !== id);
+        if (remaining.length === 0) {
+          const meta = makeMeta();
+          const fresh: SessionIndex = { activeId: meta.id, sessions: [meta] };
+          writeIndex(projectId, fresh);
+          setMessagesState([initialMessage]);
+          return fresh;
+        }
+        const nextActive = prev.activeId === id ? remaining[0].id : prev.activeId;
+        const updated: SessionIndex = {
+          activeId: nextActive,
+          sessions: remaining,
+        };
+        writeIndex(projectId, updated);
+        if (prev.activeId === id)
+          setMessagesState(loadSessionMessages(projectId, nextActive, initialMessage));
+        return updated;
+      });
+    },
+    [initialMessage, projectId],
+  );
 
-  const renameSession = useCallback((id: string, title: string) => {
-    const trimmed = title.trim();
-    if (!trimmed) return;
-    setIndex((prev) => {
-      const updated = { ...prev, sessions: prev.sessions.map((s) => (s.id === id ? { ...s, title: trimmed } : s)) };
-      writeIndex(projectId, updated);
-      return updated;
-    });
-  }, [projectId]);
+  const renameSession = useCallback(
+    (id: string, title: string) => {
+      const trimmed = title.trim();
+      if (!trimmed) return;
+      setIndex((prev) => {
+        const updated = {
+          ...prev,
+          sessions: prev.sessions.map((s) => (s.id === id ? { ...s, title: trimmed } : s)),
+        };
+        writeIndex(projectId, updated);
+        return updated;
+      });
+    },
+    [projectId],
+  );
 
   /** Set the active session's title only if it is still the default placeholder. */
-  const ensureTitleFromFirstMessage = useCallback((text: string) => {
-    const snippet = text.trim().replace(/\s+/g, ' ').slice(0, 20);
-    if (!snippet) return;
-    setIndex((prev) => {
-      const active = prev.sessions.find((s) => s.id === prev.activeId);
-      if (!active || active.title !== DEFAULT_TITLE) return prev;
-      const updated = { ...prev, sessions: prev.sessions.map((s) => (s.id === prev.activeId ? { ...s, title: snippet } : s)) };
-      writeIndex(projectId, updated);
-      return updated;
-    });
-  }, [projectId]);
+  const ensureTitleFromFirstMessage = useCallback(
+    (text: string) => {
+      const snippet = text.trim().replace(/\s+/g, ' ').slice(0, 20);
+      if (!snippet) return;
+      setIndex((prev) => {
+        const active = prev.sessions.find((s) => s.id === prev.activeId);
+        if (!active || active.title !== DEFAULT_TITLE) return prev;
+        const updated = {
+          ...prev,
+          sessions: prev.sessions.map((s) =>
+            s.id === prev.activeId ? { ...s, title: snippet } : s,
+          ),
+        };
+        writeIndex(projectId, updated);
+        return updated;
+      });
+    },
+    [projectId],
+  );
 
   const sessions = useMemo(
     () => [...index.sessions].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),

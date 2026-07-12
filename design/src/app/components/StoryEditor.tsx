@@ -12,10 +12,22 @@ import { SnapshotManagerDialog } from './SnapshotManagerDialog';
 import { SceneManagerPanel } from './SceneManagerPanel';
 import type { WebGalNode } from '../lib/webgal-types';
 import {
-  parseScene, serializeScene, saveScene, loadScene,
-  openProject, getScenePath, createScene,
-  setRuntimeProject, setRuntimeTemplateDir, getRuntimeUrl, jumpToSentence, openInBrowser,
-  readFileText, writeFileText, deleteScene, renameScene,
+  parseScene,
+  serializeScene,
+  saveScene,
+  loadScene,
+  openProject,
+  getScenePath,
+  createScene,
+  setRuntimeProject,
+  setRuntimeTemplateDir,
+  getRuntimeUrl,
+  jumpToSentence,
+  openInBrowser,
+  readFileText,
+  writeFileText,
+  deleteScene,
+  renameScene,
   type ProjectInfo,
 } from '../lib/webgal-ipc';
 import { listCharacters, listCharacterNames } from '../lib/character-ipc';
@@ -73,17 +85,32 @@ export function StoryEditor() {
 
   // Editor state
   const {
-    nodes, setNodes, nodesRef,
-    selectedNode, setSelectedNode,
-    scriptSource, setScriptSource,
-    dirty, setDirty, dirtyRef,
-    saveStatus, setSaveStatus,
+    nodes,
+    setNodes,
+    nodesRef,
+    selectedNode,
+    setSelectedNode,
+    scriptSource,
+    setScriptSource,
+    dirty,
+    setDirty,
+    dirtyRef,
+    saveStatus,
+    setSaveStatus,
     clipboardNode,
     markDirty,
     pushHistory,
-    undo, redo,
-    insertNode, createUnlockNode, updateSelectedNode,
-    deleteSelectedNode, deleteNode, copyNode, cutNode, reorderNodes, pasteNode,
+    undo,
+    redo,
+    insertNode,
+    createUnlockNode,
+    updateSelectedNode,
+    deleteSelectedNode,
+    deleteNode,
+    copyNode,
+    cutNode,
+    reorderNodes,
+    pasteNode,
   } = useSceneDocument();
   const {
     headers: sceneHeaders,
@@ -108,7 +135,6 @@ export function StoryEditor() {
   const [charactersForAi, setCharactersForAi] = useState<Character[]>([]);
   const [characterColors, setCharacterColors] = useState<Record<string, string>>({});
 
-
   const loadCharacterColors = useCallback(async (projectPath: string) => {
     try {
       const refs = await listCharacterNames(projectPath);
@@ -132,7 +158,6 @@ export function StoryEditor() {
     }
     void loadCharacterColors(projectPath);
   }, [loadCharacterColors, projectPath]);
-
 
   const chooseInitialScene = useCallback((scenes: string[], requested: string | null): string => {
     if (requested && scenes.includes(requested)) return requested;
@@ -204,10 +229,9 @@ export function StoryEditor() {
           setProjectPath(storedPath);
           setProjectInfo(info);
           const initialSceneName = chooseInitialScene(info.scenes, requestedScene);
-          const sceneCandidates = Array.from(new Set([
-            initialSceneName,
-            ...info.scenes,
-          ])).filter(Boolean);
+          const sceneCandidates = Array.from(new Set([initialSceneName, ...info.scenes])).filter(
+            Boolean,
+          );
 
           let loadedInitialScene = false;
           for (const sceneName of sceneCandidates) {
@@ -215,27 +239,27 @@ export function StoryEditor() {
             try {
               const loaded = await loadScene(scenePath);
               setCurrentSceneName(sceneName);
-            // Restore sessionStorage draft left by assets-page navigation
-            const draftKey = `scene-draft-${projectId}-${sceneName}`;
-            const draftJson = sessionStorage.getItem(draftKey);
-            if (draftJson) {
-              try {
-                const draft = JSON.parse(draftJson) as WebGalNode[];
-                setNodes(draft);
-                const text = await serializeScene(draft);
-                setScriptSource(text);
-                setDirty(true);
-              } catch {
+              // Restore sessionStorage draft left by assets-page navigation
+              const draftKey = `scene-draft-${projectId}-${sceneName}`;
+              const draftJson = sessionStorage.getItem(draftKey);
+              if (draftJson) {
+                try {
+                  const draft = JSON.parse(draftJson) as WebGalNode[];
+                  setNodes(draft);
+                  const text = await serializeScene(draft);
+                  setScriptSource(text);
+                  setDirty(true);
+                } catch {
+                  setNodes(loaded);
+                  const text = await serializeScene(loaded);
+                  setScriptSource(text);
+                }
+                sessionStorage.removeItem(draftKey);
+              } else {
                 setNodes(loaded);
                 const text = await serializeScene(loaded);
                 setScriptSource(text);
               }
-              sessionStorage.removeItem(draftKey);
-            } else {
-              setNodes(loaded);
-              const text = await serializeScene(loaded);
-              setScriptSource(text);
-            }
               loadedInitialScene = true;
               break;
             } catch (e) {
@@ -291,32 +315,38 @@ export function StoryEditor() {
   // ---------------------------------------------------------------------------
   // 同步节点到脚本文本
   // ---------------------------------------------------------------------------
-  const jumpToNode = useCallback((index: number) => {
-    if (!currentSceneName) return;
-    void jumpToSentence(currentSceneName, index + 1).catch((e) =>
-      console.warn('[runtime] jumpToSentence failed:', e),
-    );
-  }, [currentSceneName]);
-
-  const syncSceneBackgroundCard = useCallback(async (sceneFile: string, sceneNodes: WebGalNode[]) => {
-    if (!projectPath) return;
-    try {
-      const backgroundAssets = await listAssets(projectPath, 'background');
-      const availableBackgrounds = new Set(backgroundAssets.map((asset) => asset.name));
-      const backgroundFilenames = extractSceneBackgroundAssets(sceneNodes);
-      if (backgroundFilenames.length === 0) return;
-      const metadata = await loadAssetMetadata(projectPath, projectId);
-      const next = syncSceneCardsFromBackgrounds(
-        metadata,
-        sceneFile,
-        backgroundFilenames,
-        availableBackgrounds,
+  const jumpToNode = useCallback(
+    (index: number) => {
+      if (!currentSceneName) return;
+      void jumpToSentence(currentSceneName, index + 1).catch((e) =>
+        console.warn('[runtime] jumpToSentence failed:', e),
       );
-      if (next !== metadata) await saveAssetMetadata(projectPath, next);
-    } catch (e) {
-      console.warn('[asset] sync scene background card failed:', e);
-    }
-  }, [projectId, projectPath]);
+    },
+    [currentSceneName],
+  );
+
+  const syncSceneBackgroundCard = useCallback(
+    async (sceneFile: string, sceneNodes: WebGalNode[]) => {
+      if (!projectPath) return;
+      try {
+        const backgroundAssets = await listAssets(projectPath, 'background');
+        const availableBackgrounds = new Set(backgroundAssets.map((asset) => asset.name));
+        const backgroundFilenames = extractSceneBackgroundAssets(sceneNodes);
+        if (backgroundFilenames.length === 0) return;
+        const metadata = await loadAssetMetadata(projectPath, projectId);
+        const next = syncSceneCardsFromBackgrounds(
+          metadata,
+          sceneFile,
+          backgroundFilenames,
+          availableBackgrounds,
+        );
+        if (next !== metadata) await saveAssetMetadata(projectPath, next);
+      } catch (e) {
+        console.warn('[asset] sync scene background card failed:', e);
+      }
+    },
+    [projectId, projectPath],
+  );
 
   // 场景背景卡片同步只在保存时进行（见 handleSave），避免用户逐字输入文件名
   // 时把 t / te / tes 等中间状态都建成卡片。
@@ -355,7 +385,8 @@ export function StoryEditor() {
       setDirty(false);
       sceneDraftCache.current.delete(currentSceneName);
       // Refresh header + scene-graph link entry for the saved scene
-      if (projectPath) void refreshSceneGraph(projectPath, projectInfo?.scenes ?? [currentSceneName]);
+      if (projectPath)
+        void refreshSceneGraph(projectPath, projectInfo?.scenes ?? [currentSceneName]);
       // Sync voice cards from the dialogue lines
       if (projectPath) {
         syncSceneVoiceCards(projectPath, currentSceneName).catch((e) =>
@@ -388,14 +419,17 @@ export function StoryEditor() {
   ]);
 
   // Guard navigation that would discard unsaved changes (back to home, window close)
-  const guardedNavigate = useCallback((action: () => void) => {
-    if (dirty) {
-      pendingActionRef.current = action;
-      setUnsavedConfirmOpen(true);
-    } else {
-      action();
-    }
-  }, [dirty]);
+  const guardedNavigate = useCallback(
+    (action: () => void) => {
+      if (dirty) {
+        pendingActionRef.current = action;
+        setUnsavedConfirmOpen(true);
+      } else {
+        action();
+      }
+    },
+    [dirty],
+  );
 
   const handleUnsavedSaveAndLeave = useCallback(async () => {
     const action = pendingActionRef.current;
@@ -437,15 +471,21 @@ export function StoryEditor() {
     } catch {
       return undefined;
     }
-    appWindow.onCloseRequested((event) => {
-      if (dirtyRef.current) {
-        event.preventDefault();
-        pendingActionRef.current = () => void appWindow.destroy();
-        setUnsavedConfirmOpen(true);
-      }
-    }).then((fn) => { unlisten = fn; });
-    return () => { unlisten?.(); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    appWindow
+      .onCloseRequested((event) => {
+        if (dirtyRef.current) {
+          event.preventDefault();
+          pendingActionRef.current = () => void appWindow.destroy();
+          setUnsavedConfirmOpen(true);
+        }
+      })
+      .then((fn) => {
+        unlisten = fn;
+      });
+    return () => {
+      unlisten?.();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Ctrl+S / Cmd+S shortcut
@@ -500,7 +540,9 @@ export function StoryEditor() {
   // Auto-save: periodic save when dirty.
   // Use refs to avoid recreating the interval on every dirty/handleSave change.
   const handleSaveRef = useRef(handleSave);
-  useEffect(() => { handleSaveRef.current = handleSave; }, [handleSave]);
+  useEffect(() => {
+    handleSaveRef.current = handleSave;
+  }, [handleSave]);
 
   useEffect(() => {
     if (!autoSaveEnabled || !projectPath) return;
@@ -516,9 +558,12 @@ export function StoryEditor() {
   }, [autoSaveEnabled, projectPath]);
 
   // Clear the export-toast dismissal timer on unmount.
-  useEffect(() => () => {
-    if (exportToastTimerRef.current) clearTimeout(exportToastTimerRef.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (exportToastTimerRef.current) clearTimeout(exportToastTimerRef.current);
+    },
+    [],
+  );
 
   // ---------------------------------------------------------------------------
   // Open project folder
@@ -575,47 +620,50 @@ export function StoryEditor() {
   // ---------------------------------------------------------------------------
   // Switch scene within project
   // ---------------------------------------------------------------------------
-  const handleSwitchScene = useCallback(async (sceneName: string) => {
-    if (!projectPath) return;
+  const handleSwitchScene = useCallback(
+    async (sceneName: string) => {
+      if (!projectPath) return;
 
-    // Stash current unsaved nodes in the in-memory draft cache
-    if (dirty && !aiPreviewingCurrentSceneRef.current) {
-      sceneDraftCache.current.set(currentSceneName, nodes);
-    } else if (aiPreviewingCurrentSceneRef.current) {
-      sceneDraftCache.current.delete(currentSceneName);
-    }
-
-    // Guard against out-of-order async results: a fast A→B→A switch must not
-    // let B's (slower) load overwrite A's. Only the latest token may commit.
-    const myToken = sceneLoadTokenRef.current + 1;
-    sceneLoadTokenRef.current = myToken;
-    setCurrentSceneName(sceneName);
-    const scenePath = await getScenePath(projectPath, sceneName);
-    try {
-      // Prefer a cached draft over the saved file
-      const draft = sceneDraftCache.current.get(sceneName);
-      if (draft) {
-        const text = await serializeScene(draft);
-        if (sceneLoadTokenRef.current !== myToken) return;
-        setNodes(draft);
-        setScriptSource(text);
-        setSelectedNode(null);
-        setDirty(true);
-      } else {
-        const loaded = await loadScene(scenePath);
-        const text = await serializeScene(loaded);
-        if (sceneLoadTokenRef.current !== myToken) return;
-        setNodes(loaded);
-        setScriptSource(text);
-        setSelectedNode(null);
-        setDirty(false);
+      // Stash current unsaved nodes in the in-memory draft cache
+      if (dirty && !aiPreviewingCurrentSceneRef.current) {
+        sceneDraftCache.current.set(currentSceneName, nodes);
+      } else if (aiPreviewingCurrentSceneRef.current) {
+        sceneDraftCache.current.delete(currentSceneName);
       }
-    } catch {
-      if (sceneLoadTokenRef.current !== myToken) return;
-      setNodes([]);
-      setScriptSource('');
-    }
-  }, [projectPath, currentSceneName, dirty, nodes]);
+
+      // Guard against out-of-order async results: a fast A→B→A switch must not
+      // let B's (slower) load overwrite A's. Only the latest token may commit.
+      const myToken = sceneLoadTokenRef.current + 1;
+      sceneLoadTokenRef.current = myToken;
+      setCurrentSceneName(sceneName);
+      const scenePath = await getScenePath(projectPath, sceneName);
+      try {
+        // Prefer a cached draft over the saved file
+        const draft = sceneDraftCache.current.get(sceneName);
+        if (draft) {
+          const text = await serializeScene(draft);
+          if (sceneLoadTokenRef.current !== myToken) return;
+          setNodes(draft);
+          setScriptSource(text);
+          setSelectedNode(null);
+          setDirty(true);
+        } else {
+          const loaded = await loadScene(scenePath);
+          const text = await serializeScene(loaded);
+          if (sceneLoadTokenRef.current !== myToken) return;
+          setNodes(loaded);
+          setScriptSource(text);
+          setSelectedNode(null);
+          setDirty(false);
+        }
+      } catch {
+        if (sceneLoadTokenRef.current !== myToken) return;
+        setNodes([]);
+        setScriptSource('');
+      }
+    },
+    [projectPath, currentSceneName, dirty, nodes],
+  );
 
   // Stable wrapper for child components (SceneGraph) so they can be memoized —
   // the underlying handleSwitchScene closes over `nodes`/`dirty` and changes
@@ -634,62 +682,71 @@ export function StoryEditor() {
     setNewSceneOpen(true);
   }, [projectPath]);
 
-  const handleCreateScene = useCallback(async (sceneName: string) => {
-    if (!projectPath) throw new Error('项目路径不可用');
-    const baseName = sceneName.replace(/\.txt$/i, '');
-    await createScene(projectPath, baseName);
-    const info = await openProject(projectPath);
-    setProjectInfo(info);
-    try {
-      const metadata = await loadAssetMetadata(projectPath, projectId);
-      const index = Object.keys(metadata.sceneCards ?? {}).length + 1;
-      const next = ensureSceneCard(metadata, sceneName, index);
-      if (next !== metadata) await saveAssetMetadata(projectPath, next);
-    } catch (error) {
-      console.error('Create scene card failed:', error);
-    }
-    await handleSwitchScene(sceneName);
-  }, [handleSwitchScene, projectId, projectPath]);
+  const handleCreateScene = useCallback(
+    async (sceneName: string) => {
+      if (!projectPath) throw new Error('项目路径不可用');
+      const baseName = sceneName.replace(/\.txt$/i, '');
+      await createScene(projectPath, baseName);
+      const info = await openProject(projectPath);
+      setProjectInfo(info);
+      try {
+        const metadata = await loadAssetMetadata(projectPath, projectId);
+        const index = Object.keys(metadata.sceneCards ?? {}).length + 1;
+        const next = ensureSceneCard(metadata, sceneName, index);
+        if (next !== metadata) await saveAssetMetadata(projectPath, next);
+      } catch (error) {
+        console.error('Create scene card failed:', error);
+      }
+      await handleSwitchScene(sceneName);
+    },
+    [handleSwitchScene, projectId, projectPath],
+  );
 
-  const handleDeleteScene = useCallback(async (sceneName: string) => {
-    if (!projectPath) return;
-    const ok = window.confirm(`确定删除场景 "${sceneName}" 吗？此操作不可恢复。`);
-    if (!ok) return;
-    try {
-      const path = await getScenePath(projectPath, sceneName);
-      await deleteScene(path);
-      // If deleting the current scene, switch to another
-      if (sceneName === currentSceneName) {
-        const info = await openProject(projectPath);
-        const remaining = info.scenes.filter((s) => s !== sceneName);
-        if (remaining.length > 0) {
-          await handleSwitchScene(remaining[0]);
+  const handleDeleteScene = useCallback(
+    async (sceneName: string) => {
+      if (!projectPath) return;
+      const ok = window.confirm(`确定删除场景 "${sceneName}" 吗？此操作不可恢复。`);
+      if (!ok) return;
+      try {
+        const path = await getScenePath(projectPath, sceneName);
+        await deleteScene(path);
+        // If deleting the current scene, switch to another
+        if (sceneName === currentSceneName) {
+          const info = await openProject(projectPath);
+          const remaining = info.scenes.filter((s) => s !== sceneName);
+          if (remaining.length > 0) {
+            await handleSwitchScene(remaining[0]);
+          }
         }
+        void refreshProjectInfo();
+      } catch (e) {
+        console.error('Delete scene failed:', e);
+        alert(`删除场景失败: ${e}`);
       }
-      void refreshProjectInfo();
-    } catch (e) {
-      console.error('Delete scene failed:', e);
-      alert(`删除场景失败: ${e}`);
-    }
-  }, [projectPath, currentSceneName, handleSwitchScene, refreshProjectInfo]);
+    },
+    [projectPath, currentSceneName, handleSwitchScene, refreshProjectInfo],
+  );
 
-  const handleRenameScene = useCallback(async (oldName: string) => {
-    if (!projectPath) return;
-    const newName = prompt(`重命名 "${oldName}" 为:`, oldName.replace(/\.txt$/, ''));
-    if (!newName || newName === oldName) return;
-    const finalName = newName.endsWith('.txt') ? newName : `${newName}.txt`;
-    try {
-      const path = await getScenePath(projectPath, oldName);
-      await renameScene(path, finalName);
-      void refreshProjectInfo();
-      if (oldName === currentSceneName) {
-        setCurrentSceneName(finalName);
+  const handleRenameScene = useCallback(
+    async (oldName: string) => {
+      if (!projectPath) return;
+      const newName = prompt(`重命名 "${oldName}" 为:`, oldName.replace(/\.txt$/, ''));
+      if (!newName || newName === oldName) return;
+      const finalName = newName.endsWith('.txt') ? newName : `${newName}.txt`;
+      try {
+        const path = await getScenePath(projectPath, oldName);
+        await renameScene(path, finalName);
+        void refreshProjectInfo();
+        if (oldName === currentSceneName) {
+          setCurrentSceneName(finalName);
+        }
+      } catch (e) {
+        console.error('Rename scene failed:', e);
+        alert(`重命名场景失败: ${e}`);
       }
-    } catch (e) {
-      console.error('Rename scene failed:', e);
-      alert(`重命名场景失败: ${e}`);
-    }
-  }, [projectPath, currentSceneName, refreshProjectInfo]);
+    },
+    [projectPath, currentSceneName, refreshProjectInfo],
+  );
 
   // ---------------------------------------------------------------------------
   // Import / Export / Apply script
@@ -716,16 +773,20 @@ export function StoryEditor() {
       console.log('开始导出场景:', currentSceneName, '节点数:', nodes.length);
 
       // Ensure filename has .txt extension
-      const filename = currentSceneName.endsWith('.txt') ? currentSceneName : `${currentSceneName}.txt`;
+      const filename = currentSceneName.endsWith('.txt')
+        ? currentSceneName
+        : `${currentSceneName}.txt`;
 
       // Let user choose where to save
       const savePath = await saveDialog({
         title: '导出场景',
         defaultPath: filename,
-        filters: [{
-          name: 'WebGAL 场景文件',
-          extensions: ['txt']
-        }]
+        filters: [
+          {
+            name: 'WebGAL 场景文件',
+            extensions: ['txt'],
+          },
+        ],
       });
 
       if (!savePath) {
@@ -778,7 +839,8 @@ export function StoryEditor() {
     markDirty();
   }, [scriptSource, markDirty]);
 
-  const projectName = projectInfo?.config.Game_name || projectPath?.split('/').pop() || '未命名项目';
+  const projectName =
+    projectInfo?.config.Game_name || projectPath?.split('/').pop() || '未命名项目';
 
   const reloadAfterSnapshot = useCallback(async () => {
     if (!projectPath) return;
@@ -806,10 +868,7 @@ export function StoryEditor() {
     setSelectedNode,
   ]);
 
-  const ensureSaved = useCallback(
-    async () => !dirty || handleSave(),
-    [dirty, handleSave],
-  );
+  const ensureSaved = useCallback(async () => !dirty || handleSave(), [dirty, handleSave]);
 
   const {
     open: projectMetadataOpen,
@@ -867,14 +926,7 @@ export function StoryEditor() {
     const next = new URLSearchParams(searchParams);
     next.delete('action');
     setSearchParams(next, { replace: true });
-  }, [
-    handleExportProject,
-    handleOpenRuntime,
-    loading,
-    projectPath,
-    searchParams,
-    setSearchParams,
-  ]);
+  }, [handleExportProject, handleOpenRuntime, loading, projectPath, searchParams, setSearchParams]);
 
   const aiAgent = useAiAgent({
     projectId,
@@ -926,12 +978,20 @@ export function StoryEditor() {
       });
       return;
     }
-    if (set?.status === 'reverted' && set.edits.some((edit) => edit.kind === 'scene' && edit.file === currentSceneName)) {
+    if (
+      set?.status === 'reverted' &&
+      set.edits.some((edit) => edit.kind === 'scene' && edit.file === currentSceneName)
+    ) {
       sceneDraftCache.current.delete(currentSceneName);
     }
   }, [aiPreviewEntries, aiAgent.pendingChangeSet, currentSceneName]);
 
-  const handleAiSend = useCallback((text: string) => { void aiAgent.sendPrompt(text); }, [aiAgent.sendPrompt]);
+  const handleAiSend = useCallback(
+    (text: string) => {
+      void aiAgent.sendPrompt(text);
+    },
+    [aiAgent.sendPrompt],
+  );
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
@@ -986,147 +1046,144 @@ export function StoryEditor() {
         />
 
         <div className="story-os-workspace flex flex-col">
-        {viewMode === 'worldline' ? (
-          <FullScreenWorldline
-            scenes={projectInfo?.scenes ?? [currentSceneName]}
-            currentSceneName={currentSceneName}
-            sceneHeaders={sceneHeaders}
-            sceneLinkMap={sceneLinkMap}
-            nodes={nodes}
-            selectedNode={selectedNode}
-            onSelectNode={setSelectedNode}
-            onOpenScene={stableSwitchScene}
-            onClose={() => {
-              const next = new URLSearchParams(searchParams);
-              next.delete('view');
-              setSearchParams(next, { replace: true });
-            }}
-            characterColors={characterColors}
-            onNewScene={handleNewScene}
-            onDeleteScene={handleDeleteScene}
-            onRenameScene={handleRenameScene}
-            onOpenSceneManager={() => setSceneManagerOpen(true)}
-            onDeleteNode={deleteNode}
-            onJumpToIndex={jumpToNode}
-          />
-        ) : (
-          <>
-        {/* Main Content */}
-        <div className="relative flex-1 flex overflow-hidden">
-          <SceneWorldlinePanel
-            scenes={projectInfo?.scenes ?? [currentSceneName]}
-            currentSceneName={currentSceneName}
-            sceneHeaders={sceneHeaders}
-            sceneLinkMap={sceneLinkMap}
-            nodes={nodes}
-            selectedNode={selectedNode}
-            onSelectNode={handleSelectNodeWithScroll}
-            onOpenScene={stableSwitchScene}
-            onOpenSceneManager={() => setSceneManagerOpen(true)}
-            characterColors={characterColors}
-            onDeleteNode={deleteNode}
-            onJumpToIndex={jumpToNode}
-          />
-
-          {/* Center - Script Command Stream / Script Source */}
-          {showScript ? (
-            <div className="flex-1 flex flex-col bg-background/50">
-              <div className="p-3 border-b border-border flex items-center justify-between">
-                <span className="text-sm text-muted-foreground font-mono-family">
-                  WebGAL 脚本编辑器 - {currentSceneName}
-                </span>
-                <button
-                  onClick={handleApplyScript}
-                  className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground hover:opacity-90 transition-all text-sm"
-                >
-                  应用更改
-                </button>
-              </div>
-              <textarea
-                value={scriptSource}
-                onChange={(e) => {
-                  setScriptSource(e.target.value);
-                  markDirty();
-                }}
-                className="flex-1 p-4 bg-transparent resize-none focus:outline-none text-sm leading-relaxed font-mono-family"
-                spellCheck={false}
-                aria-label="WebGAL 脚本编辑器"
-              />
-            </div>
-          ) : (
-            <ScriptCommandStream
-              nodes={nodes}
-              selectedNode={selectedNode}
+          {viewMode === 'worldline' ? (
+            <FullScreenWorldline
+              scenes={projectInfo?.scenes ?? [currentSceneName]}
               currentSceneName={currentSceneName}
               sceneHeaders={sceneHeaders}
+              sceneLinkMap={sceneLinkMap}
+              nodes={nodes}
+              selectedNode={selectedNode}
               onSelectNode={setSelectedNode}
-              onInsertNode={insertNode}
-              onDeleteNode={deleteNode}
-              onCopyNode={copyNode}
-              onCutNode={cutNode}
-              onPasteNode={pasteNode}
-              onReorderNodes={reorderNodes}
-              onJumpToIndex={jumpToNode}
-              onCreateUnlockNode={createUnlockNode}
-              clipboardNode={clipboardNode}
+              onOpenScene={stableSwitchScene}
+              onClose={() => {
+                const next = new URLSearchParams(searchParams);
+                next.delete('view');
+                setSearchParams(next, { replace: true });
+              }}
               characterColors={characterColors}
-              characters={charactersForAi}
-              searchQuery={commandSearchQuery}
-              previewEntries={aiPreviewEntries}
-              projectPath={projectPath ?? undefined}
+              onNewScene={handleNewScene}
+              onDeleteScene={handleDeleteScene}
+              onRenameScene={handleRenameScene}
+              onOpenSceneManager={() => setSceneManagerOpen(true)}
+              onDeleteNode={deleteNode}
+              onJumpToIndex={jumpToNode}
             />
-          )}
+          ) : (
+            <>
+              {/* Main Content */}
+              <div className="relative flex-1 flex overflow-hidden">
+                <SceneWorldlinePanel
+                  scenes={projectInfo?.scenes ?? [currentSceneName]}
+                  currentSceneName={currentSceneName}
+                  sceneHeaders={sceneHeaders}
+                  sceneLinkMap={sceneLinkMap}
+                  nodes={nodes}
+                  selectedNode={selectedNode}
+                  onSelectNode={handleSelectNodeWithScroll}
+                  onOpenScene={stableSwitchScene}
+                  onOpenSceneManager={() => setSceneManagerOpen(true)}
+                  characterColors={characterColors}
+                  onDeleteNode={deleteNode}
+                  onJumpToIndex={jumpToNode}
+                />
 
-          <AiAssistantPanel
-            aiAgent={aiAgent}
-            projectPath={projectPath}
-            sceneHeaders={sceneHeaders}
-            onOpenSettings={() => setAiSettingsOpen(true)}
-            onSend={handleAiSend}
-          />
+                {/* Center - Script Command Stream / Script Source */}
+                {showScript ? (
+                  <div className="flex-1 flex flex-col bg-background/50">
+                    <div className="p-3 border-b border-border flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground font-mono-family">
+                        WebGAL 脚本编辑器 - {currentSceneName}
+                      </span>
+                      <button
+                        onClick={handleApplyScript}
+                        className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground hover:opacity-90 transition-all text-sm"
+                      >
+                        应用更改
+                      </button>
+                    </div>
+                    <textarea
+                      value={scriptSource}
+                      onChange={(e) => {
+                        setScriptSource(e.target.value);
+                        markDirty();
+                      }}
+                      className="flex-1 p-4 bg-transparent resize-none focus:outline-none text-sm leading-relaxed font-mono-family"
+                      spellCheck={false}
+                      aria-label="WebGAL 脚本编辑器"
+                    />
+                  </div>
+                ) : (
+                  <ScriptCommandStream
+                    nodes={nodes}
+                    selectedNode={selectedNode}
+                    currentSceneName={currentSceneName}
+                    sceneHeaders={sceneHeaders}
+                    onSelectNode={setSelectedNode}
+                    onInsertNode={insertNode}
+                    onDeleteNode={deleteNode}
+                    onCopyNode={copyNode}
+                    onCutNode={cutNode}
+                    onPasteNode={pasteNode}
+                    onReorderNodes={reorderNodes}
+                    onJumpToIndex={jumpToNode}
+                    onCreateUnlockNode={createUnlockNode}
+                    clipboardNode={clipboardNode}
+                    characterColors={characterColors}
+                    characters={charactersForAi}
+                    searchQuery={commandSearchQuery}
+                    previewEntries={aiPreviewEntries}
+                    projectPath={projectPath ?? undefined}
+                  />
+                )}
 
-          {selectedNode && !showScript && (
-            <div className="absolute bottom-0 right-80 top-0 z-30 w-80 border-l border-border bg-surface-container-lowest shadow-[-8px_0_24px_var(--shadow-soft)]">
-              <DetailPanel
-                node={selectedNode}
-                onUpdateNode={updateSelectedNode}
-                onDeleteNode={deleteSelectedNode}
-                onClose={() => setSelectedNode(null)}
-                characterNames={charactersForAi.map((character) => character.name)}
-                projectPath={projectPath ?? undefined}
-                characters={charactersForAi}
-                projectId={projectId}
-                scenes={projectInfo?.scenes ?? []}
-                sceneHeaders={sceneHeaders}
+                <AiAssistantPanel
+                  aiAgent={aiAgent}
+                  projectPath={projectPath}
+                  sceneHeaders={sceneHeaders}
+                  onOpenSettings={() => setAiSettingsOpen(true)}
+                  onSend={handleAiSend}
+                />
+
+                {selectedNode && !showScript && (
+                  <div className="absolute bottom-0 right-80 top-0 z-30 w-80 border-l border-border bg-surface-container-lowest shadow-[-8px_0_24px_var(--shadow-soft)]">
+                    <DetailPanel
+                      node={selectedNode}
+                      onUpdateNode={updateSelectedNode}
+                      onDeleteNode={deleteSelectedNode}
+                      onClose={() => setSelectedNode(null)}
+                      characterNames={charactersForAi.map((character) => character.name)}
+                      projectPath={projectPath ?? undefined}
+                      characters={charactersForAi}
+                      projectId={projectId}
+                      scenes={projectInfo?.scenes ?? []}
+                      sceneHeaders={sceneHeaders}
+                    />
+                  </div>
+                )}
+              </div>
+
+              <PerformanceTimeline
+                nodes={nodes}
+                selectedNodeId={selectedNode?.id}
+                onSelectNode={(id) => {
+                  const found = nodes.find((node) => node.id === id);
+                  if (found) setSelectedNode(found);
+                }}
               />
-            </div>
+              <footer className="flex h-8 shrink-0 items-center justify-between border-t border-outline-variant bg-surface-container px-4 text-[10px] text-on-surface-variant/40">
+                <div className="flex items-center gap-4">
+                  <span>{scriptSource.length.toLocaleString()} 字</span>
+                  <span>约 {Math.max(1, Math.ceil(scriptSource.length / 380))} 分钟阅读量</span>
+                  <span className="h-3 w-px bg-outline-variant/30" />
+                  <span>UTF-8 | LF | Engine: WebGAL</span>
+                </div>
+              </footer>
+            </>
           )}
         </div>
 
-          <PerformanceTimeline
-            nodes={nodes}
-            selectedNodeId={selectedNode?.id}
-            onSelectNode={(id) => {
-              const found = nodes.find((node) => node.id === id);
-              if (found) setSelectedNode(found);
-            }}
-          />
-          <footer className="flex h-8 shrink-0 items-center justify-between border-t border-outline-variant bg-surface-container px-4 text-[10px] text-on-surface-variant/40">
-            <div className="flex items-center gap-4">
-              <span>{scriptSource.length.toLocaleString()} 字</span>
-              <span>约 {Math.max(1, Math.ceil(scriptSource.length / 380))} 分钟阅读量</span>
-              <span className="h-3 w-px bg-outline-variant/30" />
-              <span>UTF-8 | LF | Engine: WebGAL</span>
-            </div>
-          </footer>
-          </>
-        )}
-        </div>
-
-        <AiSettingsDialog
-          open={aiSettingsOpen}
-          onClose={() => setAiSettingsOpen(false)}
-        />
+        <AiSettingsDialog open={aiSettingsOpen} onClose={() => setAiSettingsOpen(false)} />
 
         <ProjectMetadataDialog
           open={projectMetadataOpen}
@@ -1182,7 +1239,12 @@ export function StoryEditor() {
           onApplyRuntimeTemplateDir={(dir) => setRuntimeTemplateDir(dir)}
         />
 
-        <AlertDialog open={unsavedConfirmOpen} onOpenChange={(open) => { if (!open) handleUnsavedCancel(); }}>
+        <AlertDialog
+          open={unsavedConfirmOpen}
+          onOpenChange={(open) => {
+            if (!open) handleUnsavedCancel();
+          }}
+        >
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>有未保存的更改</AlertDialogTitle>
@@ -1193,7 +1255,9 @@ export function StoryEditor() {
             <AlertDialogFooter>
               <AlertDialogCancel onClick={handleUnsavedCancel}>取消</AlertDialogCancel>
               <AlertDialogAction
-                onClick={() => { void handleUnsavedSaveAndLeave(); }}
+                onClick={() => {
+                  void handleUnsavedSaveAndLeave();
+                }}
                 className="bg-primary text-primary-foreground"
               >
                 保存并离开
@@ -1207,7 +1271,6 @@ export function StoryEditor() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
-
       </div>
     </DndProvider>
   );

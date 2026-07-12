@@ -96,22 +96,46 @@ describe('resolveFigurePatchText', () => {
       { emotion: '生气', file: '' },
     ],
   };
-  const figure = (name: string): AssetInfo => ({ name, path: `/p/${name}`, category: 'figure', size: 1, extension: 'png' });
+  const figure = (name: string): AssetInfo => ({
+    name,
+    path: `/p/${name}`,
+    category: 'figure',
+    size: 1,
+    extension: 'png',
+  });
   const variantAssets = [figure('char_shizuka/静香_生气_1700000000.png')];
 
   it('fills/corrects the file from figureCharacter + figureEmotion flags', () => {
-    const out = resolveFigurePatchText('changeFigure:placeholder -figureCharacter=静香 -figureEmotion=默认 -left -next;', [SHIZUKA], []);
-    expect(out).toBe('changeFigure:shizuka_default.png -figureCharacter=静香 -figureEmotion=默认 -left -next;');
+    const out = resolveFigurePatchText(
+      'changeFigure:placeholder -figureCharacter=静香 -figureEmotion=默认 -left -next;',
+      [SHIZUKA],
+      [],
+    );
+    expect(out).toBe(
+      'changeFigure:shizuka_default.png -figureCharacter=静香 -figureEmotion=默认 -left -next;',
+    );
   });
 
   it('resolves a variant emotion to its qualified subdir path', () => {
-    const out = resolveFigurePatchText('changeFigure:none -figureCharacter=静香 -figureEmotion=生气 -next;', [SHIZUKA], variantAssets);
-    expect(out).toBe('changeFigure:char_shizuka/静香_生气_1700000000.png -figureCharacter=静香 -figureEmotion=生气 -next;');
+    const out = resolveFigurePatchText(
+      'changeFigure:none -figureCharacter=静香 -figureEmotion=生气 -next;',
+      [SHIZUKA],
+      variantAssets,
+    );
+    expect(out).toBe(
+      'changeFigure:char_shizuka/静香_生气_1700000000.png -figureCharacter=静香 -figureEmotion=生气 -next;',
+    );
   });
 
   it('treats a non-file asset token as the emotion when figureCharacter is present', () => {
-    const out = resolveFigurePatchText('changeFigure:生气 -figureCharacter=静香 -left -next;', [SHIZUKA], variantAssets);
-    expect(out).toBe('changeFigure:char_shizuka/静香_生气_1700000000.png -figureCharacter=静香 -left -next -figureEmotion=生气;');
+    const out = resolveFigurePatchText(
+      'changeFigure:生气 -figureCharacter=静香 -left -next;',
+      [SHIZUKA],
+      variantAssets,
+    );
+    expect(out).toBe(
+      'changeFigure:char_shizuka/静香_生气_1700000000.png -figureCharacter=静香 -left -next -figureEmotion=生气;',
+    );
   });
 
   it('does not treat a real filename as emotion when figureEmotion is missing', () => {
@@ -130,9 +154,12 @@ describe('resolveFigurePatchText', () => {
   });
 
   it('only rewrites changeFigure lines, leaving dialogue/other commands alone', () => {
-    const text = '静香:你好;\nchangeFigure:bad -figureCharacter=静香 -figureEmotion=默认 -next;\nchangeBg:room.png;';
+    const text =
+      '静香:你好;\nchangeFigure:bad -figureCharacter=静香 -figureEmotion=默认 -next;\nchangeBg:room.png;';
     const out = resolveFigurePatchText(text, [SHIZUKA], []);
-    expect(out).toBe('静香:你好;\nchangeFigure:shizuka_default.png -figureCharacter=静香 -figureEmotion=默认 -next;\nchangeBg:room.png;');
+    expect(out).toBe(
+      '静香:你好;\nchangeFigure:shizuka_default.png -figureCharacter=静香 -figureEmotion=默认 -next;\nchangeBg:room.png;',
+    );
   });
 });
 
@@ -147,12 +174,27 @@ describe('stageFigureInsert', () => {
       { emotion: '生气', file: '' },
     ],
   };
-  const figure = (name: string): AssetInfo => ({ name, path: `/p/${name}`, category: 'figure', size: 1, extension: 'png' });
+  const figure = (name: string): AssetInfo => ({
+    name,
+    path: `/p/${name}`,
+    category: 'figure',
+    size: 1,
+    extension: 'png',
+  });
 
   it('builds a valid scene edit from character + emotion intent', async () => {
     invokeMock.mockImplementation(async (command, args) => {
-      if (command === 'parse_scene') return args.source.split('\n').map((line: string) => ({ id: line, type: 'comment', content: line, flags: [], position: { x: 0, y: 0 }, connections: [] }));
-      if (command === 'serialize_scene') return args.nodes.map((node: { content: string }) => node.content).join('\n');
+      if (command === 'parse_scene')
+        return args.source.split('\n').map((line: string) => ({
+          id: line,
+          type: 'comment',
+          content: line,
+          flags: [],
+          position: { x: 0, y: 0 },
+          connections: [],
+        }));
+      if (command === 'serialize_scene')
+        return args.nodes.map((node: { content: string }) => node.content).join('\n');
       throw new Error(`unexpected invoke: ${command}`);
     });
 
@@ -181,17 +223,19 @@ describe('stageFigureInsert', () => {
   });
 
   it('surfaces a clear error when the requested emotion is not configured', async () => {
-    await expect(stageFigureInsert(
-      undefined,
-      {
-        tool: 'insert_figure',
-        file: 'start.txt',
-        afterLine: 'end',
-        character: '静香',
-        emotion: '困惑',
-      },
-      makeCtx({ currentScriptSource: ':开场;', characters: [SHIZUKA] }),
-    )).rejects.toThrow('没有表情');
+    await expect(
+      stageFigureInsert(
+        undefined,
+        {
+          tool: 'insert_figure',
+          file: 'start.txt',
+          afterLine: 'end',
+          character: '静香',
+          emotion: '困惑',
+        },
+        makeCtx({ currentScriptSource: ':开场;', characters: [SHIZUKA] }),
+      ),
+    ).rejects.toThrow('没有表情');
   });
 });
 
@@ -199,7 +243,12 @@ describe('scene structure tools', () => {
   it('sets scene header without requiring the model to patch comment lines', async () => {
     const edit = await stageSceneHeaderEdit(
       undefined,
-      { tool: 'set_scene_header', file: 'start.txt', chapter: '第一章', outline: '雨夜重逢' },
+      {
+        tool: 'set_scene_header',
+        file: 'start.txt',
+        chapter: '第一章',
+        outline: '雨夜重逢',
+      },
       makeCtx({ currentScriptSource: ':开场;' }),
     );
 
@@ -252,15 +301,24 @@ describe('scene structure tools', () => {
   });
 
   it('rejects missing background refs without an asset plan', async () => {
-    await expect(stageSceneEdit(
-      undefined,
-      {
-        tool: 'edit_scene',
-        file: 'start.txt',
-        patches: [{ type: 'insert', file: 'start.txt', afterLine: 'end', text: 'changeBg:fake_room.png -next;' }],
-      },
-      makeCtx({ currentScriptSource: ':开场;' }),
-    )).rejects.toThrow('plan_assets');
+    await expect(
+      stageSceneEdit(
+        undefined,
+        {
+          tool: 'edit_scene',
+          file: 'start.txt',
+          patches: [
+            {
+              type: 'insert',
+              file: 'start.txt',
+              afterLine: 'end',
+              text: 'changeBg:fake_room.png -next;',
+            },
+          ],
+        },
+        makeCtx({ currentScriptSource: ':开场;' }),
+      ),
+    ).rejects.toThrow('plan_assets');
   });
 
   it('creates branch targets with optional initial content', async () => {
@@ -271,7 +329,12 @@ describe('scene structure tools', () => {
         file: 'start.txt',
         afterLine: 'end',
         choices: [
-          { text: '追上去', targetScene: 'chase', chapter: '追逐', contentLines: [{ type: 'narrator', text: '他冲进雨幕。' }] },
+          {
+            text: '追上去',
+            targetScene: 'chase',
+            chapter: '追逐',
+            contentLines: [{ type: 'narrator', text: '他冲进雨幕。' }],
+          },
           { text: '留下来', targetScene: 'stay', outline: '选择等待' },
         ],
       },
@@ -296,7 +359,11 @@ describe('stageCharacterEdit', () => {
   it('applies valid string and string[] fields', () => {
     const edit = stageCharacterEdit(
       undefined,
-      { tool: 'edit_character', id: 'c1', partial: { personality: '内向', aliases: ['阿明'] } },
+      {
+        tool: 'edit_character',
+        id: 'c1',
+        partial: { personality: '内向', aliases: ['阿明'] },
+      },
       makeCtx(),
     );
     expect(edit.after.personality).toBe('内向');
@@ -311,14 +378,19 @@ describe('stageCharacterEdit', () => {
         tool: 'edit_character',
         id: 'c1',
         // hacked: unknown field, wrong type for aliases, attempt to repoint id
-        partial: { evil: 'x', aliases: 'not-an-array', id: 'c2', personality: 42 } as Record<string, unknown>,
+        partial: {
+          evil: 'x',
+          aliases: 'not-an-array',
+          id: 'c2',
+          personality: 42,
+        } as Record<string, unknown>,
       },
       makeCtx(),
     );
     expect((edit.after as Record<string, unknown>).evil).toBeUndefined();
-    expect(edit.after.id).toBe('c1');           // id never changes
+    expect(edit.after.id).toBe('c1'); // id never changes
     expect(edit.after.aliases).toEqual(['明明']); // wrong type ignored, base kept
-    expect(edit.after.personality).toBe('开朗');  // number ignored, base kept
+    expect(edit.after.personality).toBe('开朗'); // number ignored, base kept
     expect(edit.changedFields).toEqual([]);
   });
 });
@@ -335,7 +407,14 @@ describe('stageCharacterSpritesPlan', () => {
           { emotion: '微笑', prompt: 'gentle smile' },
         ],
       },
-      makeCtx({ characters: [{ ...BASE_CHARACTER, sprites: [{ emotion: '默认', file: 'old.png' }] }] }),
+      makeCtx({
+        characters: [
+          {
+            ...BASE_CHARACTER,
+            sprites: [{ emotion: '默认', file: 'old.png' }],
+          },
+        ],
+      }),
     );
 
     expect(edit.after.sprites).toEqual([
@@ -417,7 +496,11 @@ describe('stageCreateCharacterEdit', () => {
           referenceImages: ['fake.png'],
           defaultVoice: 'fake.wav',
           sprites: [
-            { emotion: '微笑', prompt: 'gentle smile', file: 'should-not-pass.png' },
+            {
+              emotion: '微笑',
+              prompt: 'gentle smile',
+              file: 'should-not-pass.png',
+            },
             { emotion: '', prompt: 'ignored' },
             { emotion: '微笑', prompt: 'duplicate' },
           ],
@@ -446,10 +529,7 @@ describe('stageCreateCharacterEdit', () => {
 
   it('throws when the character name already exists', () => {
     expect(() =>
-      stageCreateCharacterEdit(
-        { tool: 'create_character', draft: { name: '小明' } },
-        makeCtx(),
-      ),
+      stageCreateCharacterEdit({ tool: 'create_character', draft: { name: '小明' } }, makeCtx()),
     ).toThrow(StageError);
   });
 });
@@ -460,7 +540,11 @@ describe('stageMemoryEdit', () => {
       undefined,
       {
         tool: 'edit_memory',
-        partial: { worldSetting: '魔法世界', junk: 'x', writingStyle: 7 } as Record<string, unknown>,
+        partial: {
+          worldSetting: '魔法世界',
+          junk: 'x',
+          writingStyle: 7,
+        } as Record<string, unknown>,
       },
       makeCtx(),
     );
