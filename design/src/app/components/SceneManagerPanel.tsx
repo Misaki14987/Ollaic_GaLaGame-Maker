@@ -5,7 +5,7 @@ import {
   updateSceneHeader,
   type ProjectInfo,
   type SceneHeader,
-} from '../lib/webgal-ipc';
+} from '@/app/lib/webgal-ipc';
 
 export interface SceneManagerPanelProps {
   open: boolean;

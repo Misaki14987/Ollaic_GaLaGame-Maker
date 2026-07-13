@@ -10,7 +10,7 @@ import {
   Save,
   X,
 } from 'lucide-react';
-import type { ExportValidationIssue, ProjectMetadata } from '../lib/webgal-ipc';
+import type { ExportValidationIssue, ProjectMetadata } from '@/app/lib/webgal-ipc';
 
 export type ExportTaskStatus = 'idle' | 'savingMetadata' | 'exporting' | 'succeeded' | 'failed';
 

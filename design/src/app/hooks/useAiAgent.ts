@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { aiChatTurn, appendAiAgentTrace, getAiConfig, type AiChatMessage } from '../lib/ai-ipc';
-import { listAllAssets, type AssetInfo } from '../lib/assets-ipc';
+import { aiChatTurn, appendAiAgentTrace, getAiConfig, type AiChatMessage } from '@/app/lib/ai-ipc';
+import { listAllAssets, type AssetInfo } from '@/app/lib/assets-ipc';
 import {
   extractSceneBackgroundAssets,
   loadAssetMetadata,
   saveAssetMetadata,
   type AssetMetadata,
   syncSceneCardsFromBackgrounds,
-} from '../lib/asset-metadata';
-import { createCharacter, deleteCharacter, updateCharacter } from '../lib/character-ipc';
-import type { Character } from '../lib/character-types';
+} from '@/app/lib/asset-metadata';
+import { createCharacter, deleteCharacter, updateCharacter } from '@/app/lib/character-ipc';
+import type { Character } from '@/app/lib/character-types';
 import {
   describeEdit,
   stageCharacterEdit,
@@ -35,23 +35,23 @@ import {
   type SceneEdit,
   type StageError,
   type StagingContext,
-} from '../lib/change-set';
-import { extractEditorResponse } from '../lib/editor-patch';
-import { getTool, toolDefs, type StagedWrite } from '../lib/ai-tools';
+} from '@/app/lib/change-set';
+import { extractEditorResponse } from '@/app/lib/editor-patch';
+import { getTool, toolDefs, type StagedWrite } from '@/app/lib/ai-tools';
 import {
   buildMemoryContext,
   emptyProjectMemory,
   readProjectMemory,
   saveProjectMemory,
   type ProjectMemory,
-} from '../lib/project-memory';
+} from '@/app/lib/project-memory';
 import {
   buildAssetContext,
   buildNumberedScriptContext,
   hasAssetContextTruncation,
   truncateContextMessages,
   type MissingAssetIssue,
-} from '../lib/story-agent';
+} from '@/app/lib/story-agent';
 import {
   createScene,
   getScenePath,
@@ -62,14 +62,14 @@ import {
   sceneDisplayName,
   updateSceneHeader,
   type SceneHeader,
-} from '../lib/webgal-ipc';
-import type { WebGalNode } from '../lib/webgal-types';
+} from '@/app/lib/webgal-ipc';
+import type { WebGalNode } from '@/app/lib/webgal-types';
 import {
   useChatSession,
   type AssistantStep,
   type ChatMessage,
   type StepToolCall,
-} from './useChatSession';
+} from '@/app/hooks/useChatSession';
 
 export type AiPanelStatus =
   'idle' | 'generating' | 'tooling' | 'pending' | 'accepted' | 'reverted' | 'conflict' | 'error';

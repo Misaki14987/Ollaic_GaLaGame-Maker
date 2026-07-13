@@ -10,12 +10,12 @@ import {
   Wand2,
   X,
 } from 'lucide-react';
-import type { SceneHeader } from '../../lib/webgal-ipc';
-import { useAiAgent } from '../../hooks/useAiAgent';
-import { AiMemoryPanel } from '../AiMemoryPanel';
-import { AiMessageBubble } from '../AiMessageBubble';
-import { ChangeSetCard } from '../AiPendingCard';
-import { ConflictCard, ErrorCard } from '../AiStatusCard';
+import type { SceneHeader } from '@/app/lib/webgal-ipc';
+import { useAiAgent } from '@/app/hooks/useAiAgent';
+import { AiMemoryPanel } from '@/app/components/AiMemoryPanel';
+import { AiMessageBubble } from '@/app/components/AiMessageBubble';
+import { ChangeSetCard } from '@/app/components/AiPendingCard';
+import { ConflictCard, ErrorCard } from '@/app/components/AiStatusCard';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -23,7 +23,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '../ui/dropdown-menu';
+} from '@/app/components/ui/dropdown-menu';
 import {
   Dialog,
   DialogContent,
@@ -31,7 +31,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '../ui/dialog';
+} from '@/app/components/ui/dialog';
 
 interface AiAssistantPanelProps {
   aiAgent: ReturnType<typeof useAiAgent>;

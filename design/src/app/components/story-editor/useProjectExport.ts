@@ -4,8 +4,8 @@ import {
   readProjectMetadata,
   saveProjectMetadata,
   type ProjectMetadata,
-} from '../../lib/webgal-ipc';
-import type { ExportTaskState } from '../ProjectMetadataDialog';
+} from '@/app/lib/webgal-ipc';
+import type { ExportTaskState } from '@/app/components/ProjectMetadataDialog';
 
 const EMPTY_METADATA: ProjectMetadata = {
   synopsis: '',

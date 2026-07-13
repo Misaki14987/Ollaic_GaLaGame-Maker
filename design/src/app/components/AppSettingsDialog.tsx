@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { X, Save, FolderOpen, Download, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
-import { getRuntimeInfo, installRuntime, type RuntimeInfo } from '../lib/webgal-ipc';
+import { getRuntimeInfo, installRuntime, type RuntimeInfo } from '@/app/lib/webgal-ipc';
 
 export interface AppSettings {
   defaultProjectDir: string;

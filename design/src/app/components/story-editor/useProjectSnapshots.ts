@@ -6,7 +6,7 @@ import {
   renameProjectSnapshot,
   restoreProjectSnapshot,
   type SnapshotInfo,
-} from '../../lib/webgal-ipc';
+} from '@/app/lib/webgal-ipc';
 
 interface ProjectSnapshotsOptions {
   projectPath: string | null;

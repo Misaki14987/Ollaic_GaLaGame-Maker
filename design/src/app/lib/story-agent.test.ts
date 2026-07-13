@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createLineDiff } from './story-agent';
+import { createLineDiff } from '@/app/lib/story-agent';
 
 describe('createLineDiff', () => {
   it('reports no diff when content is identical', () => {

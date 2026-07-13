@@ -20,7 +20,7 @@ import {
   ImageIcon,
   type LucideIcon,
 } from 'lucide-react';
-import type { AssistantStep, ChatDiffLine } from '../hooks/useChatSession';
+import type { AssistantStep, ChatDiffLine } from '@/app/hooks/useChatSession';
 
 const TOOL_ICONS: Record<string, LucideIcon> = {
   list_scenes: List,

@@ -24,7 +24,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
-import { Switch } from './ui/switch';
+import { Switch } from '@/app/components/ui/switch';
 
 type StoryOsSection =
   'home' | 'flow' | 'script' | 'world' | 'characters' | 'assets' | 'preview' | 'build';

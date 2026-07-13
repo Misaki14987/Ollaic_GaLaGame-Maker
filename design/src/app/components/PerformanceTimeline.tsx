@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { Music, Image as ImageIcon, MessageCircle } from 'lucide-react';
-import type { WebGalNode } from '../lib/webgal-types';
-import { isMetadataComment } from '../lib/webgal-types';
+import type { WebGalNode } from '@/app/lib/webgal-types';
+import { isMetadataComment } from '@/app/lib/webgal-types';
 
 interface PerformanceTimelineProps {
   nodes: WebGalNode[];

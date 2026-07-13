@@ -2,8 +2,8 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { SnapshotManagerDialog } from './SnapshotManagerDialog';
-import type { SnapshotInfo } from '../lib/webgal-ipc';
+import { SnapshotManagerDialog } from '@/app/components/SnapshotManagerDialog';
+import type { SnapshotInfo } from '@/app/lib/webgal-ipc';
 
 const snapshots: SnapshotInfo[] = [
   {

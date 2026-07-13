@@ -1,7 +1,7 @@
 import { memo, useMemo } from 'react';
 import { Split } from 'lucide-react';
-import type { SceneLink } from '../lib/webgal-types';
-import type { SceneHeader } from '../lib/webgal-ipc';
+import type { SceneLink } from '@/app/lib/webgal-types';
+import type { SceneHeader } from '@/app/lib/webgal-ipc';
 
 // Scene graph layout constants (SVG coordinate space). Nodes are card-style
 // (fixed CARD_W × CARD_H) so they read like the pre-refactor worldline cards;

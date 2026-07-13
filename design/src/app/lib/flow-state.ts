@@ -10,7 +10,7 @@ import type {
   RunStatus,
   StepRunHistory,
   StepStatus,
-} from './pipeline-types';
+} from '@/app/lib/pipeline-types';
 
 export interface FlowStepView {
   id: string;

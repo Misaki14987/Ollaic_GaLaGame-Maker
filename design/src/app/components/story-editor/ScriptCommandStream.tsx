@@ -19,9 +19,9 @@ import {
   Trash2,
   Users,
 } from 'lucide-react';
-import type { Character } from '../../lib/character-types';
-import type { SceneHeader } from '../../lib/webgal-ipc';
-import type { WebGalCommandType, WebGalNode } from '../../lib/webgal-types';
+import type { Character } from '@/app/lib/character-types';
+import type { SceneHeader } from '@/app/lib/webgal-ipc';
+import type { WebGalCommandType, WebGalNode } from '@/app/lib/webgal-types';
 import {
   categoryLabels,
   categoryTagClass,
@@ -29,25 +29,25 @@ import {
   commandLabels,
   getCommandCategory,
   isMetadataComment,
-} from '../../lib/webgal-types';
-import { figureLabel } from '../../lib/node-display';
-import type { NodeDiffEntry } from '../../lib/node-diff';
-import { PreviewNodeCard } from '../PreviewNodeCard';
+} from '@/app/lib/webgal-types';
+import { figureLabel } from '@/app/lib/node-display';
+import type { NodeDiffEntry } from '@/app/lib/node-diff';
+import { PreviewNodeCard } from '@/app/components/PreviewNodeCard';
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuTrigger,
-} from '../ui/context-menu';
+} from '@/app/components/ui/context-menu';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '../ui/dropdown-menu';
-import { commandIconFor, commandToneFor, getCommandSummary } from './command-presentation';
+} from '@/app/components/ui/dropdown-menu';
+import { commandIconFor, commandToneFor, getCommandSummary } from '@/app/components/story-editor/command-presentation';
 
 interface ScriptCommandStreamProps {
   nodes: WebGalNode[];

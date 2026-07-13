@@ -1,5 +1,5 @@
-import type { AssetInfo } from './assets-ipc';
-import type { AiChatMessage } from './ai-ipc';
+import type { AssetInfo } from '@/app/lib/assets-ipc';
+import type { AiChatMessage } from '@/app/lib/ai-ipc';
 
 export interface MissingAssetIssue {
   command: string;

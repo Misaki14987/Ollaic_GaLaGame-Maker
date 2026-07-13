@@ -5,12 +5,12 @@ import { HTML5Backend } from 'react-dnd-html5-backend';
 import { Loader2 } from 'lucide-react';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { AiSettingsDialog } from './AiSettingsDialog';
-import { AppSettingsDialog, loadAppSettings } from './AppSettingsDialog';
-import { ProjectMetadataDialog } from './ProjectMetadataDialog';
-import { SnapshotManagerDialog } from './SnapshotManagerDialog';
-import { SceneManagerPanel } from './SceneManagerPanel';
-import type { WebGalNode } from '../lib/webgal-types';
+import { AiSettingsDialog } from '@/app/components/AiSettingsDialog';
+import { AppSettingsDialog, loadAppSettings } from '@/app/components/AppSettingsDialog';
+import { ProjectMetadataDialog } from '@/app/components/ProjectMetadataDialog';
+import { SnapshotManagerDialog } from '@/app/components/SnapshotManagerDialog';
+import { SceneManagerPanel } from '@/app/components/SceneManagerPanel';
+import type { WebGalNode } from '@/app/lib/webgal-types';
 import {
   parseScene,
   serializeScene,
@@ -29,22 +29,22 @@ import {
   deleteScene,
   renameScene,
   type ProjectInfo,
-} from '../lib/webgal-ipc';
-import { listCharacters, listCharacterNames } from '../lib/character-ipc';
-import type { Character } from '../lib/character-types';
-import { characterColor } from '../lib/character-editing';
-import { useAiAgent } from '../hooks/useAiAgent';
-import { listAssets, syncSceneVoiceCards } from '../lib/assets-ipc';
+} from '@/app/lib/webgal-ipc';
+import { listCharacters, listCharacterNames } from '@/app/lib/character-ipc';
+import type { Character } from '@/app/lib/character-types';
+import { characterColor } from '@/app/lib/character-editing';
+import { useAiAgent } from '@/app/hooks/useAiAgent';
+import { listAssets, syncSceneVoiceCards } from '@/app/lib/assets-ipc';
 import {
   ensureSceneCard,
   extractSceneBackgroundAssets,
   loadAssetMetadata,
   saveAssetMetadata,
   syncSceneCardsFromBackgrounds,
-} from '../lib/asset-metadata';
-import { computeFullNodeDiff } from '../lib/node-diff';
-import type { SceneEdit } from '../lib/change-set';
-import { DetailPanel } from './DetailPanel';
+} from '@/app/lib/asset-metadata';
+import { computeFullNodeDiff } from '@/app/lib/node-diff';
+import type { SceneEdit } from '@/app/lib/change-set';
+import { DetailPanel } from '@/app/components/DetailPanel';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -54,17 +54,17 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from './ui/alert-dialog';
-import { StoryOsSideNav, StoryOsTopBar } from './StoryOsChrome';
-import { PerformanceTimeline } from './PerformanceTimeline';
-import { AiAssistantPanel } from './story-editor/AiAssistantPanel';
-import { FullScreenWorldline, SceneWorldlinePanel } from './story-editor/SceneWorldline';
-import { ScriptCommandStream } from './story-editor/ScriptCommandStream';
-import { NewSceneDialog } from './story-editor/NewSceneDialog';
-import { useSceneDocument } from './story-editor/useSceneDocument';
-import { useSceneGraphIndex } from './story-editor/useSceneGraphIndex';
-import { useProjectSnapshots } from './story-editor/useProjectSnapshots';
-import { useProjectExport } from './story-editor/useProjectExport';
+} from '@/app/components/ui/alert-dialog';
+import { StoryOsSideNav, StoryOsTopBar } from '@/app/components/StoryOsChrome';
+import { PerformanceTimeline } from '@/app/components/PerformanceTimeline';
+import { AiAssistantPanel } from '@/app/components/story-editor/AiAssistantPanel';
+import { FullScreenWorldline, SceneWorldlinePanel } from '@/app/components/story-editor/SceneWorldline';
+import { ScriptCommandStream } from '@/app/components/story-editor/ScriptCommandStream';
+import { NewSceneDialog } from '@/app/components/story-editor/NewSceneDialog';
+import { useSceneDocument } from '@/app/components/story-editor/useSceneDocument';
+import { useSceneGraphIndex } from '@/app/components/story-editor/useSceneGraphIndex';
+import { useProjectSnapshots } from '@/app/components/story-editor/useProjectSnapshots';
+import { useProjectExport } from '@/app/components/story-editor/useProjectExport';
 
 // Fixed auto-save cadence (ms). Auto-save is toggled on/off from the top-bar
 // switch; there is no user-configurable interval.

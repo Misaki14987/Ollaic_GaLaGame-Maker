@@ -21,9 +21,9 @@ import {
   Move,
   Award,
 } from 'lucide-react';
-import type { WebGalNode, WebGalCommandType } from './webgal-types';
-import { typeBorderClass } from './webgal-types';
-import type { Character } from './character-types';
+import type { WebGalNode, WebGalCommandType } from '@/app/lib/webgal-types';
+import { typeBorderClass } from '@/app/lib/webgal-types';
+import type { Character } from '@/app/lib/character-types';
 
 export const commandIcons: Partial<Record<WebGalCommandType, typeof MessageCircle>> = {
   dialogue: MessageCircle,

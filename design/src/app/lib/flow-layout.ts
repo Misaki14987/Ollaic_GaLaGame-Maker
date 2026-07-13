@@ -1,4 +1,4 @@
-import type { FlowStepView } from './flow-state';
+import type { FlowStepView } from '@/app/lib/flow-state';
 
 export interface FlowNodePosition {
   x: number;

@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import type { FlowStepView } from './flow-state';
+import type { FlowStepView } from '@/app/lib/flow-state';
 import {
   flowLayoutStorageKey,
   layoutFlowSteps,
   loadFlowPositions,
   saveFlowPositions,
-} from './flow-layout';
+} from '@/app/lib/flow-layout';
 
 const step = (id: string, dependsOn: string[] = []): FlowStepView => ({
   id,

@@ -1,8 +1,8 @@
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import type { FlowStepView } from '../lib/flow-state';
-import { FlowStepInspector } from './FlowStepInspector';
+import type { FlowStepView } from '@/app/lib/flow-state';
+import { FlowStepInspector } from '@/app/components/FlowStepInspector';
 
 const step: FlowStepView = {
   id: 'outline',

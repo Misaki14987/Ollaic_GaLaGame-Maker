@@ -1,4 +1,4 @@
-import type { Character, CharacterRelation, CharacterSprite } from './character-types';
+import type { Character, CharacterRelation, CharacterSprite } from '@/app/lib/character-types';
 
 const CHARACTER_COLOR_COUNT = 8;
 const CHARACTER_COLORS = Array.from(

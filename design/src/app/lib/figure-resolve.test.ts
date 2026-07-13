@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { Character } from './character-types';
-import type { AssetInfo } from './assets-ipc';
-import { resolveSpriteFile, resolveFigureByEmotion } from './figure-resolve';
+import type { Character } from '@/app/lib/character-types';
+import type { AssetInfo } from '@/app/lib/assets-ipc';
+import { resolveSpriteFile, resolveFigureByEmotion } from '@/app/lib/figure-resolve';
 
 function asset(name: string): AssetInfo {
   return {

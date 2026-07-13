@@ -9,8 +9,8 @@ import {
   type LucideProps,
 } from 'lucide-react';
 import { Handle, Position } from 'reactflow';
-import { cn } from './ui/utils';
-import type { StepStatus } from '../lib/pipeline-types';
+import { cn } from '@/app/components/ui/utils';
+import type { StepStatus } from '@/app/lib/pipeline-types';
 
 const KIND_LABEL: Record<string, string> = {
   plan: '故事规划',

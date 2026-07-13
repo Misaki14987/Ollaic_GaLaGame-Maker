@@ -1,20 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { Image, Loader2, Search, Sparkles, Trash2, Plus, X } from 'lucide-react';
-import type { WebGalNode, WebGalCommandType } from '../lib/webgal-types';
-import { commandLabels } from '../lib/webgal-types';
-import { AssetPickerButton } from './AssetPicker';
-import type { Character } from '../lib/character-types';
+import type { WebGalNode, WebGalCommandType } from '@/app/lib/webgal-types';
+import { commandLabels } from '@/app/lib/webgal-types';
+import { AssetPickerButton } from '@/app/components/AssetPicker';
+import type { Character } from '@/app/lib/character-types';
 import {
   aliasesForCategory,
   emptyAssetMetadata,
   loadAssetMetadata,
   type AssetMetadata,
-} from '../lib/asset-metadata';
-import { listScenes, sceneDisplayName, type SceneHeader } from '../lib/webgal-ipc';
-import { listAssets, type AssetInfo } from '../lib/assets-ipc';
-import { figureFileTail, spritePrefix, resolveSpriteFile } from '../lib/figure-resolve';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
+} from '@/app/lib/asset-metadata';
+import { listScenes, sceneDisplayName, type SceneHeader } from '@/app/lib/webgal-ipc';
+import { listAssets, type AssetInfo } from '@/app/lib/assets-ipc';
+import { figureFileTail, spritePrefix, resolveSpriteFile } from '@/app/lib/figure-resolve';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/app/components/ui/dialog';
 
 interface DetailPanelProps {
   node: WebGalNode;

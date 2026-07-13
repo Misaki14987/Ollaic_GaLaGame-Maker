@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { getNodeSummary } from './node-display';
-import type { WebGalNode } from './webgal-types';
+import { getNodeSummary } from '@/app/lib/node-display';
+import type { WebGalNode } from '@/app/lib/webgal-types';
 
 function figureNode(overrides: Partial<WebGalNode>): WebGalNode {
   return {

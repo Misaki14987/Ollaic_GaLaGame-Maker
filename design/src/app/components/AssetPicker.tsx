@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Image, Search, Loader2, Music, Volume2 } from 'lucide-react';
-import { listAssets, type AssetInfo } from '../lib/assets-ipc';
+import { listAssets, type AssetInfo } from '@/app/lib/assets-ipc';
 import { convertFileSrc } from '@tauri-apps/api/core';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/app/components/ui/dialog';
 
 interface Props {
   projectPath: string;

@@ -8,30 +8,30 @@
  * On accept the whole set is applied atomically (all-or-rollback).
  */
 
-import type { AssetInfo } from './assets-ipc';
-import type { SceneAssetCard } from './assets-ipc';
-import type { Character } from './character-types';
-import { applyEditorPatches } from './editor-executor';
+import type { AssetInfo } from '@/app/lib/assets-ipc';
+import type { SceneAssetCard } from '@/app/lib/assets-ipc';
+import type { Character } from '@/app/lib/character-types';
+import { applyEditorPatches } from '@/app/lib/editor-executor';
 import {
   extractPatchAssetRefs,
   splitPatchText,
   summarizePatches,
   validatePatchText,
   type EditorPatch,
-} from './editor-patch';
-import { characterColor } from './character-editing';
-import { backgroundCardId } from './asset-metadata';
+} from '@/app/lib/editor-patch';
+import { characterColor } from '@/app/lib/character-editing';
+import { backgroundCardId } from '@/app/lib/asset-metadata';
 import {
   figureFileTail,
   findCharacter,
   findSprite,
   resolveFigureByEmotion,
-} from './figure-resolve';
-import { emptyProjectMemory, type ProjectMemory } from './project-memory';
-import { createLineDiff, type DiffLine, type MissingAssetIssue } from './story-agent';
-import { parseScene, serializeScene, sceneDisplayName, type SceneHeader } from './webgal-ipc';
-import type { WebGalNode } from './webgal-types';
-import type { StagedWrite } from './ai-tools';
+} from '@/app/lib/figure-resolve';
+import { emptyProjectMemory, type ProjectMemory } from '@/app/lib/project-memory';
+import { createLineDiff, type DiffLine, type MissingAssetIssue } from '@/app/lib/story-agent';
+import { parseScene, serializeScene, sceneDisplayName, type SceneHeader } from '@/app/lib/webgal-ipc';
+import type { WebGalNode } from '@/app/lib/webgal-types';
+import type { StagedWrite } from '@/app/lib/ai-tools';
 
 type DialogueLineInput = Record<string, unknown>;
 

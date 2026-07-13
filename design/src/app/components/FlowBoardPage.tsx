@@ -1,10 +1,10 @@
 import { AlertTriangle } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router';
-import { FlowBoard } from './FlowBoard';
-import { Button } from './ui/button';
-import { StoryOsSideNav, StoryOsTopBar } from './StoryOsChrome';
-import type { FlowStepView } from '../lib/flow-state';
-import type { StoryPlan } from '../lib/pipeline-types';
+import { FlowBoard } from '@/app/components/FlowBoard';
+import { Button } from '@/app/components/ui/button';
+import { StoryOsSideNav, StoryOsTopBar } from '@/app/components/StoryOsChrome';
+import type { FlowStepView } from '@/app/lib/flow-state';
+import type { StoryPlan } from '@/app/lib/pipeline-types';
 
 export function FlowBoardPage() {
   const navigate = useNavigate();

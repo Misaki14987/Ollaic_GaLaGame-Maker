@@ -8,7 +8,7 @@ import {
   Users,
   Wand2,
 } from 'lucide-react';
-import type { WebGalCommandType, WebGalNode } from '../../lib/webgal-types';
+import type { WebGalCommandType, WebGalNode } from '@/app/lib/webgal-types';
 
 export function getCommandSummary(node: WebGalNode): string {
   switch (node.type) {

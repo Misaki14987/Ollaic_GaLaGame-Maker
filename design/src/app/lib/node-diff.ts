@@ -7,7 +7,7 @@
  * the same type into a single "modified" entry.
  */
 
-import type { WebGalNode } from './webgal-types';
+import type { WebGalNode } from '@/app/lib/webgal-types';
 
 export interface NodeDiffEntry {
   kind: 'added' | 'removed' | 'modified' | 'context';

@@ -12,9 +12,9 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
-import type { VoiceAssetCard, AssetUsage } from '../lib/assets-ipc';
-import { fillVoiceCard, deleteVoiceCard, importAsset } from '../lib/assets-ipc';
-import { getScenePath, loadScene, saveScene } from '../lib/webgal-ipc';
+import type { VoiceAssetCard, AssetUsage } from '@/app/lib/assets-ipc';
+import { fillVoiceCard, deleteVoiceCard, importAsset } from '@/app/lib/assets-ipc';
+import { getScenePath, loadScene, saveScene } from '@/app/lib/webgal-ipc';
 import {
   generateBatchTts,
   listenBatchTtsProgress,
@@ -22,9 +22,9 @@ import {
   type AiProviderConfig,
   type BatchTtsItem,
   type BatchTtsProgress,
-} from '../lib/ai-ipc';
-import { listCharacters } from '../lib/character-ipc';
-import type { Character } from '../lib/character-types';
+} from '@/app/lib/ai-ipc';
+import { listCharacters } from '@/app/lib/character-ipc';
+import type { Character } from '@/app/lib/character-types';
 
 interface Props {
   projectPath: string;

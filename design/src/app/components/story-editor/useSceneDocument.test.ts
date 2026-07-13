@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { useSceneDocument } from './useSceneDocument';
+import { useSceneDocument } from '@/app/components/story-editor/useSceneDocument';
 
 describe('useSceneDocument', () => {
   it('keeps edits and undo history behind the document interface', () => {

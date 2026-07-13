@@ -1,7 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { exportProject, saveProjectMetadata } from '../../lib/webgal-ipc';
-import { useProjectExport } from './useProjectExport';
+import { exportProject, saveProjectMetadata } from '@/app/lib/webgal-ipc';
+import { useProjectExport } from '@/app/components/story-editor/useProjectExport';
 
 vi.mock('../../lib/webgal-ipc', () => ({
   exportProject: vi.fn(),

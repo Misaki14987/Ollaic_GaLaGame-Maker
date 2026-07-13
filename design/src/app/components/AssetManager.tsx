@@ -36,7 +36,7 @@ import {
   type AssetUsage,
   type SceneAssetCard,
   type VoiceAssetCard,
-} from '../lib/assets-ipc';
+} from '@/app/lib/assets-ipc';
 import {
   assetMetadataEntry,
   emptyAssetMetadata,
@@ -54,7 +54,7 @@ import {
   defaultCgTargetStem,
   extractSceneBgmAssets,
   type AssetMetadata,
-} from '../lib/asset-metadata';
+} from '@/app/lib/asset-metadata';
 import {
   getAiImageConfig,
   getAiTtsConfig,
@@ -65,13 +65,13 @@ import {
   listenAiMediaGenerationProgress,
   type AiProviderConfig,
   type AiMediaGenerationProgress,
-} from '../lib/ai-ipc';
-import { getScenePath, loadScene, openProject, saveScene } from '../lib/webgal-ipc';
-import type { WebGalNode } from '../lib/webgal-types';
-import { listCharacters } from '../lib/character-ipc';
-import { CharacterPanel } from './CharacterPanel';
-import { StoryOsSideNav, StoryOsTopBar } from './StoryOsChrome';
-import { VoiceDubbingPanel } from './VoiceDubbingPanel';
+} from '@/app/lib/ai-ipc';
+import { getScenePath, loadScene, openProject, saveScene } from '@/app/lib/webgal-ipc';
+import type { WebGalNode } from '@/app/lib/webgal-types';
+import { listCharacters } from '@/app/lib/character-ipc';
+import { CharacterPanel } from '@/app/components/CharacterPanel';
+import { StoryOsSideNav, StoryOsTopBar } from '@/app/components/StoryOsChrome';
+import { VoiceDubbingPanel } from '@/app/components/VoiceDubbingPanel';
 
 type TabId = 'scene' | 'cg' | 'music' | 'character' | 'dubbing';
 type MusicCategory = 'bgm' | 'dubbing' | 'vocal';

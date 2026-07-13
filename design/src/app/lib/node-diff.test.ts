@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { computeFullNodeDiff, computeNodeDiff, summarizeNodeDiff } from './node-diff';
-import type { WebGalNode } from './webgal-types';
+import { computeFullNodeDiff, computeNodeDiff, summarizeNodeDiff } from '@/app/lib/node-diff';
+import type { WebGalNode } from '@/app/lib/webgal-types';
 
 function figureNode(overrides: Partial<WebGalNode> = {}): WebGalNode {
   return {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { applyEditorPatch, applyEditorPatches, resolveLineWithAnchor } from './editor-executor';
-import type { EditorPatch } from './editor-patch';
+import { applyEditorPatch, applyEditorPatches, resolveLineWithAnchor } from '@/app/lib/editor-executor';
+import type { EditorPatch } from '@/app/lib/editor-patch';
 
 const SCRIPT = ['line1;', 'line2;', 'line3;', 'line4;'].join('\n');
 

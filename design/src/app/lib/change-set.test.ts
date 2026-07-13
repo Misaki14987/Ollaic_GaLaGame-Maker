@@ -14,10 +14,10 @@ import {
   stageSceneEdit,
   stageSceneHeaderEdit,
   type StagingContext,
-} from './change-set';
-import type { Character } from './character-types';
-import type { AssetInfo } from './assets-ipc';
-import { emptyProjectMemory } from './project-memory';
+} from '@/app/lib/change-set';
+import type { Character } from '@/app/lib/character-types';
+import type { AssetInfo } from '@/app/lib/assets-ipc';
+import { emptyProjectMemory } from '@/app/lib/project-memory';
 
 const invokeMock = vi.mocked(invoke);
 

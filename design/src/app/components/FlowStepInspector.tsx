@@ -17,14 +17,14 @@ import {
   Workflow,
   X,
 } from 'lucide-react';
-import type { FlowStepView } from '../lib/flow-state';
-import type { AssetQueueState, AssetTaskStatus, StepStatus } from '../lib/pipeline-types';
-import type { PipelineEventRecord } from './PipelineEventLedger';
-import { Button } from './ui/button';
-import { ScrollArea } from './ui/scroll-area';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-import { Textarea } from './ui/textarea';
-import { cn } from './ui/utils';
+import type { FlowStepView } from '@/app/lib/flow-state';
+import type { AssetQueueState, AssetTaskStatus, StepStatus } from '@/app/lib/pipeline-types';
+import type { PipelineEventRecord } from '@/app/components/PipelineEventLedger';
+import { Button } from '@/app/components/ui/button';
+import { ScrollArea } from '@/app/components/ui/scroll-area';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/app/components/ui/tabs';
+import { Textarea } from '@/app/components/ui/textarea';
+import { cn } from '@/app/components/ui/utils';
 
 const STATUS: Record<StepStatus, { label: string; className: string }> = {
   pending: { label: '待运行', className: 'bg-muted-foreground' },

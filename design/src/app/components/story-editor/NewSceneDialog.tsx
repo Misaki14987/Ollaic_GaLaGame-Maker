@@ -7,7 +7,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '../ui/dialog';
+} from '@/app/components/ui/dialog';
 
 interface NewSceneDialogProps {
   open: boolean;

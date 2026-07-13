@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { StepNode } from './StepNode';
+import { StepNode } from '@/app/components/StepNode';
 
 vi.mock('reactflow', () => ({
   Handle: ({ type, position, isConnectable, ...props }: Record<string, unknown>) => (

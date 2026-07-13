@@ -1,4 +1,4 @@
-import type { WebGalCommandType, WebGalNode } from './webgal-types';
+import type { WebGalCommandType, WebGalNode } from '@/app/lib/webgal-types';
 
 const TERMINAL_TYPES = new Set<WebGalCommandType>(['choose', 'changeScene', 'end', 'jumpLabel']);
 

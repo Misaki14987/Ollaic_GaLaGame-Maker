@@ -23,9 +23,9 @@ import {
   X,
 } from 'lucide-react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
-import { initProject, openProject, type ProjectInfo } from '../lib/webgal-ipc';
-import { saveProjectMemory } from '../lib/project-memory';
-import { StoryOsPanel } from './StoryOsChrome';
+import { initProject, openProject, type ProjectInfo } from '@/app/lib/webgal-ipc';
+import { saveProjectMemory } from '@/app/lib/project-memory';
+import { StoryOsPanel } from '@/app/components/StoryOsChrome';
 
 export interface Project {
   id: string;

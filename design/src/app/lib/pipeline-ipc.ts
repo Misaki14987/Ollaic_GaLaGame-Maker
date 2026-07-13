@@ -7,7 +7,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { AssetQueueState, PipelineEvent, RunState, StoryPlan } from './pipeline-types';
+import type { AssetQueueState, PipelineEvent, RunState, StoryPlan } from '@/app/lib/pipeline-types';
 
 /** Start an Agent Flow for a project. Returns the new run id. */
 export async function pipelineStart(

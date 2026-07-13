@@ -27,15 +27,15 @@ import ReactFlow, {
   useNodesState,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { FlowStepInspector } from './FlowStepInspector';
-import { PipelineEventLedger, type PipelineEventRecord } from './PipelineEventLedger';
-import { StepNode, type StepNodeData } from './StepNode';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Progress } from './ui/progress';
-import { Switch } from './ui/switch';
-import { initialFlowState, reduceFlowEvent, type FlowStepView } from '../lib/flow-state';
-import { layoutFlowSteps, loadFlowPositions, saveFlowPositions } from '../lib/flow-layout';
+import { FlowStepInspector } from '@/app/components/FlowStepInspector';
+import { PipelineEventLedger, type PipelineEventRecord } from '@/app/components/PipelineEventLedger';
+import { StepNode, type StepNodeData } from '@/app/components/StepNode';
+import { Button } from '@/app/components/ui/button';
+import { Input } from '@/app/components/ui/input';
+import { Progress } from '@/app/components/ui/progress';
+import { Switch } from '@/app/components/ui/switch';
+import { initialFlowState, reduceFlowEvent, type FlowStepView } from '@/app/lib/flow-state';
+import { layoutFlowSteps, loadFlowPositions, saveFlowPositions } from '@/app/lib/flow-layout';
 import {
   assetQueueDeleteArtifact,
   assetQueueGet,
@@ -58,14 +58,14 @@ import {
   pipelineStop,
   pipelineUpdateDependencies,
   pipelineUpdateStepPrompt,
-} from '../lib/pipeline-ipc';
+} from '@/app/lib/pipeline-ipc';
 import type {
   AssetQueueState,
   PipelineEvent,
   RunState,
   RunStatus,
   StoryPlan,
-} from '../lib/pipeline-types';
+} from '@/app/lib/pipeline-types';
 
 const NODE_TYPES = { step: StepNode };
 
