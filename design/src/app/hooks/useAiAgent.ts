@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { aiChatTurn, appendAiAgentTrace, getAiConfig, type AiChatMessage } from '@/app/lib/ai-ipc';
-import { listAllAssets, type AssetInfo } from '@/app/lib/assets-ipc';
+import { aiChatTurn, appendAiAgentTrace, getAiConfig, type AiChatMessage } from '@/app/lib/ai/ai-ipc';
+import { listAllAssets, type AssetInfo } from '@/app/lib/assets/assets-ipc';
 import {
   extractSceneBackgroundAssets,
   loadAssetMetadata,
   saveAssetMetadata,
   type AssetMetadata,
   syncSceneCardsFromBackgrounds,
-} from '@/app/lib/asset-metadata';
-import { createCharacter, deleteCharacter, updateCharacter } from '@/app/lib/character-ipc';
-import type { Character } from '@/app/lib/character-types';
+} from '@/app/lib/assets/asset-metadata';
+import { createCharacter, deleteCharacter, updateCharacter } from '@/app/lib/character/character-ipc';
+import type { Character } from '@/app/lib/character/character-types';
 import {
   describeEdit,
   stageCharacterEdit,
@@ -35,23 +35,23 @@ import {
   type SceneEdit,
   type StageError,
   type StagingContext,
-} from '@/app/lib/change-set';
-import { extractEditorResponse } from '@/app/lib/editor-patch';
-import { getTool, toolDefs, type StagedWrite } from '@/app/lib/ai-tools';
+} from '@/app/lib/editor/change-set';
+import { extractEditorResponse } from '@/app/lib/editor/editor-patch';
+import { getTool, toolDefs, type StagedWrite } from '@/app/lib/ai/ai-tools';
 import {
   buildMemoryContext,
   emptyProjectMemory,
   readProjectMemory,
   saveProjectMemory,
   type ProjectMemory,
-} from '@/app/lib/project-memory';
+} from '@/app/lib/ai/project-memory';
 import {
   buildAssetContext,
   buildNumberedScriptContext,
   hasAssetContextTruncation,
   truncateContextMessages,
   type MissingAssetIssue,
-} from '@/app/lib/story-agent';
+} from '@/app/lib/ai/story-agent';
 import {
   createScene,
   getScenePath,
@@ -62,8 +62,8 @@ import {
   sceneDisplayName,
   updateSceneHeader,
   type SceneHeader,
-} from '@/app/lib/webgal-ipc';
-import type { WebGalNode } from '@/app/lib/webgal-types';
+} from '@/app/lib/webgal/webgal-ipc';
+import type { WebGalNode } from '@/app/lib/webgal/webgal-types';
 import {
   useChatSession,
   type AssistantStep,

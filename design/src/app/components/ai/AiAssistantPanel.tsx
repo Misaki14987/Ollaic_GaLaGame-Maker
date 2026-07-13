@@ -10,7 +10,7 @@ import {
   Wand2,
   X,
 } from 'lucide-react';
-import type { SceneHeader } from '@/app/lib/webgal-ipc';
+import type { SceneHeader } from '@/app/lib/webgal/webgal-ipc';
 import { useAiAgent } from '@/app/hooks/useAiAgent';
 import { AiMemoryPanel } from '@/app/components/ai/AiMemoryPanel';
 import { AiMessageBubble } from '@/app/components/ai/AiMessageBubble';

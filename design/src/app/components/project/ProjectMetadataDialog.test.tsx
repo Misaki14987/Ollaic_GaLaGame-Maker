@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { ProjectMetadataDialog, type ExportTaskState } from '@/app/components/project/ProjectMetadataDialog';
-import type { ProjectMetadata } from '@/app/lib/webgal-ipc';
+import type { ProjectMetadata } from '@/app/lib/webgal/webgal-ipc';
 
 const metadata: ProjectMetadata = {
   synopsis: '故事摘要',

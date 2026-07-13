@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getTool } from '@/app/lib/ai-tools';
+import { getTool } from '@/app/lib/ai/ai-tools';
 
 describe('plan_assets tool', () => {
   it('stages missing background/CG asset cards instead of script commands', async () => {

@@ -17,8 +17,8 @@ import {
   Workflow,
   X,
 } from 'lucide-react';
-import type { FlowStepView } from '@/app/lib/flow-state';
-import type { AssetQueueState, AssetTaskStatus, StepStatus } from '@/app/lib/pipeline-types';
+import type { FlowStepView } from '@/app/lib/flow/flow-state';
+import type { AssetQueueState, AssetTaskStatus, StepStatus } from '@/app/lib/flow/pipeline-types';
 import type { PipelineEventRecord } from '@/app/components/flow/PipelineEventLedger';
 import { Button } from '@/app/components/ui/button';
 import { ScrollArea } from '@/app/components/ui/scroll-area';

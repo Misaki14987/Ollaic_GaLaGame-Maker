@@ -19,9 +19,9 @@ import {
   Trash2,
   Users,
 } from 'lucide-react';
-import type { Character } from '@/app/lib/character-types';
-import type { SceneHeader } from '@/app/lib/webgal-ipc';
-import type { WebGalCommandType, WebGalNode } from '@/app/lib/webgal-types';
+import type { Character } from '@/app/lib/character/character-types';
+import type { SceneHeader } from '@/app/lib/webgal/webgal-ipc';
+import type { WebGalCommandType, WebGalNode } from '@/app/lib/webgal/webgal-types';
 import {
   categoryLabels,
   categoryTagClass,
@@ -29,9 +29,9 @@ import {
   commandLabels,
   getCommandCategory,
   isMetadataComment,
-} from '@/app/lib/webgal-types';
-import { figureLabel } from '@/app/lib/node-display';
-import type { NodeDiffEntry } from '@/app/lib/node-diff';
+} from '@/app/lib/webgal/webgal-types';
+import { figureLabel } from '@/app/lib/editor/node-display';
+import type { NodeDiffEntry } from '@/app/lib/editor/node-diff';
 import { PreviewNodeCard } from '@/app/components/ai/PreviewNodeCard';
 import {
   ContextMenu,

@@ -12,14 +12,14 @@
  * The model sees tool schemas via ToolDef; the loop dispatches by name.
  */
 
-import type { ToolDef } from '@/app/lib/ai-ipc';
-import { listAllAssets, listAssets, type AssetInfo } from '@/app/lib/assets-ipc';
-import { getCharacter, listCharacterNames, listCharacters } from '@/app/lib/character-ipc';
-import { readProjectMemory } from '@/app/lib/project-memory';
-import { getScenePath, listScenes, readFileText, parseSceneHeader } from '@/app/lib/webgal-ipc';
-import { isEditorPatch, type EditorPatch } from '@/app/lib/editor-patch';
-import { figureFileTail, findCharacter, resolveSpriteFile } from '@/app/lib/figure-resolve';
-import type { Character } from '@/app/lib/character-types';
+import type { ToolDef } from '@/app/lib/ai/ai-ipc';
+import { listAllAssets, listAssets, type AssetInfo } from '@/app/lib/assets/assets-ipc';
+import { getCharacter, listCharacterNames, listCharacters } from '@/app/lib/character/character-ipc';
+import { readProjectMemory } from '@/app/lib/ai/project-memory';
+import { getScenePath, listScenes, readFileText, parseSceneHeader } from '@/app/lib/webgal/webgal-ipc';
+import { isEditorPatch, type EditorPatch } from '@/app/lib/editor/editor-patch';
+import { figureFileTail, findCharacter, resolveSpriteFile } from '@/app/lib/editor/figure-resolve';
+import type { Character } from '@/app/lib/character/character-types';
 
 export type ToolKind = 'read' | 'write';
 

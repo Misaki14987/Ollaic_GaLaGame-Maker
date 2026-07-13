@@ -1,4 +1,4 @@
-import type { MissingAssetIssue } from '@/app/lib/story-agent';
+import type { MissingAssetIssue } from '@/app/lib/ai/story-agent';
 
 interface MissingAssetCardProps {
   issues: MissingAssetIssue[];

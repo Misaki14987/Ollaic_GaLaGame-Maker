@@ -8,30 +8,30 @@
  * On accept the whole set is applied atomically (all-or-rollback).
  */
 
-import type { AssetInfo } from '@/app/lib/assets-ipc';
-import type { SceneAssetCard } from '@/app/lib/assets-ipc';
-import type { Character } from '@/app/lib/character-types';
-import { applyEditorPatches } from '@/app/lib/editor-executor';
+import type { AssetInfo } from '@/app/lib/assets/assets-ipc';
+import type { SceneAssetCard } from '@/app/lib/assets/assets-ipc';
+import type { Character } from '@/app/lib/character/character-types';
+import { applyEditorPatches } from '@/app/lib/editor/editor-executor';
 import {
   extractPatchAssetRefs,
   splitPatchText,
   summarizePatches,
   validatePatchText,
   type EditorPatch,
-} from '@/app/lib/editor-patch';
-import { characterColor } from '@/app/lib/character-editing';
-import { backgroundCardId } from '@/app/lib/asset-metadata';
+} from '@/app/lib/editor/editor-patch';
+import { characterColor } from '@/app/lib/character/character-editing';
+import { backgroundCardId } from '@/app/lib/assets/asset-metadata';
 import {
   figureFileTail,
   findCharacter,
   findSprite,
   resolveFigureByEmotion,
-} from '@/app/lib/figure-resolve';
-import { emptyProjectMemory, type ProjectMemory } from '@/app/lib/project-memory';
-import { createLineDiff, type DiffLine, type MissingAssetIssue } from '@/app/lib/story-agent';
-import { parseScene, serializeScene, sceneDisplayName, type SceneHeader } from '@/app/lib/webgal-ipc';
-import type { WebGalNode } from '@/app/lib/webgal-types';
-import type { StagedWrite } from '@/app/lib/ai-tools';
+} from '@/app/lib/editor/figure-resolve';
+import { emptyProjectMemory, type ProjectMemory } from '@/app/lib/ai/project-memory';
+import { createLineDiff, type DiffLine, type MissingAssetIssue } from '@/app/lib/ai/story-agent';
+import { parseScene, serializeScene, sceneDisplayName, type SceneHeader } from '@/app/lib/webgal/webgal-ipc';
+import type { WebGalNode } from '@/app/lib/webgal/webgal-types';
+import type { StagedWrite } from '@/app/lib/ai/ai-tools';
 
 type DialogueLineInput = Record<string, unknown>;
 

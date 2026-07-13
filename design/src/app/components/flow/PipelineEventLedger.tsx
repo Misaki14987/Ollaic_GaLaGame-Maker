@@ -1,5 +1,5 @@
 import { Activity } from 'lucide-react';
-import type { PipelineEvent, StepDef } from '@/app/lib/pipeline-types';
+import type { PipelineEvent, StepDef } from '@/app/lib/flow/pipeline-types';
 import { cn } from '@/app/components/ui/utils';
 
 export interface PipelineEventRecord {

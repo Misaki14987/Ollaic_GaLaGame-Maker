@@ -4,7 +4,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import type { Character, CharacterRef } from '@/app/lib/character-types';
+import type { Character, CharacterRef } from '@/app/lib/character/character-types';
 
 // ---------------------------------------------------------------------------
 // CRUD

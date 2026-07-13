@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import type { WebGalNode } from '@/app/lib/webgal-types';
+import type { WebGalNode } from '@/app/lib/webgal/webgal-types';
 import { useSceneGraphIndex } from '@/app/components/editor/useSceneGraphIndex';
 
 describe('useSceneGraphIndex', () => {

@@ -1,6 +1,6 @@
-import { commandIcons, typeColors, getNodeSummary } from '@/app/lib/node-display';
-import { commandLabels, isMetadataComment } from '@/app/lib/webgal-types';
-import type { NodeDiffEntry } from '@/app/lib/node-diff';
+import { commandIcons, typeColors, getNodeSummary } from '@/app/lib/editor/node-display';
+import { commandLabels, isMetadataComment } from '@/app/lib/webgal/webgal-types';
+import type { NodeDiffEntry } from '@/app/lib/editor/node-diff';
 
 /**
  * Full-size, read-only node card for the in-canvas AI change preview

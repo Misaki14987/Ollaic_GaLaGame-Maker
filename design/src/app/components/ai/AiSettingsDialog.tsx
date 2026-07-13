@@ -30,7 +30,7 @@ import {
   listAiLogs,
   clearAiLogs,
   getAiLogPath,
-} from '@/app/lib/ai-ipc';
+} from '@/app/lib/ai/ai-ipc';
 
 interface ProviderPreset {
   value: string;

@@ -1,9 +1,9 @@
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createProjectSnapshot, listProjectSnapshots } from '@/app/lib/webgal-ipc';
+import { createProjectSnapshot, listProjectSnapshots } from '@/app/lib/webgal/webgal-ipc';
 import { useProjectSnapshots } from '@/app/components/editor/useProjectSnapshots';
 
-vi.mock('../../lib/webgal-ipc', () => ({
+vi.mock('@/app/lib/webgal/webgal-ipc', () => ({
   createProjectSnapshot: vi.fn(),
   deleteProjectSnapshot: vi.fn(),
   listProjectSnapshots: vi.fn(),

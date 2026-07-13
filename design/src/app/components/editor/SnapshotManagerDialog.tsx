@@ -12,7 +12,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import type { SnapshotInfo } from '@/app/lib/webgal-ipc';
+import type { SnapshotInfo } from '@/app/lib/webgal/webgal-ipc';
 
 type SnapshotKind = NonNullable<SnapshotInfo['kind']>;
 type SnapshotFilter = 'all' | SnapshotKind | 'legacy';

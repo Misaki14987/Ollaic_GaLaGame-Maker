@@ -19,7 +19,7 @@ import {
   Upload,
   Check,
 } from 'lucide-react';
-import type { Character, CharacterSprite } from '@/app/lib/character-types';
+import type { Character, CharacterSprite } from '@/app/lib/character/character-types';
 import {
   appendCharacterSprite,
   appendEmotionPreset,
@@ -30,13 +30,13 @@ import {
   removeCharacterSprite,
   updateCharacterSprite,
   withReferenceSprite,
-} from '@/app/lib/character-editing';
+} from '@/app/lib/character/character-editing';
 import {
   createCharacter,
   deleteCharacter,
   listCharacters,
   updateCharacter,
-} from '@/app/lib/character-ipc';
+} from '@/app/lib/character/character-ipc';
 import {
   deleteAsset,
   findAssetUsages,
@@ -45,7 +45,7 @@ import {
   listAssets,
   type AssetInfo,
   type AssetUsage,
-} from '@/app/lib/assets-ipc';
+} from '@/app/lib/assets/assets-ipc';
 import { Popover, PopoverContent, PopoverTrigger } from '@/app/components/ui/popover';
 import {
   aiGenerateImage,
@@ -54,7 +54,7 @@ import {
   listenAiMediaGenerationProgress,
   type AiMediaGenerationProgress,
   type AiProviderConfig,
-} from '@/app/lib/ai-ipc';
+} from '@/app/lib/ai/ai-ipc';
 
 interface Props {
   projectPath: string;

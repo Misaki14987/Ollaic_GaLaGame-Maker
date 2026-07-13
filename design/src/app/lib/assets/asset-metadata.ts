@@ -3,10 +3,10 @@ import {
   saveProjectAssetMetadata,
   type AssetMetadata,
   type SceneAssetCard,
-} from '@/app/lib/assets-ipc';
-import type { WebGalNode } from '@/app/lib/webgal-types';
+} from '@/app/lib/assets/assets-ipc';
+import type { WebGalNode } from '@/app/lib/webgal/webgal-types';
 
-export type { AssetMetadata } from '@/app/lib/assets-ipc';
+export type { AssetMetadata } from '@/app/lib/assets/assets-ipc';
 
 /** Stable scene-card id derived from a scene .txt filename. */
 export function sceneCardId(sceneFile: string): string {

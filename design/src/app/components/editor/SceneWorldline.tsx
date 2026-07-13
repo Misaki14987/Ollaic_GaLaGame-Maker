@@ -9,9 +9,9 @@ import {
   Plus,
   Trash2,
 } from 'lucide-react';
-import type { SceneHeader } from '@/app/lib/webgal-ipc';
-import type { SceneLink, WebGalNode } from '@/app/lib/webgal-types';
-import { isMetadataComment } from '@/app/lib/webgal-types';
+import type { SceneHeader } from '@/app/lib/webgal/webgal-ipc';
+import type { SceneLink, WebGalNode } from '@/app/lib/webgal/webgal-types';
+import { isMetadataComment } from '@/app/lib/webgal/webgal-types';
 import { SceneGraph } from '@/app/components/editor/SceneGraph';
 import { commandIconFor, commandToneFor, getCommandSummary } from '@/app/components/editor/command-presentation';
 

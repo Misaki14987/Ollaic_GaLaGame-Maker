@@ -10,7 +10,7 @@ import { AppSettingsDialog, loadAppSettings } from '@/app/components/shell/AppSe
 import { ProjectMetadataDialog } from '@/app/components/project/ProjectMetadataDialog';
 import { SnapshotManagerDialog } from '@/app/components/editor/SnapshotManagerDialog';
 import { SceneManagerPanel } from '@/app/components/editor/SceneManagerPanel';
-import type { WebGalNode } from '@/app/lib/webgal-types';
+import type { WebGalNode } from '@/app/lib/webgal/webgal-types';
 import {
   parseScene,
   serializeScene,
@@ -29,21 +29,21 @@ import {
   deleteScene,
   renameScene,
   type ProjectInfo,
-} from '@/app/lib/webgal-ipc';
-import { listCharacters, listCharacterNames } from '@/app/lib/character-ipc';
-import type { Character } from '@/app/lib/character-types';
-import { characterColor } from '@/app/lib/character-editing';
+} from '@/app/lib/webgal/webgal-ipc';
+import { listCharacters, listCharacterNames } from '@/app/lib/character/character-ipc';
+import type { Character } from '@/app/lib/character/character-types';
+import { characterColor } from '@/app/lib/character/character-editing';
 import { useAiAgent } from '@/app/hooks/useAiAgent';
-import { listAssets, syncSceneVoiceCards } from '@/app/lib/assets-ipc';
+import { listAssets, syncSceneVoiceCards } from '@/app/lib/assets/assets-ipc';
 import {
   ensureSceneCard,
   extractSceneBackgroundAssets,
   loadAssetMetadata,
   saveAssetMetadata,
   syncSceneCardsFromBackgrounds,
-} from '@/app/lib/asset-metadata';
-import { computeFullNodeDiff } from '@/app/lib/node-diff';
-import type { SceneEdit } from '@/app/lib/change-set';
+} from '@/app/lib/assets/asset-metadata';
+import { computeFullNodeDiff } from '@/app/lib/editor/node-diff';
+import type { SceneEdit } from '@/app/lib/editor/change-set';
 import { DetailPanel } from '@/app/components/editor/DetailPanel';
 import {
   AlertDialog,

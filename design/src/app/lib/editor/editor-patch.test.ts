@@ -6,7 +6,7 @@ import {
   normalizePatchText,
   validateEditorResponse,
   validatePatchText,
-} from '@/app/lib/editor-patch';
+} from '@/app/lib/editor/editor-patch';
 
 describe('isEditorPatch', () => {
   it('accepts a well-formed insert patch', () => {

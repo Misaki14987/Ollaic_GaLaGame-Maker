@@ -23,8 +23,8 @@ import {
   X,
 } from 'lucide-react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
-import { initProject, openProject, type ProjectInfo } from '@/app/lib/webgal-ipc';
-import { saveProjectMemory } from '@/app/lib/project-memory';
+import { initProject, openProject, type ProjectInfo } from '@/app/lib/webgal/webgal-ipc';
+import { saveProjectMemory } from '@/app/lib/ai/project-memory';
 import { StoryOsPanel } from '@/app/components/shell/StoryOsChrome';
 
 export interface Project {

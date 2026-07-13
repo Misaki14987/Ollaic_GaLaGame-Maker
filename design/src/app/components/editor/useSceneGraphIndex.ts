@@ -5,8 +5,8 @@ import {
   parseSceneHeader,
   readFileText,
   type SceneHeader,
-} from '@/app/lib/webgal-ipc';
-import { extractSceneLinks, type SceneLink, type WebGalNode } from '@/app/lib/webgal-types';
+} from '@/app/lib/webgal/webgal-ipc';
+import { extractSceneLinks, type SceneLink, type WebGalNode } from '@/app/lib/webgal/webgal-types';
 
 function linksEqual(left: SceneLink[], right: SceneLink[]) {
   return (

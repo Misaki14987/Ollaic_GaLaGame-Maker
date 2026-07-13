@@ -1,6 +1,6 @@
 import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import type { StepDef } from '@/app/lib/pipeline-types';
+import type { StepDef } from '@/app/lib/flow/pipeline-types';
 import { PipelineEventLedger, type PipelineEventRecord } from '@/app/components/flow/PipelineEventLedger';
 
 const at = (hour: number, second: number) => new Date(2026, 6, 10, hour, 5, second).getTime();

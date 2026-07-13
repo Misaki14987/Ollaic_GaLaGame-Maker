@@ -1,7 +1,7 @@
 import { Plus, Minus, Pencil } from 'lucide-react';
-import { commandIcons, typeColors, getNodeSummary } from '@/app/lib/node-display';
-import { commandLabels } from '@/app/lib/webgal-types';
-import type { NodeDiffEntry } from '@/app/lib/node-diff';
+import { commandIcons, typeColors, getNodeSummary } from '@/app/lib/editor/node-display';
+import { commandLabels } from '@/app/lib/webgal/webgal-types';
+import type { NodeDiffEntry } from '@/app/lib/editor/node-diff';
 
 /** Compact node card for the AI change preview: diff badge + type icon + summary. */
 export function MiniNodeCard({ entry }: { entry: NodeDiffEntry }) {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { emptyProjectMemory, type ProjectMemory } from '@/app/lib/project-memory';
+import { emptyProjectMemory, type ProjectMemory } from '@/app/lib/ai/project-memory';
 
 interface AiMemoryPanelProps {
   memory: ProjectMemory | null;

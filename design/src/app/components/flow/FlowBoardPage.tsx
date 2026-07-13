@@ -3,8 +3,8 @@ import { useNavigate, useParams } from 'react-router';
 import { FlowBoard } from '@/app/components/flow/FlowBoard';
 import { Button } from '@/app/components/ui/button';
 import { StoryOsSideNav, StoryOsTopBar } from '@/app/components/shell/StoryOsChrome';
-import type { FlowStepView } from '@/app/lib/flow-state';
-import type { StoryPlan } from '@/app/lib/pipeline-types';
+import type { FlowStepView } from '@/app/lib/flow/flow-state';
+import type { StoryPlan } from '@/app/lib/flow/pipeline-types';
 
 export function FlowBoardPage() {
   const navigate = useNavigate();

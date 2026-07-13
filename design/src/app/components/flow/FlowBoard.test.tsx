@@ -4,8 +4,8 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import * as React from 'react';
-import type { PipelineEvent, RunState } from '@/app/lib/pipeline-types';
-import { flowLayoutStorageKey } from '@/app/lib/flow-layout';
+import type { PipelineEvent, RunState } from '@/app/lib/flow/pipeline-types';
+import { flowLayoutStorageKey } from '@/app/lib/flow/flow-layout';
 import { FlowBoard } from '@/app/components/flow/FlowBoard';
 
 // React Flow's real renderer needs DOM measurements jsdom doesn't provide.

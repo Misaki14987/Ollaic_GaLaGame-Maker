@@ -4,7 +4,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import type { WebGalNode } from '@/app/lib/webgal-types';
+import type { WebGalNode } from '@/app/lib/webgal/webgal-types';
 
 // ---------------------------------------------------------------------------
 // Scene parsing & serialization

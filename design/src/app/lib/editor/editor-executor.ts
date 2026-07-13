@@ -1,4 +1,4 @@
-import { normalizePatchText, type EditorPatch } from '@/app/lib/editor-patch';
+import { normalizePatchText, type EditorPatch } from '@/app/lib/editor/editor-patch';
 
 export interface ResolvedLine {
   line: number;

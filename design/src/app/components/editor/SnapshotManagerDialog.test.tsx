@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { SnapshotManagerDialog } from '@/app/components/editor/SnapshotManagerDialog';
-import type { SnapshotInfo } from '@/app/lib/webgal-ipc';
+import type { SnapshotInfo } from '@/app/lib/webgal/webgal-ipc';
 
 const snapshots: SnapshotInfo[] = [
   {

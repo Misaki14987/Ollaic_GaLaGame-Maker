@@ -34,8 +34,8 @@ import { Button } from '@/app/components/ui/button';
 import { Input } from '@/app/components/ui/input';
 import { Progress } from '@/app/components/ui/progress';
 import { Switch } from '@/app/components/ui/switch';
-import { initialFlowState, reduceFlowEvent, type FlowStepView } from '@/app/lib/flow-state';
-import { layoutFlowSteps, loadFlowPositions, saveFlowPositions } from '@/app/lib/flow-layout';
+import { initialFlowState, reduceFlowEvent, type FlowStepView } from '@/app/lib/flow/flow-state';
+import { layoutFlowSteps, loadFlowPositions, saveFlowPositions } from '@/app/lib/flow/flow-layout';
 import {
   assetQueueDeleteArtifact,
   assetQueueGet,
@@ -58,14 +58,14 @@ import {
   pipelineStop,
   pipelineUpdateDependencies,
   pipelineUpdateStepPrompt,
-} from '@/app/lib/pipeline-ipc';
+} from '@/app/lib/flow/pipeline-ipc';
 import type {
   AssetQueueState,
   PipelineEvent,
   RunState,
   RunStatus,
   StoryPlan,
-} from '@/app/lib/pipeline-types';
+} from '@/app/lib/flow/pipeline-types';
 
 const NODE_TYPES = { step: StepNode };
 

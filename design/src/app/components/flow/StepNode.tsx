@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { Handle, Position } from 'reactflow';
 import { cn } from '@/app/components/ui/utils';
-import type { StepStatus } from '@/app/lib/pipeline-types';
+import type { StepStatus } from '@/app/lib/flow/pipeline-types';
 
 const KIND_LABEL: Record<string, string> = {
   plan: '故事规划',

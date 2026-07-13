@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { serializeScene } from '@/app/lib/webgal-ipc';
-import type { WebGalCommandType, WebGalNode } from '@/app/lib/webgal-types';
-import { insertSceneNode, pasteSceneNode, reorderSceneNodes } from '@/app/lib/scene-editing';
+import { serializeScene } from '@/app/lib/webgal/webgal-ipc';
+import type { WebGalCommandType, WebGalNode } from '@/app/lib/webgal/webgal-types';
+import { insertSceneNode, pasteSceneNode, reorderSceneNodes } from '@/app/lib/editor/scene-editing';
 
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { initialFlowState, reduceFlowEvent } from '@/app/lib/flow-state';
-import type { PipelineEvent, RunState } from '@/app/lib/pipeline-types';
+import { initialFlowState, reduceFlowEvent } from '@/app/lib/flow/flow-state';
+import type { PipelineEvent, RunState } from '@/app/lib/flow/pipeline-types';
 
 const ev = (e: PipelineEvent) => e;
 

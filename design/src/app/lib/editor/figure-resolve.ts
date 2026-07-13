@@ -11,8 +11,8 @@
  * character + emotion to the exact qualified filename to write into a script.
  */
 
-import type { AssetInfo } from '@/app/lib/assets-ipc';
-import type { Character, CharacterSprite } from '@/app/lib/character-types';
+import type { AssetInfo } from '@/app/lib/assets/assets-ipc';
+import type { Character, CharacterSprite } from '@/app/lib/character/character-types';
 
 export function sanitizeFilenamePart(value: string, fallback: string): string {
   const normalized = value

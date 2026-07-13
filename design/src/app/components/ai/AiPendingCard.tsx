@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { ChevronRight } from 'lucide-react';
-import type { DiffLine } from '@/app/lib/story-agent';
-import type { ChangeEdit, PendingChangeSet, SceneEdit } from '@/app/lib/change-set';
-import { sceneDisplayName, type SceneHeader } from '@/app/lib/webgal-ipc';
-import { computeNodeDiff, summarizeNodeDiff } from '@/app/lib/node-diff';
+import type { DiffLine } from '@/app/lib/ai/story-agent';
+import type { ChangeEdit, PendingChangeSet, SceneEdit } from '@/app/lib/editor/change-set';
+import { sceneDisplayName, type SceneHeader } from '@/app/lib/webgal/webgal-ipc';
+import { computeNodeDiff, summarizeNodeDiff } from '@/app/lib/editor/node-diff';
 import { MiniNodeCard } from '@/app/components/ai/MiniNodeCard';
 
 function DiffViewer({ lines }: { lines: DiffLine[] }) {
