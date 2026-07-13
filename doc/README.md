@@ -19,7 +19,7 @@
 
 | 模块 | 状态 | 说明 |
 |------|------|------|
-| 端到端 Agent 形态 | **P2 已完成** | 内容 Flow 后接 AssetTaskQueue，已实现分类限流、自动重试、Artifact 保留、透明 Figure 晋升和由 Agent 决策的多角色 Scene Staging；P3 继续按 [`v2-agent-pipeline.md`](./v2-agent-pipeline.md) 推进 |
+| 端到端 Agent 形态 | **P2 已完成** | 内容 Flow 后接 AssetTaskQueue，已实现分类限流、自动重试、Artifact 保留、透明 Figure 晋升和由 Agent 决策的多角色 Scene Staging；P3 继续按 [`v2-agent-pipeline.md`](./ai/v2-agent-pipeline.md) 推进 |
 
 ## 模块索引
 
@@ -31,7 +31,7 @@
 | [`assets/`](./assets/README.md) | 素材库、元数据、配音管理 |
 | [`characters/`](./characters/README.md) | 角色资料与立绘系统 |
 | [`ai/`](./ai/README.md) | AI Agent、修改预览、会话记忆、媒体生成、供应商配置 |
-| [`v2-agent-pipeline.md`](./v2-agent-pipeline.md) | V2 端到端 Agent 产品与架构基线 |
+| [`v2-agent-pipeline.md`](./ai/v2-agent-pipeline.md) | V2 端到端 Agent 产品与架构基线 |
 
 ## 维护原则
 

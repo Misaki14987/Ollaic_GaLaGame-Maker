@@ -14,7 +14,7 @@ Ollaic 有两条 AI 工作流：FlowBoard 中的 **Production Agent Flow** 负�
 
 ## 总览
 
-- **Production Agent Flow**：Rust 后端按 Plan → Memory → Plotter → Character → Dialogist → AssetPlanner → SceneScript → AssetTaskQueue 执行，当前完成 P2 资产闭环；详见 [`../v2-agent-pipeline.md`](../v2-agent-pipeline.md)。
+- **Production Agent Flow**：Rust 后端按 Plan → Memory → Plotter → Character → Dialogist → AssetPlanner → SceneScript → AssetTaskQueue 执行，当前完成 P2 资产闭环；详见 [`v2-agent-pipeline.md`](./v2-agent-pipeline.md)。
 - **入口**:编辑器右侧 `AiAssistantPanel`(会话标题 + 状态徽标 + 输入框)。
 - **核心 Hook**:`useAiAgent`(状态机)、`useChatSession`(会话存储)。
 - **两种执行模式**:支持原生函数调用的供应商走**多步 Agent 循环**(读工具→写工具→暂存);其余供应商走 **legacy 单轮**(一次性返回 JSON 补丁)。
@@ -24,7 +24,7 @@ Ollaic 有两条 AI 工作流：FlowBoard 中的 **Production Agent Flow** 负�
 
 - `src-tauri/src/agents/` — P1 多 Agent 内容生成、结构校验与 WebGAL 编译
 - `src-tauri/src/pipeline/` — Agent Flow 编排、恢复、历史与 StoryPlan 更新
-- [`../agent-flow-contracts.md`](../agent-flow-contracts.md) — 节点输入输出、引用、校验与恢复契约
+- [`agent-flow-contracts.md`](./agent-flow-contracts.md) — 节点输入输出、引用、校验与恢复契约
 - `src-tauri/src/asset_queue/` — P2 资产队列、分类限流、Artifact 与自动绑定
 - `design/src/app/hooks/useAiAgent.ts` — AI 状态机与 Agent 循环
 - `design/src/app/hooks/useChatSession.ts` — 会话存储

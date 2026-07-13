@@ -1,6 +1,6 @@
 //! Flow recipe DSL - the declarative description of an Agent Flow's steps,
 //! dependencies, and agents. See CONTEXT.md "Flow Template" / "Declarative
-//! Recipe" and the V2 node types in `doc/v2-agent-pipeline.md` section 3.4.
+//! Recipe" and the V2 node types in `doc/ai/v2-agent-pipeline.md` section 3.4.
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
