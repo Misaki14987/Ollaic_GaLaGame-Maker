@@ -12,8 +12,8 @@ import {
 import type { SceneHeader } from '@/app/lib/webgal-ipc';
 import type { SceneLink, WebGalNode } from '@/app/lib/webgal-types';
 import { isMetadataComment } from '@/app/lib/webgal-types';
-import { SceneGraph } from '@/app/components/SceneGraph';
-import { commandIconFor, commandToneFor, getCommandSummary } from '@/app/components/story-editor/command-presentation';
+import { SceneGraph } from '@/app/components/editor/SceneGraph';
+import { commandIconFor, commandToneFor, getCommandSummary } from '@/app/components/editor/command-presentation';
 
 interface SceneWorldlinePanelProps {
   scenes: string[];

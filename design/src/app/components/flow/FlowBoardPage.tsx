@@ -1,8 +1,8 @@
 import { AlertTriangle } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router';
-import { FlowBoard } from '@/app/components/FlowBoard';
+import { FlowBoard } from '@/app/components/flow/FlowBoard';
 import { Button } from '@/app/components/ui/button';
-import { StoryOsSideNav, StoryOsTopBar } from '@/app/components/StoryOsChrome';
+import { StoryOsSideNav, StoryOsTopBar } from '@/app/components/shell/StoryOsChrome';
 import type { FlowStepView } from '@/app/lib/flow-state';
 import type { StoryPlan } from '@/app/lib/pipeline-types';
 

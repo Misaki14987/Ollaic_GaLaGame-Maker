@@ -25,7 +25,7 @@ import {
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { initProject, openProject, type ProjectInfo } from '@/app/lib/webgal-ipc';
 import { saveProjectMemory } from '@/app/lib/project-memory';
-import { StoryOsPanel } from '@/app/components/StoryOsChrome';
+import { StoryOsPanel } from '@/app/components/shell/StoryOsChrome';
 
 export interface Project {
   id: string;

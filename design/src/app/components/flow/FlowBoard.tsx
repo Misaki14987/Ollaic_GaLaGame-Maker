@@ -27,9 +27,9 @@ import ReactFlow, {
   useNodesState,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { FlowStepInspector } from '@/app/components/FlowStepInspector';
-import { PipelineEventLedger, type PipelineEventRecord } from '@/app/components/PipelineEventLedger';
-import { StepNode, type StepNodeData } from '@/app/components/StepNode';
+import { FlowStepInspector } from '@/app/components/flow/FlowStepInspector';
+import { PipelineEventLedger, type PipelineEventRecord } from '@/app/components/flow/PipelineEventLedger';
+import { StepNode, type StepNodeData } from '@/app/components/flow/StepNode';
 import { Button } from '@/app/components/ui/button';
 import { Input } from '@/app/components/ui/input';
 import { Progress } from '@/app/components/ui/progress';

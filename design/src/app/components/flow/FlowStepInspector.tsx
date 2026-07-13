@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import type { FlowStepView } from '@/app/lib/flow-state';
 import type { AssetQueueState, AssetTaskStatus, StepStatus } from '@/app/lib/pipeline-types';
-import type { PipelineEventRecord } from '@/app/components/PipelineEventLedger';
+import type { PipelineEventRecord } from '@/app/components/flow/PipelineEventLedger';
 import { Button } from '@/app/components/ui/button';
 import { ScrollArea } from '@/app/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/app/components/ui/tabs';

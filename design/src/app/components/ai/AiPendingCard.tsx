@@ -4,7 +4,7 @@ import type { DiffLine } from '@/app/lib/story-agent';
 import type { ChangeEdit, PendingChangeSet, SceneEdit } from '@/app/lib/change-set';
 import { sceneDisplayName, type SceneHeader } from '@/app/lib/webgal-ipc';
 import { computeNodeDiff, summarizeNodeDiff } from '@/app/lib/node-diff';
-import { MiniNodeCard } from '@/app/components/MiniNodeCard';
+import { MiniNodeCard } from '@/app/components/ai/MiniNodeCard';
 
 function DiffViewer({ lines }: { lines: DiffLine[] }) {
   const [expanded, setExpanded] = useState(false);

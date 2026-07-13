@@ -3,7 +3,7 @@ import { convertFileSrc } from '@tauri-apps/api/core';
 import { Image, Loader2, Search, Sparkles, Trash2, Plus, X } from 'lucide-react';
 import type { WebGalNode, WebGalCommandType } from '@/app/lib/webgal-types';
 import { commandLabels } from '@/app/lib/webgal-types';
-import { AssetPickerButton } from '@/app/components/AssetPicker';
+import { AssetPickerButton } from '@/app/components/assets/AssetPicker';
 import type { Character } from '@/app/lib/character-types';
 import {
   aliasesForCategory,

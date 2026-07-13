@@ -1,7 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createProjectSnapshot, listProjectSnapshots } from '@/app/lib/webgal-ipc';
-import { useProjectSnapshots } from '@/app/components/story-editor/useProjectSnapshots';
+import { useProjectSnapshots } from '@/app/components/editor/useProjectSnapshots';
 
 vi.mock('../../lib/webgal-ipc', () => ({
   createProjectSnapshot: vi.fn(),

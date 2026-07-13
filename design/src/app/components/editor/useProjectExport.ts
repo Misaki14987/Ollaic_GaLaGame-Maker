@@ -5,7 +5,7 @@ import {
   saveProjectMetadata,
   type ProjectMetadata,
 } from '@/app/lib/webgal-ipc';
-import type { ExportTaskState } from '@/app/components/ProjectMetadataDialog';
+import type { ExportTaskState } from '@/app/components/project/ProjectMetadataDialog';
 
 const EMPTY_METADATA: ProjectMetadata = {
   synopsis: '',

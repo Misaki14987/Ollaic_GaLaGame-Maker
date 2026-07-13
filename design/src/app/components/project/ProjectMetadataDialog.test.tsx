@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { ProjectMetadataDialog, type ExportTaskState } from '@/app/components/ProjectMetadataDialog';
+import { ProjectMetadataDialog, type ExportTaskState } from '@/app/components/project/ProjectMetadataDialog';
 import type { ProjectMetadata } from '@/app/lib/webgal-ipc';
 
 const metadata: ProjectMetadata = {

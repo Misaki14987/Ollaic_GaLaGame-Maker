@@ -1,7 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { WebGalNode } from '@/app/lib/webgal-types';
-import { useSceneGraphIndex } from '@/app/components/story-editor/useSceneGraphIndex';
+import { useSceneGraphIndex } from '@/app/components/editor/useSceneGraphIndex';
 
 describe('useSceneGraphIndex', () => {
   it('tracks unsaved links for the current scene', () => {

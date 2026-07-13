@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import { NewSceneDialog } from '@/app/components/story-editor/NewSceneDialog';
+import { NewSceneDialog } from '@/app/components/editor/NewSceneDialog';
 
 describe('NewSceneDialog', () => {
   it('validates names and creates a normalized scene', async () => {

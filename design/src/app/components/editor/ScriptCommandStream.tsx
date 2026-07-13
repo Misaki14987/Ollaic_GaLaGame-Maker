@@ -32,7 +32,7 @@ import {
 } from '@/app/lib/webgal-types';
 import { figureLabel } from '@/app/lib/node-display';
 import type { NodeDiffEntry } from '@/app/lib/node-diff';
-import { PreviewNodeCard } from '@/app/components/PreviewNodeCard';
+import { PreviewNodeCard } from '@/app/components/ai/PreviewNodeCard';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -47,7 +47,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/app/components/ui/dropdown-menu';
-import { commandIconFor, commandToneFor, getCommandSummary } from '@/app/components/story-editor/command-presentation';
+import { commandIconFor, commandToneFor, getCommandSummary } from '@/app/components/editor/command-presentation';
 
 interface ScriptCommandStreamProps {
   nodes: WebGalNode[];

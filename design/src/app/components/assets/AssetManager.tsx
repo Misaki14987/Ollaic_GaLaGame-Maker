@@ -69,9 +69,9 @@ import {
 import { getScenePath, loadScene, openProject, saveScene } from '@/app/lib/webgal-ipc';
 import type { WebGalNode } from '@/app/lib/webgal-types';
 import { listCharacters } from '@/app/lib/character-ipc';
-import { CharacterPanel } from '@/app/components/CharacterPanel';
-import { StoryOsSideNav, StoryOsTopBar } from '@/app/components/StoryOsChrome';
-import { VoiceDubbingPanel } from '@/app/components/VoiceDubbingPanel';
+import { CharacterPanel } from '@/app/components/character/CharacterPanel';
+import { StoryOsSideNav, StoryOsTopBar } from '@/app/components/shell/StoryOsChrome';
+import { VoiceDubbingPanel } from '@/app/components/assets/VoiceDubbingPanel';
 
 type TabId = 'scene' | 'cg' | 'music' | 'character' | 'dubbing';
 type MusicCategory = 'bgm' | 'dubbing' | 'vocal';

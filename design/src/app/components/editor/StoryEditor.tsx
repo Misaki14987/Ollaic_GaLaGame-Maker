@@ -5,11 +5,11 @@ import { HTML5Backend } from 'react-dnd-html5-backend';
 import { Loader2 } from 'lucide-react';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { AiSettingsDialog } from '@/app/components/AiSettingsDialog';
-import { AppSettingsDialog, loadAppSettings } from '@/app/components/AppSettingsDialog';
-import { ProjectMetadataDialog } from '@/app/components/ProjectMetadataDialog';
-import { SnapshotManagerDialog } from '@/app/components/SnapshotManagerDialog';
-import { SceneManagerPanel } from '@/app/components/SceneManagerPanel';
+import { AiSettingsDialog } from '@/app/components/ai/AiSettingsDialog';
+import { AppSettingsDialog, loadAppSettings } from '@/app/components/shell/AppSettingsDialog';
+import { ProjectMetadataDialog } from '@/app/components/project/ProjectMetadataDialog';
+import { SnapshotManagerDialog } from '@/app/components/editor/SnapshotManagerDialog';
+import { SceneManagerPanel } from '@/app/components/editor/SceneManagerPanel';
 import type { WebGalNode } from '@/app/lib/webgal-types';
 import {
   parseScene,
@@ -44,7 +44,7 @@ import {
 } from '@/app/lib/asset-metadata';
 import { computeFullNodeDiff } from '@/app/lib/node-diff';
 import type { SceneEdit } from '@/app/lib/change-set';
-import { DetailPanel } from '@/app/components/DetailPanel';
+import { DetailPanel } from '@/app/components/editor/DetailPanel';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -55,16 +55,16 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/app/components/ui/alert-dialog';
-import { StoryOsSideNav, StoryOsTopBar } from '@/app/components/StoryOsChrome';
-import { PerformanceTimeline } from '@/app/components/PerformanceTimeline';
-import { AiAssistantPanel } from '@/app/components/story-editor/AiAssistantPanel';
-import { FullScreenWorldline, SceneWorldlinePanel } from '@/app/components/story-editor/SceneWorldline';
-import { ScriptCommandStream } from '@/app/components/story-editor/ScriptCommandStream';
-import { NewSceneDialog } from '@/app/components/story-editor/NewSceneDialog';
-import { useSceneDocument } from '@/app/components/story-editor/useSceneDocument';
-import { useSceneGraphIndex } from '@/app/components/story-editor/useSceneGraphIndex';
-import { useProjectSnapshots } from '@/app/components/story-editor/useProjectSnapshots';
-import { useProjectExport } from '@/app/components/story-editor/useProjectExport';
+import { StoryOsSideNav, StoryOsTopBar } from '@/app/components/shell/StoryOsChrome';
+import { PerformanceTimeline } from '@/app/components/flow/PerformanceTimeline';
+import { AiAssistantPanel } from '@/app/components/ai/AiAssistantPanel';
+import { FullScreenWorldline, SceneWorldlinePanel } from '@/app/components/editor/SceneWorldline';
+import { ScriptCommandStream } from '@/app/components/editor/ScriptCommandStream';
+import { NewSceneDialog } from '@/app/components/editor/NewSceneDialog';
+import { useSceneDocument } from '@/app/components/editor/useSceneDocument';
+import { useSceneGraphIndex } from '@/app/components/editor/useSceneGraphIndex';
+import { useProjectSnapshots } from '@/app/components/editor/useProjectSnapshots';
+import { useProjectExport } from '@/app/components/editor/useProjectExport';
 
 // Fixed auto-save cadence (ms). Auto-save is toggled on/off from the top-bar
 // switch; there is no user-configurable interval.

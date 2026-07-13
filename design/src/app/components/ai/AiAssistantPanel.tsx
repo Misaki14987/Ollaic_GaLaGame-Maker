@@ -12,10 +12,10 @@ import {
 } from 'lucide-react';
 import type { SceneHeader } from '@/app/lib/webgal-ipc';
 import { useAiAgent } from '@/app/hooks/useAiAgent';
-import { AiMemoryPanel } from '@/app/components/AiMemoryPanel';
-import { AiMessageBubble } from '@/app/components/AiMessageBubble';
-import { ChangeSetCard } from '@/app/components/AiPendingCard';
-import { ConflictCard, ErrorCard } from '@/app/components/AiStatusCard';
+import { AiMemoryPanel } from '@/app/components/ai/AiMemoryPanel';
+import { AiMessageBubble } from '@/app/components/ai/AiMessageBubble';
+import { ChangeSetCard } from '@/app/components/ai/AiPendingCard';
+import { ConflictCard, ErrorCard } from '@/app/components/ai/AiStatusCard';
 import {
   DropdownMenu,
   DropdownMenuContent,

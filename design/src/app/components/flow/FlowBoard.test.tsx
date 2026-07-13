@@ -6,7 +6,7 @@ import { listen } from '@tauri-apps/api/event';
 import * as React from 'react';
 import type { PipelineEvent, RunState } from '@/app/lib/pipeline-types';
 import { flowLayoutStorageKey } from '@/app/lib/flow-layout';
-import { FlowBoard } from '@/app/components/FlowBoard';
+import { FlowBoard } from '@/app/components/flow/FlowBoard';
 
 // React Flow's real renderer needs DOM measurements jsdom doesn't provide.
 // Mock it as a passthrough that renders each node through its `nodeTypes`
