@@ -270,8 +270,11 @@ fn compile_figure_cue(
     Ok(vec![
         format!("; {}", crate::asset_queue::binder::task_marker(task_id)),
         format!(
-            "changeFigure:none -id={character} -figureCharacter={character} -figureEmotion={} -{position};",
-            cue.emotion
+            "; {}",
+            crate::asset_queue::binder::staged_figure_command(&format!(
+                "changeFigure:none -id={character} -figureCharacter={character} -figureEmotion={} -{position};",
+                cue.emotion
+            ))
         ),
     ])
 }
@@ -453,10 +456,17 @@ mod tests {
             .content
             .contains("; ollaic-asset-task:figure_heroine_default"));
         assert!(scripts[0].content.contains(
-            "changeFigure:none -id=heroine -figureCharacter=heroine -figureEmotion=default -right;"
+            "; ollaic-figure-staging:changeFigure:none -id=heroine -figureCharacter=heroine -figureEmotion=default -right;"
         ));
+        assert!(
+            !scripts[0]
+                .content
+                .lines()
+                .any(|line| line
+                    .starts_with("changeFigure:none -id=heroine -figureCharacter=heroine"))
+        );
         assert!(scripts[0].content.contains(
-            "changeFigure:none -id=friend -figureCharacter=friend -figureEmotion=surprised -left;"
+            "; ollaic-figure-staging:changeFigure:none -id=friend -figureCharacter=friend -figureEmotion=surprised -left;"
         ));
         assert!(scripts[0]
             .content

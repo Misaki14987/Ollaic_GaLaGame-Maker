@@ -266,6 +266,20 @@ pub(crate) fn task_marker(task_id: &str) -> String {
     format!("ollaic-asset-task:{task_id}")
 }
 
+const FIGURE_STAGING_PREFIX: &str = "ollaic-figure-staging:";
+
+pub(crate) fn staged_figure_command(command: &str) -> String {
+    format!("{FIGURE_STAGING_PREFIX}{command}")
+}
+
+fn parse_staged_figure(node: &WebGalNode) -> Option<WebGalNode> {
+    let command = node.content.strip_prefix(FIGURE_STAGING_PREFIX)?;
+    parser::parse_script(command)
+        .into_iter()
+        .next()
+        .filter(|node| node.cmd_type == CommandType::ChangeFigure)
+}
+
 fn available_target(
     project_path: &Path,
     task: &AssetTask,
@@ -424,10 +438,13 @@ fn bind_figure(project_path: &Path, task: &AssetTask, filename: &str) -> Result<
             let mut changed = false;
             let marker = task_marker(&task.id);
             for index in 0..nodes.len().saturating_sub(1) {
-                if nodes[index].cmd_type != CommandType::Comment
-                    || nodes[index].content != marker
-                    || nodes[index + 1].cmd_type != CommandType::ChangeFigure
-                {
+                if nodes[index].cmd_type != CommandType::Comment || nodes[index].content != marker {
+                    continue;
+                }
+                if let Some(staged) = parse_staged_figure(&nodes[index + 1]) {
+                    nodes[index + 1] = staged;
+                }
+                if nodes[index + 1].cmd_type != CommandType::ChangeFigure {
                     continue;
                 }
                 let node = &mut nodes[index + 1];
@@ -585,7 +602,7 @@ mod tests {
         fs::create_dir_all(project.join("game/config")).unwrap();
         fs::write(
             project.join("game/scene/start.txt"),
-            "; Ollaic Scene Staging\n; ollaic-asset-task:figure_alice\nchangeFigure:none -id=alice -figureCharacter=alice -figureEmotion=default -right;\nAlice:one;\nBob:reply;\n",
+            "; Ollaic Scene Staging\n; ollaic-asset-task:figure_alice\n; ollaic-figure-staging:changeFigure:none -id=alice -figureCharacter=alice -figureEmotion=default -right;\nAlice:one;\nBob:reply;\n",
         )
         .unwrap();
         fs::write(project.join("game/scene/route.txt"), "Alice:two;\n").unwrap();

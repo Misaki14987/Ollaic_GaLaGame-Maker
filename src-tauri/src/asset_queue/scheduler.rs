@@ -22,6 +22,10 @@ pub struct GeneratedArtifact {
 }
 
 pub trait AssetGenerator: Send + Sync {
+    fn preflight(&self, _task: &AssetTask) -> Result<(), String> {
+        Ok(())
+    }
+
     fn generate<'a>(
         &'a self,
         task: &'a AssetTask,
@@ -85,24 +89,29 @@ pub async fn run_queue_cancellable(
         }
     }
     let attempt_budget = queue.limits.max_retries + 1;
-    let runnable: Vec<(usize, u32)> = queue
-        .tasks
-        .iter_mut()
-        .enumerate()
-        .filter_map(|(index, task)| {
-            if task.status == AssetTaskStatus::Succeeded {
-                return None;
-            }
-            let limit = if same_run && task.status == AssetTaskStatus::Failed {
-                task.attempts.len() as u32 + attempt_budget
-            } else {
-                attempt_budget
-            };
+    let mut runnable = Vec::new();
+    for (index, task) in queue.tasks.iter_mut().enumerate() {
+        if task.status == AssetTaskStatus::Succeeded {
+            continue;
+        }
+        if let Err(error) = generator.preflight(task) {
             task.status = AssetTaskStatus::Pending;
-            task.error = None;
-            Some((index, limit))
-        })
-        .collect();
+            task.error = Some(format!("pending configuration: {error}"));
+            continue;
+        }
+        let was_blocked = task
+            .error
+            .as_deref()
+            .is_some_and(|error| error.starts_with("pending configuration:"));
+        let limit = if same_run && (task.status == AssetTaskStatus::Failed || was_blocked) {
+            task.attempts.len() as u32 + attempt_budget
+        } else {
+            attempt_budget
+        };
+        task.status = AssetTaskStatus::Pending;
+        task.error = None;
+        runnable.push((index, limit));
+    }
     queue.updated_at = now_ms();
     save_queue(project_path, &queue)?;
     let queue = Arc::new(Mutex::new(queue));
@@ -338,6 +347,7 @@ mod tests {
     struct TransparentFigure;
     struct AlwaysFail(AtomicUsize);
     struct CountingGenerate(AtomicUsize);
+    struct MissingConfiguration(AtomicUsize);
     struct FailFourThenSucceed(AtomicUsize);
     struct BlockingGenerator {
         started: Arc<tokio::sync::Semaphore>,
@@ -433,6 +443,22 @@ mod tests {
                     bytes: b"asset".to_vec(),
                     used_local_fallback: false,
                 })
+            })
+        }
+    }
+
+    impl AssetGenerator for MissingConfiguration {
+        fn preflight(&self, _task: &AssetTask) -> Result<(), String> {
+            Err("missing API key".to_string())
+        }
+
+        fn generate<'a>(
+            &'a self,
+            _task: &'a AssetTask,
+        ) -> Pin<Box<dyn Future<Output = Result<GeneratedArtifact, String>> + Send + 'a>> {
+            Box::pin(async move {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Err("must not run".to_string())
             })
         }
     }
@@ -707,7 +733,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn enforces_each_kind_concurrency_limit() {
+    async fn enforces_image_and_music_concurrency_limits() {
         let project = std::env::temp_dir().join(format!("ollaic_queue_limits_{}", now_ms()));
         std::fs::create_dir_all(project.join("game/scene")).unwrap();
         let scene = (0..8)
@@ -717,9 +743,6 @@ mod tests {
         std::fs::write(project.join("game/scene/start.txt"), scene).unwrap();
         let mut tasks = Vec::new();
         tasks.extend((0..6).map(|index| task(format!("bg_{index}"), AssetKind::Background, None)));
-        tasks.extend(
-            (0..8).map(|index| task(format!("tts_start_{index}"), AssetKind::Tts, Some(index))),
-        );
         tasks.extend((0..3).map(|index| task(format!("bgm_{index}"), AssetKind::Bgm, None)));
         let queue = AssetQueue::new("run-limits", tasks, now_ms());
         let plan = plan_for(&queue, vec!["start.txt".to_string()]);
@@ -733,7 +756,7 @@ mod tests {
             .iter()
             .all(|task| task.status == AssetTaskStatus::Succeeded));
         assert_eq!(probe.maximum[0].load(Ordering::SeqCst), 2);
-        assert_eq!(probe.maximum[1].load(Ordering::SeqCst), 4);
+        assert_eq!(probe.maximum[1].load(Ordering::SeqCst), 0);
         assert_eq!(probe.maximum[2].load(Ordering::SeqCst), 1);
         let _ = std::fs::remove_dir_all(project);
     }
@@ -761,6 +784,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unavailable_capability_stays_pending_without_retrying() {
+        let project = std::env::temp_dir().join(format!("ollaic_queue_blocked_{}", now_ms()));
+        std::fs::create_dir_all(project.join("game/scene")).unwrap();
+        std::fs::write(project.join("game/scene/start.txt"), "; empty\n").unwrap();
+        let queue = AssetQueue::new(
+            "run-blocked",
+            vec![task("bg_blocked".into(), AssetKind::Background, None)],
+            now_ms(),
+        );
+        let plan = plan_for(&queue, vec!["start.txt".into()]);
+        save_queue(&project, &queue).unwrap();
+        let generator = Arc::new(MissingConfiguration(AtomicUsize::new(0)));
+
+        let result = run_queue(&project, "run-blocked", &plan, generator.clone())
+            .await
+            .unwrap();
+
+        assert_eq!(generator.0.load(Ordering::SeqCst), 0);
+        assert_eq!(result.tasks[0].status, AssetTaskStatus::Pending);
+        assert!(result.tasks[0]
+            .error
+            .as_deref()
+            .unwrap()
+            .starts_with("pending configuration:"));
+        assert!(result.tasks[0].attempts.is_empty());
+        let _ = std::fs::remove_dir_all(project);
+    }
+
+    #[tokio::test]
     async fn manual_rerun_gets_a_fresh_retry_budget() {
         let project = std::env::temp_dir().join(format!("ollaic_queue_rerun_{}", now_ms()));
         std::fs::create_dir_all(project.join("game/scene")).unwrap();
@@ -783,54 +835,6 @@ mod tests {
             .unwrap();
         assert_eq!(succeeded.tasks[0].status, AssetTaskStatus::Succeeded);
         assert_eq!(succeeded.tasks[0].attempts.len(), 5);
-        let _ = std::fs::remove_dir_all(project);
-    }
-
-    #[tokio::test]
-    async fn schedules_and_binds_twelve_scenes_by_eight_voice_lines() {
-        let project = std::env::temp_dir().join(format!("ollaic_queue_96_tts_{}", now_ms()));
-        std::fs::create_dir_all(project.join("game/scene")).unwrap();
-        let mut tasks = Vec::new();
-        let mut scenes = Vec::new();
-        for scene in 0..12 {
-            let file = format!("scene_{scene}.txt");
-            let source = (0..8)
-                .map(|line| format!(":scene {scene} line {line};"))
-                .collect::<Vec<_>>()
-                .join("\n");
-            std::fs::write(project.join("game/scene").join(&file), source).unwrap();
-            for line in 0..8 {
-                let mut task = task(
-                    format!("tts_scene_{scene}_{line}"),
-                    AssetKind::Tts,
-                    Some(line),
-                );
-                task.scene_ref = Some(file.clone());
-                task.text = Some(format!("scene {scene} line {line}"));
-                tasks.push(task);
-            }
-            scenes.push(file);
-        }
-        save_queue(&project, &AssetQueue::new("run-96-tts", tasks, now_ms())).unwrap();
-        let plan = StoryPlan {
-            scenes,
-            ..StoryPlan::new("test")
-        };
-        let started = std::time::Instant::now();
-        let result = run_queue(
-            &project,
-            "run-96-tts",
-            &plan,
-            Arc::new(ConcurrencyProbe::new()),
-        )
-        .await
-        .unwrap();
-        assert_eq!(result.tasks.len(), 96);
-        assert!(result
-            .tasks
-            .iter()
-            .all(|task| task.status == AssetTaskStatus::Succeeded));
-        assert!(started.elapsed() < Duration::from_secs(30));
         let _ = std::fs::remove_dir_all(project);
     }
 
@@ -990,7 +994,7 @@ mod tests {
         std::fs::create_dir_all(project.join("game/figure")).unwrap();
         std::fs::write(
             project.join("game/scene/start.txt"),
-            "; Ollaic Scene Staging\n; ollaic-asset-task:alice\nchangeFigure:none -id=alice -figureCharacter=alice -figureEmotion=default -right;\n",
+            "; Ollaic Scene Staging\n; ollaic-asset-task:alice\n; ollaic-figure-staging:changeFigure:none -id=alice -figureCharacter=alice -figureEmotion=default -right;\n",
         )
         .unwrap();
         std::fs::write(

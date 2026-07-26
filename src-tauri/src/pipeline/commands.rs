@@ -111,6 +111,12 @@ pub async fn pipeline_start(
         return Err("未配置可用的对话模型。请先配置 AI，或明确允许本地内容降级。".to_string());
     }
     let project_path = PathBuf::from(project_path);
+    if super::scheduler::project_has_story_content(&project_path)? {
+        return Err(
+            "项目已有故事内容；请使用 AI 聊天的可审阅 patch 工作流修改，Agent Flow 仅用于新建故事。"
+                .to_string(),
+        );
+    }
     let run_id = new_run_id();
     let recipe = default_recipe();
     let sink = make_sink(&app);

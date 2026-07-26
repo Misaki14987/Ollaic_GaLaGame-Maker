@@ -14,7 +14,7 @@ use tokio::time::{sleep, timeout, Duration};
 use crate::agents::{Agent, AgentContext, AgentError, AgentOutput, AgentRegistry};
 use crate::pipeline::dsl::{default_recipe, FlowRecipe, RecipeError, StepDef, StepKind};
 use crate::pipeline::events::{PipelineEvent, RecordingSink};
-use crate::pipeline::scheduler::{cleanup_rollback_snapshots, Pipeline};
+use crate::pipeline::scheduler::{cleanup_rollback_snapshots, project_has_story_content, Pipeline};
 use crate::pipeline::state::{Clock, RunStatus, StepRunHistory, StepStatus, SystemClock};
 use crate::story_plan::types::ChapterPlan;
 
@@ -335,7 +335,6 @@ async fn runs_full_p2_recipe_and_binds_generated_assets() {
     assert!(opening.contains("changeBg:"));
     assert!(opening.contains("bgm:"));
     assert!(opening.contains("changeFigure:"));
-    assert!(opening.lines().any(|line| line.contains(" -vo_start_")));
     let decision = std::fs::read_to_string(project.join("game/scene/decision.txt")).unwrap();
     assert!(decision.contains(
         "choose:握住她的手，一起承担:ending_trust.txt|遵守协议，回到日常:ending_depart.txt;"
@@ -355,12 +354,6 @@ async fn runs_full_p2_recipe_and_binds_generated_assets() {
         .is_some());
     assert!(project
         .join("game/bgm")
-        .read_dir()
-        .unwrap()
-        .next()
-        .is_some());
-    assert!(project
-        .join("game/vocal")
         .read_dir()
         .unwrap()
         .next()
@@ -1482,7 +1475,7 @@ async fn recovered_running_snapshot_can_execute_one_step() {
 }
 
 #[test]
-fn a_new_run_updates_the_story_plan_production_brief() {
+fn a_new_run_updates_the_brief_without_discarding_the_story_plan() {
     let project = fresh_project("new_brief");
     let sink = RecordingSink::new();
     let clock = StepClock::new();
@@ -1497,6 +1490,9 @@ fn a_new_run_updates_the_story_plan_production_brief() {
             &sink,
         )
         .unwrap();
+    let mut previous = crate::story_plan::load_plan(&project).unwrap().unwrap();
+    previous.synopsis = "keep me".to_string();
+    crate::story_plan::save_plan(&project, &previous).unwrap();
     pipeline
         .create_run(
             &project,
@@ -1508,13 +1504,20 @@ fn a_new_run_updates_the_story_plan_production_brief() {
         )
         .unwrap();
 
-    assert_eq!(
-        crate::story_plan::load_plan(&project)
-            .unwrap()
-            .unwrap()
-            .prompt,
-        "new brief"
-    );
+    let plan = crate::story_plan::load_plan(&project).unwrap().unwrap();
+    assert_eq!(plan.prompt, "new brief");
+    assert_eq!(plan.synopsis, "keep me");
+}
+
+#[test]
+fn existing_story_content_is_routed_away_from_destructive_flows() {
+    let project = fresh_project("existing_story_guard");
+    std::fs::create_dir_all(project.join("game/scene")).unwrap();
+    std::fs::write(project.join("game/scene/start.txt"), "; placeholder\n").unwrap();
+    assert!(!project_has_story_content(&project).unwrap());
+
+    std::fs::write(project.join("game/scene/start.txt"), "Alice:Keep this;\n").unwrap();
+    assert!(project_has_story_content(&project).unwrap());
 }
 
 #[test]

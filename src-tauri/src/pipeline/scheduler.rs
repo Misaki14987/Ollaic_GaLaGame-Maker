@@ -102,6 +102,28 @@ struct ConfiguredAssetGenerator {
 }
 
 impl AssetGenerator for ConfiguredAssetGenerator {
+    fn preflight(&self, task: &AssetTask) -> Result<(), String> {
+        if self.local_fallback {
+            return Ok(());
+        }
+        let (config, capability) = match task.kind {
+            AssetKind::Background | AssetKind::Figure => {
+                (crate::ai::config::load_image_config(), "图片")
+            }
+            AssetKind::Tts => (crate::ai::config::load_tts_config(), "音频"),
+            AssetKind::Bgm | AssetKind::Sfx => (crate::ai::config::load_music_config(), "音乐"),
+        };
+        crate::ai::commands::validate_provider_config_basics(&config, capability)?;
+        configured_model(&config.model)?;
+        if matches!(task.kind, AssetKind::Bgm | AssetKind::Sfx)
+            && config.provider.trim() == "custom"
+            && config.base_url.trim().is_empty()
+        {
+            return Err("自定义音乐端点未填写 Base URL".to_string());
+        }
+        Ok(())
+    }
+
     fn generate<'a>(
         &'a self,
         task: &'a AssetTask,
@@ -194,6 +216,57 @@ fn configured_model(value: &str) -> Result<String, String> {
         .find(|model| !model.is_empty())
         .map(str::to_string)
         .ok_or_else(|| "asset provider has no configured model".to_string())
+}
+
+pub(crate) fn project_has_story_content(project_path: &Path) -> Result<bool, String> {
+    if story_plan::load_plan(project_path)
+        .map_err(|error| error.to_string())?
+        .is_some_and(|plan| {
+            !plan.synopsis.trim().is_empty()
+                || !plan.memory.worldbook.trim().is_empty()
+                || !plan.memory.glossary.is_empty()
+                || !plan.chapters.is_empty()
+                || !plan.characters.is_empty()
+                || !plan.scene_plans.is_empty()
+                || !plan.scene_drafts.is_empty()
+                || !plan.asset_plan.is_empty()
+                || !plan.scenes.is_empty()
+        })
+    {
+        return Ok(true);
+    }
+
+    let characters_path = project_path.join("game/config/characters.json");
+    if characters_path.is_file()
+        && !crate::characters::commands::list_characters(
+            project_path.to_string_lossy().into_owned(),
+        )?
+        .is_empty()
+    {
+        return Ok(true);
+    }
+
+    let scene_dir = project_path.join("game/scene");
+    let entries = match std::fs::read_dir(&scene_dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(format!("failed to read {}: {error}", scene_dir.display())),
+    };
+    for entry in entries {
+        let path = entry.map_err(|error| error.to_string())?.path();
+        if path.extension().and_then(|value| value.to_str()) != Some("txt") {
+            continue;
+        }
+        let source = std::fs::read_to_string(&path)
+            .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+        if crate::webgal::parser::parse_script(&source)
+            .iter()
+            .any(|node| node.cmd_type != crate::webgal::types::CommandType::Comment)
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn matte_figure_bytes(
@@ -308,9 +381,8 @@ impl Pipeline {
         // plan must not leave an orphan run that later bypasses validation.
         let previous_plan = story_plan::load_plan(project_path).map_err(PipelineError::Plan)?;
         match previous_plan.clone() {
-            Some(plan) => {
-                let mut next = StoryPlan::new(prompt);
-                next.pipeline_runs = plan.pipeline_runs;
+            Some(mut next) => {
+                next.prompt = prompt.to_string();
                 story_plan::save_plan(project_path, &next).map_err(PipelineError::Plan)?;
             }
             None => {
@@ -787,13 +859,33 @@ impl Pipeline {
                         let downgraded = queue.tasks.iter().any(|task| {
                             task.status == AssetTaskStatus::Succeeded && task.used_local_fallback
                         });
+                        let pending_configuration = queue
+                            .tasks
+                            .iter()
+                            .filter(|task| {
+                                task.status == AssetTaskStatus::Pending
+                                    && task.error.as_deref().is_some_and(|error| {
+                                        error.starts_with("pending configuration:")
+                                    })
+                            })
+                            .count();
+                        let mut warnings = downgraded
+                            .then(|| "部分媒体供应商不可用，已生成本地占位素材".to_string())
+                            .into_iter()
+                            .collect::<Vec<_>>();
+                        if pending_configuration > 0 {
+                            warnings
+                                .push(format!("{pending_configuration} 个媒体任务等待供应商配置"));
+                        }
                         Ok(AgentOutput {
                             asset_queue: serde_json::to_value(queue).ok(),
-                            warnings: downgraded
-                                .then(|| "部分媒体供应商不可用，已生成本地占位素材".to_string())
-                                .into_iter()
-                                .collect(),
-                            downgrade: downgraded.then(|| "local-placeholder-assets".to_string()),
+                            warnings,
+                            downgrade: downgraded
+                                .then(|| "local-placeholder-assets".to_string())
+                                .or_else(|| {
+                                    (pending_configuration > 0)
+                                        .then(|| "media-capability-pending".to_string())
+                                }),
                             ..AgentOutput::default()
                         })
                     } else {
@@ -880,15 +972,16 @@ impl Pipeline {
                         return;
                     }
                 }
-                let mut output_transaction = match OutputTransaction::apply(project_path, &out) {
-                    Ok(transaction) => transaction,
-                    Err(error) => {
-                        drop(state);
-                        self.fail_step(project_path, handle, sink, clock, id, error.0)
-                            .await;
-                        return;
-                    }
-                };
+                let mut output_transaction =
+                    match OutputTransaction::apply(project_path, &out, &plan) {
+                        Ok(transaction) => transaction,
+                        Err(error) => {
+                            drop(state);
+                            self.fail_step(project_path, handle, sink, clock, id, error.0)
+                                .await;
+                            return;
+                        }
+                    };
                 if let Err(error) = story_plan::save_plan(project_path, &plan) {
                     let rollback = output_transaction.rollback();
                     drop(state);
@@ -1076,10 +1169,47 @@ fn apply_output(plan: &mut StoryPlan, out: &AgentOutput) {
     }
     if let Some(asset_plan) = &out.asset_plan {
         plan.asset_plan = asset_plan.clone();
+        plan_figure_sprites(&mut plan.characters, asset_plan);
         plan.scenes.clear();
     }
     if let Some(scenes) = &out.scenes {
         plan.scenes = scenes.iter().map(|scene| scene.name.clone()).collect();
+    }
+}
+
+fn plan_figure_sprites(
+    characters: &mut [crate::characters::types::Character],
+    asset_plan: &[crate::story_plan::AssetTaskPlan],
+) {
+    for task in asset_plan.iter().filter(|task| task.kind == "figure") {
+        let (Some(character_ref), Some(emotion)) =
+            (task.character_ref.as_deref(), task.emotion.as_deref())
+        else {
+            continue;
+        };
+        let Some(character) = characters
+            .iter_mut()
+            .find(|character| character.id == character_ref || character.name == character_ref)
+        else {
+            continue;
+        };
+        if let Some(sprite) = character
+            .sprites
+            .iter_mut()
+            .find(|sprite| sprite.emotion.eq_ignore_ascii_case(emotion))
+        {
+            if sprite.prompt.as_deref().is_none_or(str::is_empty) {
+                sprite.prompt = Some(task.prompt.clone());
+            }
+        } else {
+            character
+                .sprites
+                .push(crate::characters::types::CharacterSprite {
+                    emotion: emotion.to_string(),
+                    file: String::new(),
+                    prompt: Some(task.prompt.clone()),
+                });
+        }
     }
 }
 
@@ -1287,6 +1417,47 @@ mod character_cast_tests {
 
         assert_eq!(plan.scene_plans[0].character_ids, vec!["erin", "viper"]);
     }
+
+    #[test]
+    fn asset_plan_persists_missing_character_sprite_slots() {
+        let project = std::env::temp_dir().join("ollaic_planned_sprite_slot");
+        let _ = std::fs::remove_dir_all(&project);
+        let mut plan = StoryPlan::new("test");
+        plan.characters = serde_json::from_value(serde_json::json!([{
+            "id": "alice", "name": "Alice", "sprites": []
+        }]))
+        .unwrap();
+        let output = AgentOutput {
+            asset_plan: Some(vec![crate::story_plan::AssetTaskPlan {
+                id: "figure_alice_happy".into(),
+                kind: "figure".into(),
+                target_stem: "alice_happy".into(),
+                prompt: "happy Alice".into(),
+                scene_ref: None,
+                character_ref: Some("alice".into()),
+                emotion: Some("happy".into()),
+                status: "pending".into(),
+            }]),
+            ..AgentOutput::default()
+        };
+
+        apply_output(&mut plan, &output);
+        OutputTransaction::apply(&project, &output, &plan)
+            .unwrap()
+            .commit();
+
+        assert_eq!(plan.characters[0].sprites[0].emotion, "happy");
+        assert_eq!(plan.characters[0].sprites[0].file, "");
+        assert_eq!(
+            plan.characters[0].sprites[0].prompt.as_deref(),
+            Some("happy Alice")
+        );
+        let persisted =
+            crate::characters::commands::list_characters(project.to_string_lossy().into_owned())
+                .unwrap();
+        assert_eq!(persisted[0].sprites[0], plan.characters[0].sprites[0]);
+        let _ = std::fs::remove_dir_all(project);
+    }
 }
 
 fn clear_after_memory(plan: &mut StoryPlan) {
@@ -1304,12 +1475,12 @@ struct OutputTransaction {
 }
 
 impl OutputTransaction {
-    fn apply(project_path: &Path, out: &AgentOutput) -> Result<Self, AgentError> {
+    fn apply(project_path: &Path, out: &AgentOutput, plan: &StoryPlan) -> Result<Self, AgentError> {
         let mut writes: Vec<(std::path::PathBuf, Vec<u8>)> = Vec::new();
-        if let Some(characters) = &out.characters {
+        if out.characters.is_some() || out.asset_plan.is_some() {
             let document = crate::characters::types::CharactersDocument {
                 version: 1,
-                characters: characters.clone(),
+                characters: plan.characters.clone(),
             };
             let bytes = serde_json::to_vec_pretty(&document)
                 .map_err(|error| AgentError(format!("failed to serialize characters: {error}")))?;
@@ -1407,7 +1578,7 @@ fn create_rollback_snapshot(
     step_id: &str,
     out: &AgentOutput,
 ) -> Result<Option<String>, AgentError> {
-    if out.characters.is_none() && out.scenes.is_none() {
+    if out.characters.is_none() && out.asset_plan.is_none() && out.scenes.is_none() {
         return Ok(None);
     }
     std::fs::create_dir_all(project_path.join("game"))

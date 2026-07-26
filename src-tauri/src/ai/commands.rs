@@ -2086,7 +2086,10 @@ fn is_seedream_model(model: &str) -> bool {
     model.to_ascii_lowercase().contains("seedream")
 }
 
-fn validate_provider_config_basics(cfg: &AiProviderConfig, capability: &str) -> Result<(), String> {
+pub(crate) fn validate_provider_config_basics(
+    cfg: &AiProviderConfig,
+    capability: &str,
+) -> Result<(), String> {
     if cfg.provider.trim().is_empty() {
         return Err(format!("尚未选择{capability} AI 供应商"));
     }
