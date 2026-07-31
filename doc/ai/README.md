@@ -1,6 +1,6 @@
 # AI 子系统
 
-Ollaic 内置一个**对话式创作助手**:用户用自然语言描述创作意图,AI 通过多步「函数调用」读取项目上下文、暂存修改,并以**可预览、可同意/拒绝**的方式应用到脚本。除文本编辑外,还支持 **AI 生成图像(背景/CG/立绘)与语音(TTS)**。
+Ollaic 有两条 AI 工作流：FlowBoard 中的 **Production Agent Flow** 负责从 Production Brief 端到端生成可编辑 WebGAL；编辑器中的**对话式创作助手**负责局部读取、修改和预览。除此之外，还支持 AI 生成图像（背景/CG/立绘）与语音（TTS）。
 
 ## 子文档
 
@@ -15,6 +15,7 @@ Ollaic 内置一个**对话式创作助手**:用户用自然语言描述创作�
 
 ## 总览
 
+- **Production Agent Flow**：Rust 后端按 Plan → Memory → Plotter → Character → Dialogist → AssetPlanner → SceneScript → AssetTaskQueue 执行，当前完成 P2 资产闭环；详见 [`../v2-agent-pipeline.md`](../v2-agent-pipeline.md)。
 - **入口**:编辑器右侧 `AiAssistantPanel`(会话标题 + 状态徽标 + 输入框)。
 - **核心 Hook**:`useAiAgent`(状态机)、`useChatSession`(会话存储)。
 - **两种执行模式**:支持原生函数调用的供应商走**多步 Agent 循环**(读工具→写工具→暂存);其余供应商走 **legacy 单轮**(一次性返回 JSON 补丁)。
@@ -23,6 +24,10 @@ Ollaic 内置一个**对话式创作助手**:用户用自然语言描述创作�
 
 ## 相关源码
 
+- `src-tauri/src/agents/` — P1 多 Agent 内容生成、结构校验与 WebGAL 编译
+- `src-tauri/src/pipeline/` — Agent Flow 编排、恢复、历史与 StoryPlan 更新
+- [`../agent-flow-contracts.md`](../agent-flow-contracts.md) — 节点输入输出、引用、校验与恢复契约
+- `src-tauri/src/asset_queue/` — P2 资产队列、分类限流、Artifact 与自动绑定
 - `design/src/app/hooks/useAiAgent.ts` — AI 状态机与 Agent 循环
 - `design/src/app/hooks/useChatSession.ts` — 会话存储
 - `design/src/app/lib/ai-tools.ts` — 工具定义与注册表
