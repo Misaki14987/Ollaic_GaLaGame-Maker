@@ -30,7 +30,8 @@ fn save_doc(project_path: &str, doc: &CharactersDocument) -> Result<(), String> 
         fs::create_dir_all(parent).map_err(|e| format!("Failed to create config dir: {}", e))?;
     }
     let json = serde_json::to_string_pretty(doc).map_err(|e| e.to_string())?;
-    fs::write(&path, json).map_err(|e| format!("Failed to write {}: {}", path.display(), e))
+    crate::json_store::write_crash_safe(&path, json.as_bytes())
+        .map_err(|e| format!("Failed to write {}: {}", path.display(), e))
 }
 
 fn deduplicate_characters(characters: Vec<Character>) -> Vec<Character> {

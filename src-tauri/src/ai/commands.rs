@@ -3,8 +3,8 @@ use base64::Engine;
 use futures::{SinkExt, StreamExt};
 use genai::adapter::AdapterKind;
 use genai::chat::{
-    ChatMessage, ChatOptions, ChatRequest, ChatStreamEvent, StreamChunk, Tool, ToolCall,
-    ToolResponse,
+    ChatMessage, ChatOptions, ChatRequest, ChatResponseFormat, ChatStreamEvent, StreamChunk, Tool,
+    ToolCall, ToolResponse,
 };
 use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
 use genai::{Client, ModelIden, ServiceTarget};
@@ -337,6 +337,15 @@ pub async fn ai_generate_image(
     model: String,
     reference_image_path: Option<String>,
 ) -> Result<GeneratedMedia, String> {
+    generate_image_media(Some(&app_handle), prompt, model, reference_image_path).await
+}
+
+pub(crate) async fn generate_image_media(
+    app_handle: Option<&AppHandle>,
+    prompt: String,
+    model: String,
+    reference_image_path: Option<String>,
+) -> Result<GeneratedMedia, String> {
     let cfg = config::load_image_config();
     validate_provider_config_basics(&cfg, "图片")?;
     let model = model.trim();
@@ -362,7 +371,7 @@ pub async fn ai_generate_image(
             // data:image/<格式>;base64,<编码> 形式传入 image 字段，实现角色一致性。
             generate_openai_compatible_image(&cfg, model, &prompt, reference.as_ref()).await
         }
-        "aliyun" => generate_dashscope_image(&app_handle, &cfg, model, &prompt).await,
+        "aliyun" => generate_dashscope_image(app_handle, &cfg, model, &prompt).await,
         "gemini" => generate_gemini_image(&cfg, model, &prompt, reference.as_ref()).await,
         "sd-webui" => generate_sd_webui_image(&cfg, &prompt).await,
         "stability" => Err("Stability AI 图片接口需要 multipart/form-data；当前客户端尚未启用该格式，请先通过自定义 OpenAI 兼容网关接入。".to_string()),
@@ -377,6 +386,15 @@ pub async fn ai_generate_image(
 
 #[tauri::command]
 pub async fn ai_generate_tts(
+    text: String,
+    voice_prompt: String,
+    model: String,
+    format: String,
+) -> Result<GeneratedMedia, String> {
+    generate_tts_media(text, voice_prompt, model, format).await
+}
+
+pub(crate) async fn generate_tts_media(
     text: String,
     voice_prompt: String,
     model: String,
@@ -417,6 +435,14 @@ pub async fn ai_generate_tts(
 /// `{model, input, response_format}` and return raw audio bytes.
 #[tauri::command]
 pub async fn generate_music(
+    prompt: String,
+    model: String,
+    format: String,
+) -> Result<GeneratedMedia, String> {
+    generate_music_media(prompt, model, format).await
+}
+
+pub(crate) async fn generate_music_media(
     prompt: String,
     model: String,
     format: String,
@@ -842,6 +868,64 @@ pub async fn ai_chat_turn(
     }
 }
 
+/// Pipeline Agent entry point. `None` means no usable chat model is configured,
+/// so the caller may use an explicit local fallback. Provider failures remain
+/// errors and must not be silently downgraded.
+pub(crate) async fn complete_agent_text(
+    system_prompt: &str,
+    user_prompt: &str,
+) -> Result<Option<(String, String, Option<u32>, Option<u32>)>, String> {
+    let cfg = config::load_config();
+    if validate_config_basics(&cfg).is_err() {
+        return Ok(None);
+    }
+    let request = ChatRequest::new(vec![
+        ChatMessage::system(system_prompt),
+        ChatMessage::user(user_prompt),
+    ]);
+    let endpoint = effective_endpoint(&cfg);
+    let options = if matches!(cfg.provider.as_str(), "openai" | "deepseek") {
+        chat_debug_options().with_response_format(ChatResponseFormat::JsonMode)
+    } else {
+        chat_debug_options()
+    };
+    match build_client(&cfg)
+        .exec_chat(&cfg.model, request, Some(&options))
+        .await
+    {
+        Ok(response) => {
+            let text = response
+                .first_text()
+                .map(str::to_string)
+                .ok_or_else(|| "Agent model returned no text".to_string())?;
+            log_ai_event(
+                "pipeline_agent",
+                &cfg,
+                &endpoint,
+                true,
+                "agent turn completed",
+            );
+            Ok(Some((
+                text,
+                cfg.model,
+                response
+                    .usage
+                    .prompt_tokens
+                    .and_then(|value| u32::try_from(value).ok()),
+                response
+                    .usage
+                    .completion_tokens
+                    .and_then(|value| u32::try_from(value).ok()),
+            )))
+        }
+        Err(error) => {
+            let message = error.to_string();
+            log_ai_event("pipeline_agent", &cfg, &endpoint, false, &message);
+            Err(message)
+        }
+    }
+}
+
 fn build_client(cfg: &AiConfig) -> Client {
     let api_key = cfg.api_key.clone();
     let base_url = cfg.base_url.clone();
@@ -919,6 +1003,10 @@ fn validate_config_basics(cfg: &AiConfig) -> Result<(), String> {
         return Err("尚未配置 API Key，请先在 AI 设置中填写".into());
     }
     Ok(())
+}
+
+pub(crate) fn has_agent_chat_config() -> bool {
+    validate_config_basics(&config::load_config()).is_ok()
 }
 
 /// Default API endpoint for a chat provider. `None` means there is no built-in
@@ -1032,7 +1120,7 @@ async fn generate_openai_compatible_image(
 }
 
 async fn generate_dashscope_image(
-    app_handle: &AppHandle,
+    app_handle: Option<&AppHandle>,
     cfg: &AiProviderConfig,
     model: &str,
     prompt: &str,
@@ -1169,7 +1257,7 @@ async fn generate_dashscope_image(
 }
 
 fn emit_media_generation_progress(
-    app_handle: &AppHandle,
+    app_handle: Option<&AppHandle>,
     cfg: &AiProviderConfig,
     model: &str,
     phase: &str,
@@ -1177,17 +1265,19 @@ fn emit_media_generation_progress(
     total_attempts: u8,
     message: &str,
 ) {
-    let _ = app_handle.emit(
-        "ai-media-generation-progress",
-        AiMediaGenerationProgress {
-            provider: cfg.provider.clone(),
-            model: model.to_string(),
-            phase: phase.to_string(),
-            attempt,
-            total_attempts,
-            message: message.to_string(),
-        },
-    );
+    if let Some(app_handle) = app_handle {
+        let _ = app_handle.emit(
+            "ai-media-generation-progress",
+            AiMediaGenerationProgress {
+                provider: cfg.provider.clone(),
+                model: model.to_string(),
+                phase: phase.to_string(),
+                attempt,
+                total_attempts,
+                message: message.to_string(),
+            },
+        );
+    }
 }
 
 async fn generate_gemini_image(
@@ -1996,7 +2086,10 @@ fn is_seedream_model(model: &str) -> bool {
     model.to_ascii_lowercase().contains("seedream")
 }
 
-fn validate_provider_config_basics(cfg: &AiProviderConfig, capability: &str) -> Result<(), String> {
+pub(crate) fn validate_provider_config_basics(
+    cfg: &AiProviderConfig,
+    capability: &str,
+) -> Result<(), String> {
     if cfg.provider.trim().is_empty() {
         return Err(format!("尚未选择{capability} AI 供应商"));
     }

@@ -107,6 +107,21 @@ fn ai_agent_trace_sanitizes_secrets_without_log_truncation() {
 
 #[tokio::test]
 #[ignore]
+async fn real_pipeline_json_mode_harness() {
+    let (text, model, _, _) = complete_agent_text(
+        "Return one JSON object with exactly one boolean field named ok.",
+        "Set ok to true. JSON only.",
+    )
+    .await
+    .expect("真实模型调用失败")
+    .expect("未配置真实模型");
+    eprintln!("[harness] model={model} response={text}");
+    let value: serde_json::Value = serde_json::from_str(&text).expect("响应不是合法 JSON");
+    assert_eq!(value["ok"], true);
+}
+
+#[tokio::test]
+#[ignore]
 async fn real_model_insert_figure_harness() {
     let cfg = config::load_config();
     eprintln!(

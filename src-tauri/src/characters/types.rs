@@ -1,7 +1,21 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+fn deserialize_text_or_number<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    match serde_json::Value::deserialize(deserializer)? {
+        serde_json::Value::String(value) => Ok(value),
+        serde_json::Value::Number(value) => Ok(value.to_string()),
+        serde_json::Value::Null => Ok(String::new()),
+        value => Err(serde::de::Error::custom(format!(
+            "expected text or number, got {value}"
+        ))),
+    }
+}
 
 /// A single sprite/expression variation for a character.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CharacterSprite {
     /// Emotion label, e.g. "default", "happy", "sad", "angry", "surprised".
@@ -14,12 +28,14 @@ pub struct CharacterSprite {
 }
 
 /// A directional relation to another character.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CharacterRelation {
     /// Target character id.
+    #[serde(default)]
     pub target_id: String,
     /// Relation type in Chinese, e.g. "哥哥", "朋友", "敌人".
+    #[serde(default)]
     pub relation_type: String,
     /// Optional detail.
     #[serde(default)]
@@ -27,7 +43,7 @@ pub struct CharacterRelation {
 }
 
 /// A character in the visual novel project.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Character {
     pub id: String,
@@ -58,7 +74,7 @@ pub struct Character {
     #[serde(default)]
     pub gender: String,
     /// Age group or specific age as free text.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_text_or_number")]
     pub age: String,
     /// Emotion → figure file mappings.
     #[serde(default)]
