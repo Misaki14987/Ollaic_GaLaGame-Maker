@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo, memo, Fragment, type ReactNode } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
-import { DndProvider, useDrag, useDrop } from 'react-dnd';
+import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import {
@@ -15,25 +15,21 @@ import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialo
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { AiSettingsDialog } from './AiSettingsDialog';
 import { AppSettingsDialog, loadAppSettings } from './AppSettingsDialog';
-import { ProjectMetadataDialog, type ExportTaskState } from './ProjectMetadataDialog';
+import { ProjectMetadataDialog } from './ProjectMetadataDialog';
 import { SnapshotManagerDialog } from './SnapshotManagerDialog';
 import { SceneManagerPanel } from './SceneManagerPanel';
-import type { WebGalNode, WebGalCommandType, SceneLink } from '../lib/webgal-types';
-import { extractSceneLinks, commandCategories, commandLabels, categoryLabels, categoryTagClass, getCommandCategory, isMetadataComment } from '../lib/webgal-types';
+import type { WebGalNode } from '../lib/webgal-types';
 import {
   parseScene, serializeScene, saveScene, loadScene,
   openProject, getScenePath, createScene,
-  exportProject, readProjectMetadata, saveProjectMetadata,
-  createProjectSnapshot, listProjectSnapshots, renameProjectSnapshot, deleteProjectSnapshot, restoreProjectSnapshot,
   setRuntimeProject, setRuntimeTemplateDir, getRuntimeUrl, jumpToSentence, openInBrowser,
-  readFileText, writeFileText, parseSceneHeader, deleteScene, renameScene,
-  type ProjectInfo, type SceneHeader, type ProjectMetadata, type SnapshotInfo,
+  readFileText, writeFileText, deleteScene, renameScene,
+  type ProjectInfo,
 } from '../lib/webgal-ipc';
 import { listCharacters, listCharacterNames } from '../lib/character-ipc';
 import type { Character } from '../lib/character-types';
 import { characterColor } from '../lib/character-editing';
 import { useAiAgent } from '../hooks/useAiAgent';
-import { insertSceneNode, reorderSceneNodes, pasteSceneNode } from '../lib/scene-editing';
 import { listAssets, syncSceneVoiceCards } from '../lib/assets-ipc';
 import {
   ensureSceneCard,
@@ -51,16 +47,7 @@ import { SceneGraph } from './SceneGraph';
 import { figureLabel } from '../lib/node-display';
 import { computeFullNodeDiff, type NodeDiffEntry } from '../lib/node-diff';
 import type { SceneEdit } from '../lib/change-set';
-import { ConflictCard, ErrorCard } from './AiStatusCard';
 import { DetailPanel } from './DetailPanel';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from './ui/dialog';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -71,46 +58,20 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from './ui/alert-dialog';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from './ui/dropdown-menu';
-import {
-  ContextMenu,
-  ContextMenuTrigger,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-} from './ui/context-menu';
 import { StoryOsSideNav, StoryOsTopBar } from './StoryOsChrome';
 import { PerformanceTimeline } from './PerformanceTimeline';
-
-type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
+import { AiAssistantPanel } from './story-editor/AiAssistantPanel';
+import { FullScreenWorldline, SceneWorldlinePanel } from './story-editor/SceneWorldline';
+import { ScriptCommandStream } from './story-editor/ScriptCommandStream';
+import { NewSceneDialog } from './story-editor/NewSceneDialog';
+import { useSceneDocument } from './story-editor/useSceneDocument';
+import { useSceneGraphIndex } from './story-editor/useSceneGraphIndex';
+import { useProjectSnapshots } from './story-editor/useProjectSnapshots';
+import { useProjectExport } from './story-editor/useProjectExport';
 
 // Fixed auto-save cadence (ms). Auto-save is toggled on/off from the top-bar
 // switch; there is no user-configurable interval.
 const AUTO_SAVE_INTERVAL_MS = 3_000;
-
-const EMPTY_PROJECT_METADATA: ProjectMetadata = {
-  synopsis: '',
-  description: '',
-  coverPath: '',
-  tags: [],
-  version: '0.1.0',
-  releaseNotes: '',
-  lastExportDir: '',
-};
-
-const IDLE_EXPORT_TASK: ExportTaskState = {
-  status: 'idle',
-  warnings: [],
-  issues: [],
-  failureCount: 0,
-};
 
 function getCommandSummary(node: WebGalNode): string {
   switch (node.type) {
@@ -1597,108 +1558,45 @@ export function StoryEditor() {
   const [projectPath, setProjectPath] = useState<string | null>(null);
   const [projectInfo, setProjectInfo] = useState<ProjectInfo | null>(null);
   const [currentSceneName, setCurrentSceneName] = useState('start.txt');
-  const [dirty, setDirty] = useState(false);
-  const [sceneHeaders, setSceneHeaders] = useState<Record<string, SceneHeader>>({});
-  const [sceneLinkMap, setSceneLinkMap] = useState<Record<string, SceneLink[]>>({});
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
 
   // Editor state
-  const [nodes, setNodes] = useState<WebGalNode[]>([]);
-  const nodesRef = useRef<WebGalNode[]>([]);
-  const [selectedNode, setSelectedNode] = useState<WebGalNode | null>(null);
-  const [scriptSource, setScriptSource] = useState('');
+  const {
+    nodes, setNodes, nodesRef,
+    selectedNode, setSelectedNode,
+    scriptSource, setScriptSource,
+    dirty, setDirty, dirtyRef,
+    saveStatus, setSaveStatus,
+    clipboardNode,
+    markDirty,
+    pushHistory,
+    undo, redo,
+    insertNode, createUnlockNode, updateSelectedNode,
+    deleteSelectedNode, deleteNode, copyNode, cutNode, reorderNodes, pasteNode,
+  } = useSceneDocument();
+  const {
+    headers: sceneHeaders,
+    links: sceneLinkMap,
+    refresh: refreshSceneGraph,
+    updateHeader: handleHeaderUpdated,
+    updateCurrentLinks: updateSceneLinks,
+  } = useSceneGraphIndex(currentSceneName, nodes);
   const [showScript, setShowScript] = useState(false);
   const [commandSearchQuery, setCommandSearchQuery] = useState('');
-  const [clipboardNode, setClipboardNode] = useState<WebGalNode | null>(null);
   const [loading, setLoading] = useState(true);
 
   // AI state
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
   const [aiUploadsRevision, setAiUploadsRevision] = useState(0);
   const [appSettingsOpen, setAppSettingsOpen] = useState(false);
-  const [projectMetadataOpen, setProjectMetadataOpen] = useState(false);
-  const [projectMetadata, setProjectMetadata] = useState<ProjectMetadata | null>(null);
-  const [metadataSaving, setMetadataSaving] = useState(false);
-  const [exportTask, setExportTask] = useState<ExportTaskState>(IDLE_EXPORT_TASK);
   // Transient success toast for single-scene export, rendered by React so its
   // dismissal timer is cleaned up on unmount (no stray DOM nodes).
   const [exportToast, setExportToast] = useState<string | null>(null);
   const exportToastTimerRef = useRef<ReturnType<typeof setTimeout>>();
-  const lastExportPayloadRef = useRef<{
-    metadata: ProjectMetadata;
-    outputDir: string;
-    asZip: boolean;
-  } | null>(null);
-  const [snapshotManagerOpen, setSnapshotManagerOpen] = useState(false);
-  const [snapshots, setSnapshots] = useState<SnapshotInfo[]>([]);
-  const [snapshotBusy, setSnapshotBusy] = useState(false);
-  const [snapshotError, setSnapshotError] = useState<string | null>(null);
-  const [snapshotStatus, setSnapshotStatus] = useState<string | null>(null);
   const [sceneManagerOpen, setSceneManagerOpen] = useState(false);
   const [newSceneOpen, setNewSceneOpen] = useState(false);
-  const [newSceneName, setNewSceneName] = useState('');
-  const [newSceneError, setNewSceneError] = useState('');
-  const [creatingScene, setCreatingScene] = useState(false);
   const [charactersForAi, setCharactersForAi] = useState<Character[]>([]);
   const [characterColors, setCharacterColors] = useState<Record<string, string>>({});
-  const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
-  const [renameTarget, setRenameTarget] = useState<{ id: string; title: string } | null>(null);
-  const [renameValue, setRenameValue] = useState('');
-  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
 
-  const loadSceneHeaders = useCallback(async (projectPath: string, scenes: string[]) => {
-    const entries = await Promise.all(
-      scenes.map(async (name) => {
-        try {
-          const path = await getScenePath(projectPath, name);
-          const text = await readFileText(path);
-          return [name, parseSceneHeader(text)] as const;
-        } catch {
-          return [name, {}] as const;
-        }
-      }),
-    );
-    setSceneHeaders(Object.fromEntries(entries));
-  }, []);
-
-  const loadSceneLinkMap = useCallback(async (projectPath: string, scenes: string[]) => {
-    const entries = await Promise.all(
-      scenes.map(async (name) => {
-        try {
-          const path = await getScenePath(projectPath, name);
-          const nodes = await loadScene(path);
-          return [name, extractSceneLinks(nodes)] as const;
-        } catch {
-          return [name, [] as SceneLink[]] as const;
-        }
-      }),
-    );
-    setSceneLinkMap(Object.fromEntries(entries));
-  }, []);
-
-  // Keep the current scene's outgoing links live so the relationship graph
-  // reflects edits — AI changes, manual edits, added/removed jump & control
-  // nodes — without waiting for a save. extractSceneLinks only looks at
-  // changeScene / callScene / choose targets, and sceneLinksEqual skips updates
-  // that don't change any target, so editing dialogue never churns the graph.
-  //
-  // On a scene switch, currentSceneName updates a render before `nodes` (which
-  // load async). In that in-between render `nodes` still belongs to the previous
-  // scene, so attributing them to the new scene would write wrong links and make
-  // the graph flicker (wrong → corrected). The prevNodes guard skips renders
-  // where only currentSceneName changed; we only sync when `nodes` itself
-  // changed, at which point currentSceneName already reflects its scene.
-  const prevNodesRef = useRef(nodes);
-  useEffect(() => {
-    if (prevNodesRef.current === nodes) return;
-    prevNodesRef.current = nodes;
-    const links = extractSceneLinks(nodes);
-    setSceneLinkMap((prev) => {
-      const prevLinks = prev[currentSceneName];
-      if (prevLinks && sceneLinksEqual(prevLinks, links)) return prev;
-      return { ...prev, [currentSceneName]: links };
-    });
-  }, [nodes, currentSceneName]);
 
   const loadCharacterColors = useCallback(async (projectPath: string) => {
     try {
@@ -1724,9 +1622,6 @@ export function StoryEditor() {
     void loadCharacterColors(projectPath);
   }, [loadCharacterColors, projectPath]);
 
-  const handleHeaderUpdated = useCallback((name: string, header: SceneHeader) => {
-    setSceneHeaders((prev) => ({ ...prev, [name]: header }));
-  }, []);
 
   const chooseInitialScene = useCallback((scenes: string[], requested: string | null): string => {
     if (requested && scenes.includes(requested)) return requested;
@@ -1739,34 +1634,19 @@ export function StoryEditor() {
     try {
       const info = await openProject(projectPath);
       setProjectInfo(info);
-      void loadSceneHeaders(projectPath, info.scenes);
-      void loadSceneLinkMap(projectPath, info.scenes);
+      void refreshSceneGraph(projectPath, info.scenes);
     } catch {}
-  }, [projectPath, loadSceneHeaders, loadSceneLinkMap]);
+  }, [projectPath, refreshSceneGraph]);
 
   const [unsavedConfirmOpen, setUnsavedConfirmOpen] = useState(false);
   const pendingActionRef = useRef<(() => void) | null>(null);
 
-  useEffect(() => {
-    nodesRef.current = nodes;
-  }, [nodes]);
-
   // In-memory draft cache: sceneName -> nodes snapshot for unsaved scenes
   const sceneDraftCache = useRef<Map<string, WebGalNode[]>>(new Map());
   const aiPreviewingCurrentSceneRef = useRef(false);
-  // Keep a ref in sync so the close-requested handler always sees current dirty state
-  const dirtyRef = useRef(dirty);
-  useEffect(() => { dirtyRef.current = dirty; }, [dirty]);
-  useEffect(() => {
-    if (selectedNode) {
-      const idx = nodesRef.current.findIndex((n) => n.id === selectedNode.id);
-      if (idx >= 0) selectedIndexRef.current = idx;
-    }
-  }, [selectedNode]);
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const autoSaveRef = useRef<ReturnType<typeof setInterval>>();
-  const selectedIndexRef = useRef(0);
   // Monotonic token guarding async scene loads (switch/open) against out-of-order
   // completion — only the most recent load is allowed to commit to state.
   const sceneLoadTokenRef = useRef(0);
@@ -1795,19 +1675,6 @@ export function StoryEditor() {
     setRuntimeProject(projectPath).catch((e) =>
       console.warn('[runtime] failed to sync project path:', e),
     );
-  }, [projectPath]);
-
-  useEffect(() => {
-    if (!projectPath) {
-      setProjectMetadata(null);
-      return;
-    }
-    readProjectMetadata(projectPath)
-      .then((metadata) => setProjectMetadata(metadata ?? EMPTY_PROJECT_METADATA))
-      .catch((e) => {
-        console.warn('[project] failed to load metadata:', e);
-        setProjectMetadata(EMPTY_PROJECT_METADATA);
-      });
   }, [projectPath]);
 
   // ---------------------------------------------------------------------------
@@ -1895,8 +1762,7 @@ export function StoryEditor() {
         // Load scene header comments + outgoing scene-jump map for the graph view
         const info = await openProject(storedPath).catch(() => null);
         if (info) {
-          void loadSceneHeaders(storedPath, info.scenes);
-          void loadSceneLinkMap(storedPath, info.scenes);
+          void refreshSceneGraph(storedPath, info.scenes);
         }
       } else {
         // No project path yet; keep the editor empty until a project is opened.
@@ -1914,212 +1780,6 @@ export function StoryEditor() {
   // ---------------------------------------------------------------------------
   // 同步节点到脚本文本
   // ---------------------------------------------------------------------------
-  const syncScript = useCallback(async (nextNodes: WebGalNode[]) => {
-    try {
-      const text = await serializeScene(nextNodes);
-      setScriptSource(text);
-    } catch {
-      // keep stale
-    }
-  }, []);
-
-  // Mark dirty on any node change
-  const markDirty = useCallback(() => {
-    setDirty(true);
-    setSaveStatus('idle');
-  }, []);
-
-  const commitEditedNodes = useCallback((nextNodes: WebGalNode[]) => {
-    nodesRef.current = nextNodes;
-    setNodes(nextNodes);
-    void syncScript(nextNodes);
-    markDirty();
-  }, [markDirty, syncScript]);
-
-  // Undo / Redo
-  const [history, setHistory] = useState<WebGalNode[][]>([]);
-  const [redoHistory, setRedoHistory] = useState<WebGalNode[][]>([]);
-
-  const pushHistory = useCallback((nodesSnapshot: WebGalNode[]) => {
-    setHistory(prev => {
-      const next = [...prev, nodesSnapshot];
-      return next.length > 50 ? next.slice(-50) : next;
-    });
-    setRedoHistory([]);
-  }, []);
-
-  // Debounce timer for merging successive updateNode calls to the same node
-  const debounceTimerRef = useRef<ReturnType<typeof setTimeout>>();
-  const pendingRecordRef = useRef<WebGalNode[] | null>(null);
-
-  const flushPendingHistory = useCallback((): WebGalNode[] | null => {
-    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
-    const pending = pendingRecordRef.current;
-    if (!pending) return null;
-    pushHistory(pending);
-    pendingRecordRef.current = null;
-    return pending;
-  }, [pushHistory]);
-
-  const undo = useCallback(() => {
-    const current = nodesRef.current;
-    const pending = flushPendingHistory();
-    if (pending) {
-      setHistory(prev => prev.slice(0, -1));
-      setRedoHistory(prev => [...prev, current].slice(-50));
-      commitEditedNodes(pending);
-      setSelectedNode(null);
-      return;
-    }
-    const prevNodes = history[history.length - 1];
-    if (!prevNodes) return;
-    setHistory(prev => prev.slice(0, -1));
-    setRedoHistory(prev => [...prev, current].slice(-50));
-    commitEditedNodes(prevNodes);
-    setSelectedNode(null);
-  }, [commitEditedNodes, flushPendingHistory, history]);
-
-  const redo = useCallback(() => {
-    if (flushPendingHistory()) return;
-    const nextNodes = redoHistory[redoHistory.length - 1];
-    if (!nextNodes) return;
-    const current = nodesRef.current;
-    setRedoHistory(prev => prev.slice(0, -1));
-    setHistory(prev => [...prev, current].slice(-50));
-    commitEditedNodes(nextNodes);
-    setSelectedNode(null);
-  }, [commitEditedNodes, flushPendingHistory, redoHistory]);
-
-  // ---------------------------------------------------------------------------
-  // Node CRUD
-  // ---------------------------------------------------------------------------
-  const insertNode = useCallback((type: WebGalCommandType, atIndex: number) => {
-    const current = nodesRef.current;
-    flushPendingHistory();
-    pushHistory(current);
-    const { nodes: updated, inserted } = insertSceneNode(current, type, atIndex, Date.now().toString());
-    commitEditedNodes(updated);
-    setSelectedNode(inserted);
-  }, [commitEditedNodes, flushPendingHistory, pushHistory]);
-
-  const createUnlockNode = useCallback((sourceNode: WebGalNode, atIndex: number) => {
-    const asset = (sourceNode.asset || sourceNode.content || '').trim();
-    if (!asset || asset === 'none') return;
-    const unlockType: WebGalCommandType | null = sourceNode.type === 'changeBg'
-      ? 'unlockCg'
-      : sourceNode.type === 'bgm'
-        ? 'unlockBgm'
-        : null;
-    if (!unlockType) return;
-
-    const current = nodesRef.current;
-    const existing = current[atIndex];
-    if (existing?.type === unlockType && (existing.asset || existing.content || '').trim() === asset) {
-      setSelectedNode(existing);
-      return;
-    }
-
-    const displayName = asset.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ');
-    flushPendingHistory();
-    pushHistory(current);
-    const { nodes: insertedNodes, inserted } = insertSceneNode(current, unlockType, atIndex, Date.now().toString());
-    const updated = insertedNodes.map((node) => node.id === inserted.id
-      ? {
-          ...node,
-          content: asset,
-          asset,
-          displayName,
-        }
-      : node);
-    const selected = updated.find((node) => node.id === inserted.id) ?? inserted;
-    commitEditedNodes(updated);
-    setSelectedNode(selected);
-  }, [commitEditedNodes, flushPendingHistory, pushHistory]);
-
-  const updateSelectedNode = useCallback((updates: Partial<WebGalNode>) => {
-    const current = nodesRef.current;
-    const selected = selectedNode;
-    if (!selected) return;
-
-    if (!pendingRecordRef.current) {
-      pendingRecordRef.current = current;
-    }
-    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
-    debounceTimerRef.current = setTimeout(() => {
-      const pending = pendingRecordRef.current;
-      if (pending) pushHistory(pending);
-      pendingRecordRef.current = null;
-    }, 800);
-
-    let nextSelected: WebGalNode | null = null;
-    const updated = current.map((node) => {
-      if (node.id !== selected.id) return node;
-      nextSelected = { ...node, ...updates };
-      return nextSelected;
-    });
-    if (!nextSelected) return;
-    nodesRef.current = updated;
-    setNodes(updated);
-    setSelectedNode(nextSelected);
-    void syncScript(updated);
-    markDirty();
-  }, [markDirty, pushHistory, selectedNode, syncScript]);
-
-  const deleteSelectedNode = useCallback(() => {
-    const selected = selectedNode;
-    if (!selected) return;
-    const current = nodesRef.current;
-    flushPendingHistory();
-    pushHistory(current);
-    const updated = current.filter((node) => node.id !== selected.id);
-    commitEditedNodes(updated);
-    setSelectedNode(null);
-  }, [commitEditedNodes, flushPendingHistory, pushHistory, selectedNode]);
-
-  // ---------------------------------------------------------------------------
-  // Per-node operations (for context menu / drag handle)
-  // ---------------------------------------------------------------------------
-  const deleteNode = useCallback((nodeId: string) => {
-    const current = nodesRef.current;
-    flushPendingHistory();
-    pushHistory(current);
-    const updated = current.filter((node) => node.id !== nodeId);
-    commitEditedNodes(updated);
-    if (selectedNode?.id === nodeId) setSelectedNode(null);
-  }, [commitEditedNodes, flushPendingHistory, pushHistory, selectedNode]);
-
-  const copyNode = useCallback((nodeId: string) => {
-    const current = nodesRef.current;
-    const target = current.find((node) => node.id === nodeId);
-    if (!target) return;
-    setClipboardNode({ ...target, id: `${target.id}__copy__${Date.now().toString()}` });
-  }, []);
-
-  const cutNode = useCallback((nodeId: string) => {
-    const current = nodesRef.current;
-    const target = current.find((node) => node.id === nodeId);
-    if (!target) return;
-    setClipboardNode({ ...target, id: `${target.id}__cut__${Date.now().toString()}` });
-    deleteNode(nodeId);
-  }, [deleteNode]);
-
-  const reorderNodes = useCallback((fromIndex: number, toIndex: number) => {
-    const current = nodesRef.current;
-    flushPendingHistory();
-    pushHistory(current);
-    const updated = reorderSceneNodes(current, fromIndex, toIndex);
-    commitEditedNodes(updated);
-  }, [commitEditedNodes, flushPendingHistory, pushHistory]);
-
-  const pasteNode = useCallback((atIndex: number) => {
-    if (!clipboardNode) return;
-    const current = nodesRef.current;
-    flushPendingHistory();
-    pushHistory(current);
-    const updated = pasteSceneNode(current, clipboardNode, atIndex, Date.now().toString());
-    commitEditedNodes(updated);
-  }, [clipboardNode, commitEditedNodes, flushPendingHistory, pushHistory]);
-
   const jumpToNode = useCallback((index: number) => {
     if (!currentSceneName) return;
     void jumpToSentence(currentSceneName, index + 1).catch((e) =>
@@ -2184,14 +1844,14 @@ export function StoryEditor() {
       setDirty(false);
       sceneDraftCache.current.delete(currentSceneName);
       // Refresh header + scene-graph link entry for the saved scene
-      if (projectPath) void loadSceneHeaders(projectPath, projectInfo?.scenes ?? [currentSceneName]);
+      if (projectPath) void refreshSceneGraph(projectPath, projectInfo?.scenes ?? [currentSceneName]);
       // Sync voice cards from the dialogue lines
       if (projectPath) {
         syncSceneVoiceCards(projectPath, currentSceneName).catch((e) =>
           console.warn('[voice] sync voice cards failed:', e),
         );
       }
-      setSceneLinkMap((prev) => ({ ...prev, [currentSceneName]: extractSceneLinks(nodesToSave) }));
+      updateSceneLinks(currentSceneName, nodesToSave);
       setSaveStatus('saved');
       // Reset status after 2s
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -2206,7 +1866,8 @@ export function StoryEditor() {
     }
   }, [
     currentSceneName,
-    loadSceneHeaders,
+    refreshSceneGraph,
+    updateSceneLinks,
     nodes,
     projectInfo?.scenes,
     projectPath,
@@ -2394,12 +2055,11 @@ export function StoryEditor() {
       }
       void loadCharacterColors(selected);
 
-      void loadSceneHeaders(selected, info.scenes);
-      void loadSceneLinkMap(selected, info.scenes);
+      void refreshSceneGraph(selected, info.scenes);
     } catch (e) {
       console.error('Open project failed:', e);
     }
-  }, [projectId, loadSceneHeaders, loadSceneLinkMap, chooseInitialScene]);
+  }, [projectId, refreshSceneGraph, chooseInitialScene]);
 
   // ---------------------------------------------------------------------------
   // Switch scene within project
@@ -2460,56 +2120,25 @@ export function StoryEditor() {
   // ---------------------------------------------------------------------------
   const handleNewScene = useCallback(async () => {
     if (!projectPath) return;
-    setNewSceneName('');
-    setNewSceneError('');
     setNewSceneOpen(true);
   }, [projectPath]);
 
-  const handleCreateSceneConfirm = useCallback(async () => {
-    if (!projectPath || creatingScene) return;
-    const name = newSceneName.trim();
-    if (!name) {
-      setNewSceneError('请输入场景文件名。');
-      return;
-    }
-    if (/[\\/:*?"<>|]/.test(name)) {
-      setNewSceneError('文件名不能包含 \\ / : * ? " < > |。');
-      return;
-    }
-    const baseName = name.replace(/\.txt$/i, '');
-    const sceneName = `${baseName}.txt`;
-    if (projectInfo?.scenes?.includes(sceneName)) {
-      setNewSceneError(`场景 ${sceneName} 已存在。`);
-      return;
-    }
-    setCreatingScene(true);
-    setNewSceneError('');
+  const handleCreateScene = useCallback(async (sceneName: string) => {
+    if (!projectPath) throw new Error('项目路径不可用');
+    const baseName = sceneName.replace(/\.txt$/i, '');
+    await createScene(projectPath, baseName);
+    const info = await openProject(projectPath);
+    setProjectInfo(info);
     try {
-      await createScene(projectPath, baseName);
-      // Refresh project info
-      const info = await openProject(projectPath);
-      setProjectInfo(info);
-      // Immediately create a matching background card in the asset library so the
-      // new scene shows up under 素材库 > 背景, ready to fill in / generate.
-      try {
-        const metadata = await loadAssetMetadata(projectPath, projectId);
-        const index = Object.keys(metadata.sceneCards ?? {}).length + 1;
-        const next = ensureSceneCard(metadata, sceneName, index);
-        if (next !== metadata) await saveAssetMetadata(projectPath, next);
-      } catch (metaErr) {
-        console.error('Create scene card failed:', metaErr);
-      }
-      // Switch to new scene
-      await handleSwitchScene(sceneName);
-      setNewSceneOpen(false);
-      setNewSceneName('');
-    } catch (e) {
-      console.error('Create scene failed:', e);
-      setNewSceneError(`创建场景失败: ${String(e)}`);
-    } finally {
-      setCreatingScene(false);
+      const metadata = await loadAssetMetadata(projectPath, projectId);
+      const index = Object.keys(metadata.sceneCards ?? {}).length + 1;
+      const next = ensureSceneCard(metadata, sceneName, index);
+      if (next !== metadata) await saveAssetMetadata(projectPath, next);
+    } catch (error) {
+      console.error('Create scene card failed:', error);
     }
-  }, [projectPath, creatingScene, newSceneName, projectInfo?.scenes, projectId, handleSwitchScene]);
+    await handleSwitchScene(sceneName);
+  }, [handleSwitchScene, projectId, projectPath]);
 
   const handleDeleteScene = useCallback(async (sceneName: string) => {
     if (!projectPath) return;
@@ -2640,190 +2269,71 @@ export function StoryEditor() {
 
   const projectName = projectInfo?.config.Game_name || projectPath?.split('/').pop() || '未命名项目';
 
-  const handleSaveProjectMetadata = useCallback(async (metadata: ProjectMetadata) => {
+  const reloadAfterSnapshot = useCallback(async () => {
     if (!projectPath) return;
-    setMetadataSaving(true);
-    try {
-      await saveProjectMetadata(projectPath, metadata);
-      setProjectMetadata(metadata);
-    } catch (e) {
-      alert(`保存元信息失败: ${e}`);
-    } finally {
-      setMetadataSaving(false);
-    }
-  }, [projectPath]);
+    const info = await openProject(projectPath);
+    setProjectInfo(info);
+    await refreshSceneGraph(projectPath, info.scenes);
+    const restoredSceneName = info.scenes.includes(currentSceneName)
+      ? currentSceneName
+      : (info.scenes[0] ?? 'start.txt');
+    setCurrentSceneName(restoredSceneName);
+    const scenePath = await getScenePath(projectPath, restoredSceneName);
+    const loaded = await loadScene(scenePath);
+    setNodes(loaded);
+    setScriptSource(await serializeScene(loaded));
+    sceneDraftCache.current.clear();
+    setDirty(false);
+    setSelectedNode(null);
+    setAiUploadsRevision((revision) => revision + 1);
+    await refreshCharactersForAi();
+  }, [
+    currentSceneName,
+    projectPath,
+    refreshCharactersForAi,
+    refreshSceneGraph,
+    setDirty,
+    setNodes,
+    setScriptSource,
+    setSelectedNode,
+  ]);
 
-  const handleExportProjectWithMetadata = useCallback(async (
-    metadata: ProjectMetadata,
-    outputDir: string,
-    asZip: boolean,
-  ) => {
-    if (!projectPath) return;
-    const failureCount = exportTask.status === 'failed' ? exportTask.failureCount : 0;
-    lastExportPayloadRef.current = { metadata, outputDir, asZip };
-    try {
-      if (dirty && !(await handleSave())) return;
-      const payload = { ...metadata, lastExportDir: outputDir };
-      lastExportPayloadRef.current = { metadata: payload, outputDir, asZip };
-      setExportTask({
-        status: 'savingMetadata',
-        warnings: [],
-        issues: [],
-        failureCount,
-      });
-      await saveProjectMetadata(projectPath, payload);
-      setProjectMetadata(payload);
-      setExportTask({
-        status: 'exporting',
-        warnings: [],
-        issues: [],
-        failureCount,
-      });
-      const result = await exportProject(projectPath, outputDir, asZip, payload);
-      if (result.success) {
-        setExportTask({
-          status: 'succeeded',
-          outputPath: result.outputPath || outputDir,
-          warnings: result.warnings ?? [],
-          issues: result.issues ?? [],
-          failureCount: 0,
-        });
-      } else {
-        setExportTask((prev) => ({
-          status: 'failed',
-          warnings: result.warnings ?? [],
-          issues: result.issues ?? [],
-          error: '导出校验未通过，请处理错误后重试。',
-          failureCount: prev.failureCount + 1,
-        }));
-      }
-    } catch (e) {
-      setExportTask((prev) => ({
-        status: 'failed',
-        warnings: prev.warnings ?? [],
-        issues: prev.issues ?? [],
-        error: String(e),
-        failureCount: prev.failureCount + 1,
-      }));
-    }
-  }, [projectPath, dirty, handleSave, exportTask.status, exportTask.failureCount]);
+  const ensureSaved = useCallback(
+    async () => !dirty || handleSave(),
+    [dirty, handleSave],
+  );
 
-  const handleRetryExportProject = useCallback(async () => {
-    const payload = lastExportPayloadRef.current;
-    if (!payload) return;
-    await handleExportProjectWithMetadata(payload.metadata, payload.outputDir, payload.asZip);
-  }, [handleExportProjectWithMetadata]);
+  const {
+    open: projectMetadataOpen,
+    setOpen: setProjectMetadataOpen,
+    metadata: projectMetadata,
+    saving: metadataSaving,
+    task: exportTask,
+    saveMetadata: handleSaveProjectMetadata,
+    exportWithMetadata: handleExportProjectWithMetadata,
+    retry: handleRetryExportProject,
+    openDialog: handleExportProject,
+  } = useProjectExport({ projectPath, ensureSaved });
 
-  const handleExportProject = useCallback(() => {
-    if (!projectPath) return;
-    setExportTask(IDLE_EXPORT_TASK);
-    setProjectMetadataOpen(true);
-  }, [projectPath]);
-
-  const refreshSnapshots = useCallback(async () => {
-    if (!projectPath) return;
-    try {
-      setSnapshotError(null);
-      setSnapshots(await listProjectSnapshots(projectPath));
-    } catch (e) {
-      setSnapshotError(`读取快照失败: ${e}`);
-    }
-  }, [projectPath]);
-
-  const handleOpenSnapshotManager = useCallback(() => {
-    if (!projectPath) return;
-    setSnapshotError(null);
-    setSnapshotStatus(null);
-    setSnapshotManagerOpen(true);
-  }, [projectPath]);
-
-  const handleCreateSnapshot = useCallback(async (label: string, kind: SnapshotInfo['kind'] = 'manual') => {
-    if (!projectPath || snapshotBusy) return;
-    setSnapshotBusy(true);
-    setSnapshotError(null);
-    setSnapshotStatus(null);
-    try {
-      if (dirty && !(await handleSave())) return;
-      const snapshot = await createProjectSnapshot(projectPath, label, kind);
-      setSnapshotStatus(`快照已创建: ${snapshot.label}`);
-      await refreshSnapshots();
-    } catch (e) {
-      setSnapshotError(`创建快照失败: ${e}`);
-    } finally {
-      setSnapshotBusy(false);
-    }
-  }, [projectPath, snapshotBusy, dirty, handleSave, refreshSnapshots]);
-
-  const handleRestoreSnapshot = useCallback(async (snapshot: SnapshotInfo) => {
-    if (!projectPath || snapshotBusy) return;
-    setSnapshotBusy(true);
-    setSnapshotError(null);
-    setSnapshotStatus(null);
-    try {
-      if (dirty && !(await handleSave())) return;
-      await createProjectSnapshot(projectPath, 'before-restore', 'beforeRestore', `回滚到"${snapshot.label}"前自动备份`);
-      await restoreProjectSnapshot(projectPath, snapshot.id);
-      setAiUploadsRevision((revision) => revision + 1);
-      const info = await openProject(projectPath);
-      setProjectInfo(info);
-      void loadSceneHeaders(projectPath, info.scenes);
-      void loadSceneLinkMap(projectPath, info.scenes);
-      const restoredSceneName = info.scenes.includes(currentSceneName)
-        ? currentSceneName
-        : (info.scenes[0] ?? 'start.txt');
-      setCurrentSceneName(restoredSceneName);
-      const scenePath = await getScenePath(projectPath, restoredSceneName);
-      const loaded = await loadScene(scenePath);
-      setNodes(loaded);
-      setScriptSource(await serializeScene(loaded));
-      sceneDraftCache.current.clear();
-      setDirty(false);
-      setSelectedNode(null);
-      setSnapshotStatus(`已回滚到"${snapshot.label}"，并自动创建 before-restore 备份。`);
-      await refreshSnapshots();
-    } catch (e) {
-      setSnapshotError(`回滚快照失败: ${e}`);
-    } finally {
-      setSnapshotBusy(false);
-    }
-  }, [projectPath, snapshotBusy, dirty, handleSave, loadSceneHeaders, loadSceneLinkMap, currentSceneName, refreshSnapshots]);
-
-  const handleRenameSnapshot = useCallback(async (snapshot: SnapshotInfo, label: string) => {
-    if (!projectPath || snapshotBusy) return;
-    setSnapshotBusy(true);
-    setSnapshotError(null);
-    setSnapshotStatus(null);
-    try {
-      const renamed = await renameProjectSnapshot(projectPath, snapshot.id, label);
-      setSnapshotStatus(`快照已重命名: ${renamed.label}`);
-      await refreshSnapshots();
-    } catch (e) {
-      setSnapshotError(`重命名快照失败: ${e}`);
-    } finally {
-      setSnapshotBusy(false);
-    }
-  }, [projectPath, snapshotBusy, refreshSnapshots]);
-
-  const handleDeleteSnapshot = useCallback(async (snapshot: SnapshotInfo) => {
-    if (!projectPath || snapshotBusy) return;
-    setSnapshotBusy(true);
-    setSnapshotError(null);
-    setSnapshotStatus(null);
-    try {
-      await deleteProjectSnapshot(projectPath, snapshot.id);
-      setSnapshotStatus(`快照已删除: ${snapshot.label}`);
-      await refreshSnapshots();
-    } catch (e) {
-      setSnapshotError(`删除快照失败: ${e}`);
-    } finally {
-      setSnapshotBusy(false);
-    }
-  }, [projectPath, snapshotBusy, refreshSnapshots]);
-
-  const handleCreateExportCandidateSnapshot = useCallback(async () => {
-    await handleCreateSnapshot(`candidate-${new Date().toISOString().slice(0, 10)}`, 'exportCandidate');
-  }, [handleCreateSnapshot]);
-
+  const {
+    open: snapshotManagerOpen,
+    setOpen: setSnapshotManagerOpen,
+    snapshots,
+    busy: snapshotBusy,
+    error: snapshotError,
+    status: snapshotStatus,
+    refresh: refreshSnapshots,
+    openManager: handleOpenSnapshotManager,
+    create: handleCreateSnapshot,
+    restore: handleRestoreSnapshot,
+    rename: handleRenameSnapshot,
+    remove: handleDeleteSnapshot,
+    createExportCandidate: handleCreateExportCandidateSnapshot,
+  } = useProjectSnapshots({
+    projectPath,
+    ensureSaved,
+    onRestored: reloadAfterSnapshot,
+  });
   const handleOpenRuntime = useCallback(async () => {
     try {
       const url = await getRuntimeUrl();
@@ -2880,10 +2390,9 @@ export function StoryEditor() {
       if (!projectPath) return;
       const info = await openProject(projectPath);
       setProjectInfo(info);
-      void loadSceneHeaders(projectPath, info.scenes);
       // Refresh the relationship graph for AI edits that touch other scenes'
-      // jump/choose nodes (the current scene stays live via the nodes effect).
-      void loadSceneLinkMap(projectPath, info.scenes);
+      // jump/choose nodes.
+      void refreshSceneGraph(projectPath, info.scenes);
     },
     onCharactersChanged: refreshCharactersForAi,
   });
@@ -3065,13 +2574,6 @@ export function StoryEditor() {
             aiAgent={aiAgent}
             projectPath={projectPath}
             sceneHeaders={sceneHeaders}
-            sessionMenuOpen={sessionMenuOpen}
-            onSessionMenuOpenChange={setSessionMenuOpen}
-            onRenameSession={(session) => {
-              setRenameTarget(session);
-              setRenameValue(session.title);
-            }}
-            onDeleteSession={setDeleteTarget}
             onOpenSettings={() => setAiSettingsOpen(true)}
             onSend={handleAiSend}
           />
@@ -3160,159 +2662,12 @@ export function StoryEditor() {
           onDeleteScene={handleDeleteScene}
         />
 
-        <Dialog open={newSceneOpen} onOpenChange={(open) => {
-          setNewSceneOpen(open);
-          if (!open && !creatingScene) {
-            setNewSceneName('');
-            setNewSceneError('');
-          }
-        }}>
-          <DialogContent className="max-w-md overflow-hidden border-border bg-surface-container-lowest p-0 shadow-2xl">
-            <DialogHeader className="border-b border-border bg-surface-container px-5 py-4 text-left">
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded border border-secondary/30 bg-secondary/10 text-secondary">
-                  <FolderOpen className="h-4 w-4" />
-                </div>
-                <div className="min-w-0">
-                  <DialogTitle className="font-display-family text-base text-on-surface">新建场景</DialogTitle>
-                  <DialogDescription className="mt-1 text-xs text-muted-foreground">
-                    在 game/scene 下创建新的 WebGAL 场景脚本。
-                  </DialogDescription>
-                </div>
-              </div>
-            </DialogHeader>
-            <div className="space-y-4 px-5 py-5">
-              <label className="block space-y-2">
-                <span className="font-mono-family text-[10px] font-semibold uppercase tracking-widest text-on-surface-variant">
-                  场景文件名
-                </span>
-                <div className="flex items-center rounded border border-border bg-surface-container-low focus-within:border-secondary">
-                  <input
-                    autoFocus
-                    value={newSceneName}
-                    onChange={(e) => {
-                      setNewSceneName(e.target.value);
-                      if (newSceneError) setNewSceneError('');
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        void handleCreateSceneConfirm();
-                      }
-                    }}
-                    className="min-w-0 flex-1 bg-transparent px-3 py-2.5 text-sm text-on-surface outline-none placeholder:text-muted-foreground/60"
-                    placeholder="chapter_02"
-                    aria-label="场景文件名"
-                    disabled={creatingScene}
-                  />
-                  {!newSceneName.trim().toLowerCase().endsWith('.txt') && (
-                    <span className="border-l border-border px-3 font-mono-family text-xs text-muted-foreground">.txt</span>
-                  )}
-                </div>
-              </label>
-              <div className="rounded border border-outline-variant/30 bg-surface-container px-3 py-2">
-                <div className="font-mono-family text-[10px] uppercase tracking-widest text-muted-foreground">预览</div>
-                <div className="mt-1 truncate text-xs text-on-surface-variant">
-                  game/scene/{newSceneName.trim() ? (newSceneName.trim().endsWith('.txt') ? newSceneName.trim() : `${newSceneName.trim()}.txt`) : 'chapter_02.txt'}
-                </div>
-              </div>
-              {newSceneError && (
-                <div className="flex items-start gap-2 rounded border border-error/30 bg-error/10 px-3 py-2 text-xs text-error">
-                  <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                  <span>{newSceneError}</span>
-                </div>
-              )}
-            </div>
-            <DialogFooter className="border-t border-border bg-surface-container px-5 py-4">
-              <button
-                type="button"
-                onClick={() => setNewSceneOpen(false)}
-                disabled={creatingScene}
-                className="rounded border border-border bg-surface-container-low px-3 py-2 text-sm text-on-surface-variant transition-colors hover:border-outline-variant hover:text-on-surface disabled:opacity-50"
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                onClick={() => { void handleCreateSceneConfirm(); }}
-                disabled={creatingScene || !newSceneName.trim()}
-                className="flex items-center gap-2 rounded bg-primary px-3 py-2 text-sm font-semibold text-on-primary transition-opacity hover:opacity-90 disabled:opacity-50"
-              >
-                {creatingScene ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                创建场景
-              </button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* Rename session — in-app dialog (Tauri has no native prompt). */}
-        <Dialog open={renameTarget !== null} onOpenChange={(o) => { if (!o) setRenameTarget(null); }}>
-          <DialogContent className="sm:max-w-sm">
-            <DialogHeader>
-              <DialogTitle>重命名会话</DialogTitle>
-            </DialogHeader>
-            <input
-              autoFocus
-              value={renameValue}
-              onChange={(e) => setRenameValue(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && renameValue.trim() && renameTarget) {
-                  aiAgent.renameSession(renameTarget.id, renameValue);
-                  setRenameTarget(null);
-                }
-              }}
-              className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-              placeholder="会话名称"
-              aria-label="会话名称"
-            />
-            <DialogFooter>
-              <button
-                type="button"
-                onClick={() => setRenameTarget(null)}
-                className="px-3 py-2 rounded-md bg-secondary text-sm hover:bg-secondary/70 transition-colors"
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                disabled={!renameValue.trim()}
-                onClick={() => { if (renameTarget) { aiAgent.renameSession(renameTarget.id, renameValue); setRenameTarget(null); } }}
-                className="px-3 py-2 rounded-md bg-primary text-primary-foreground text-sm hover:opacity-90 transition-all disabled:opacity-50"
-              >
-                保存
-              </button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* Delete session confirmation — in-app dialog. */}
-        <Dialog open={deleteTarget !== null} onOpenChange={(o) => { if (!o) setDeleteTarget(null); }}>
-          <DialogContent className="sm:max-w-sm">
-            <DialogHeader>
-              <DialogTitle>删除会话</DialogTitle>
-              <DialogDescription>
-                确定删除会话「{deleteTarget?.title}」？此操作不可撤销。
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter>
-              <button
-                type="button"
-                onClick={() => setDeleteTarget(null)}
-                className="px-3 py-2 rounded-md bg-secondary text-sm hover:bg-secondary/70 transition-colors"
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                onClick={() => { if (deleteTarget) { aiAgent.removeSession(deleteTarget.id); setDeleteTarget(null); } }}
-                className="px-3 py-2 rounded-md bg-destructive text-destructive-foreground text-sm hover:opacity-90 transition-all"
-              >
-                删除
-              </button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
+        <NewSceneDialog
+          open={newSceneOpen}
+          existingScenes={projectInfo?.scenes ?? []}
+          onOpenChange={setNewSceneOpen}
+          onCreate={handleCreateScene}
+        />
         <AppSettingsDialog
           open={appSettingsOpen}
           onClose={() => setAppSettingsOpen(false)}

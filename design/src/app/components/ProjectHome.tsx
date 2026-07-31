@@ -191,8 +191,9 @@ export function ProjectHome() {
         sceneCount: info.scenes.length,
       };
       setProjects((prev) => [newProject, ...prev]);
+      localStorage.setItem(`project-path-${newProject.id}`, newProject.path);
       setIsModalOpen(false);
-      navigate(`/editor/${newProject.id}`);
+      navigate(`/flow/${newProject.id}`);
     } catch (e) {
       setCreateError(String(e));
     } finally {
@@ -212,7 +213,7 @@ export function ProjectHome() {
       const existing = projects.find((p) => p.path === dir);
       if (existing) {
         localStorage.setItem(`project-path-${existing.id}`, existing.path);
-        navigate(`/editor/${existing.id}`);
+        navigate(`/flow/${existing.id}`);
         return;
       }
       const newProject: Project = {
@@ -225,7 +226,8 @@ export function ProjectHome() {
         sceneCount: info.scenes.length,
       };
       setProjects((prev) => [newProject, ...prev]);
-      navigate(`/editor/${newProject.id}`);
+      localStorage.setItem(`project-path-${newProject.id}`, newProject.path);
+      navigate(`/flow/${newProject.id}`);
     } catch (e) {
       alert(`无法打开项目: ${e}`);
     }
@@ -489,7 +491,7 @@ export function ProjectHome() {
                         key={project.id}
                         project={project}
                         deletedView={sidebarFilter === 'trash'}
-                        onOpen={() => !project.deleted && navigate(`/editor/${project.id}`)}
+                        onOpen={() => !project.deleted && navigate(`/flow/${project.id}`)}
                         onFavorite={toggleFavorite}
                         onEdit={openEditDialog}
                         onDelete={deleteProject}
@@ -505,7 +507,7 @@ export function ProjectHome() {
                         key={project.id}
                         project={project}
                         deletedView={sidebarFilter === 'trash'}
-                        onOpen={() => !project.deleted && navigate(`/editor/${project.id}`)}
+                        onOpen={() => !project.deleted && navigate(`/flow/${project.id}`)}
                         onFavorite={toggleFavorite}
                         onEdit={openEditDialog}
                         onDelete={deleteProject}
