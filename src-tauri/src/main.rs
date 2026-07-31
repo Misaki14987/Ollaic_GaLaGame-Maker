@@ -1,11 +1,17 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod agents;
 mod ai;
+mod asset_queue;
 mod assets;
 mod characters;
+mod json_store;
 mod matting;
+mod pipeline;
+mod story_plan;
 mod webgal;
 
+use pipeline::commands::Orchestrator;
 use std::path::PathBuf;
 use tauri::Manager;
 use webgal::runtime_manager::{self, RuntimeInfo};
@@ -137,6 +143,7 @@ fn main() {
                     }
                 }
             });
+            app.manage(Orchestrator::new(app.handle()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -195,6 +202,10 @@ fn main() {
             ai::commands::get_ai_agent_trace_path,
             ai::commands::append_ai_agent_trace,
             ai::commands::generate_batch_tts,
+            asset_queue::commands::asset_queue_get,
+            asset_queue::commands::asset_queue_preview_artifact,
+            asset_queue::commands::asset_queue_delete_artifact,
+            asset_queue::commands::asset_queue_promote_artifact,
             // AI reference uploads
             ai::uploads::list_ai_uploads,
             ai::uploads::import_ai_upload,
@@ -223,6 +234,23 @@ fn main() {
             characters::commands::delete_character,
             characters::commands::list_character_names,
             characters::commands::save_characters,
+            // V2 Pipeline (Agent Flow)
+            pipeline::commands::pipeline_start,
+            pipeline::commands::pipeline_pause,
+            pipeline::commands::pipeline_resume,
+            pipeline::commands::pipeline_stop,
+            pipeline::commands::pipeline_step_once,
+            pipeline::commands::pipeline_resume_run,
+            pipeline::commands::pipeline_retry_step,
+            pipeline::commands::pipeline_skip_step,
+            pipeline::commands::pipeline_update_dependencies,
+            pipeline::commands::pipeline_update_step_prompt,
+            pipeline::commands::pipeline_set_run_pinned,
+            pipeline::commands::pipeline_clear_run_history,
+            pipeline::commands::pipeline_export_run_history,
+            pipeline::commands::pipeline_get_state,
+            pipeline::commands::pipeline_get_plan,
+            pipeline::commands::pipeline_list_runs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
