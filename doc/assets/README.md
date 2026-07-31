@@ -9,6 +9,7 @@
 | [素材库](./asset-library.md) | 分类标签、上传、配额、视图、删除与用量提示、与 game/ 目录映射 |
 | [元数据与别名](./metadata.md) | 别名、描述、参考素材、场景卡、语音卡 |
 | [配音管理](./voice-dubbing.md) | 配音清单面板、按场景/角色过滤、批量/单句 AI TTS 生成、本地导入 |
+| [资产任务队列](./asset-task-queue.md) | Agent Flow 资产调度、并发限流、Artifact、自动重试与绑定 |
 
 ## 总览
 
@@ -16,6 +17,7 @@
 - **素材选择器**:`AssetPicker.tsx`,在详情面板等处快速挑选素材,带音频试听与缩略图。
 - **元数据**:`lib/asset-metadata.ts`,为素材记录别名、描述、参考资料,以及生成用的「场景卡 / 语音卡」。
 - 素材可由用户上传,也可由 AI 生成(见 [AI 素材与立绘生成](../ai/media-generation.md))。
+- Agent Flow 通过 AssetTaskQueue 自动生成并绑定背景、立绘、BGM、音效和逐句语音。
 
 ## 相关源码
 - `design/src/app/components/AssetManager.tsx`、`design/src/app/components/AssetPicker.tsx`、`VoiceDubbingPanel.tsx`

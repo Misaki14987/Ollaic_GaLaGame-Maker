@@ -15,6 +15,12 @@
 | AI 辅助 | 已实现 | 对话修改、变更预览、角色/场景/素材规划、参考资料上传、供应商配置 |
 | 打包发布 | 准备中 | release workflow 构建 Windows x64、Linux x64 与 macOS Apple Silicon 包 |
 
+## V2 规划
+
+| 模块 | 状态 | 说明 |
+|------|------|------|
+| 端到端 Agent 形态 | **P2 已完成** | 内容 Flow 后接 AssetTaskQueue，已实现分类限流、自动重试、Artifact 保留、透明 Figure 晋升和由 Agent 决策的多角色 Scene Staging；P3 继续按 [`v2-agent-pipeline.md`](./v2-agent-pipeline.md) 推进 |
+
 ## 模块索引
 
 | 目录 | 内容 |
