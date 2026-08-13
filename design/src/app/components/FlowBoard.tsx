@@ -355,7 +355,7 @@ export function FlowBoard({ projectPath, onOpenArtifact }: FlowBoardProps) {
 
   useEffect(() => {
     const modal = Boolean(selectedStepId && !wideInspector);
-    const chrome = document.querySelectorAll<HTMLElement>('.story-os-topbar, .story-os-sidenav');
+    const chrome = document.querySelectorAll<HTMLElement>('.ollaic-topbar, .ollaic-sidenav');
     headerRef.current?.toggleAttribute('inert', modal);
     workspaceRef.current?.toggleAttribute('inert', modal);
     chrome.forEach((element) => element.toggleAttribute('inert', modal));
@@ -762,7 +762,7 @@ export function FlowBoard({ projectPath, onOpenArtifact }: FlowBoardProps) {
                 {paused && !detached ? '拖到另一节点上可添加依赖，也可连接端点或删除连线' : '拖动节点可整理布局'}
               </span>
             </div>
-            <div className="h-full pt-9 story-os-dot-grid" data-testid="flow-canvas">
+            <div className="h-full pt-9 ollaic-dot-grid" data-testid="flow-canvas">
               <ReactFlow
                 nodes={nodes}
                 edges={edges}

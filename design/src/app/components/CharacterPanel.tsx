@@ -824,10 +824,10 @@ export function CharacterPanel({
   }, [generationRequestToken, triggerBatchSpriteGeneration]);
 
   return (
-    <div className={`${containerClass} story-os-blueprint bg-surface-container-lowest`}>
+    <div className={`${containerClass} ollaic-blueprint bg-surface-container-lowest`}>
       <div className="h-12 border-b border-border bg-surface-container-lowest px-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="story-os-chamfer-tr p-2 rounded bg-primary/15 border border-primary/30">
+          <div className="ollaic-chamfer-tr p-2 rounded bg-primary/15 border border-primary/30">
             <Users className="w-4 h-4 text-primary" />
           </div>
           <div>
@@ -861,7 +861,7 @@ export function CharacterPanel({
             <div className="p-3 border-b border-border bg-surface-container-low">
               <button
                 onClick={handleCreate}
-                className="story-os-chamfer-tr mb-3 w-full px-3 py-2 rounded bg-primary text-primary-foreground hover:opacity-90 transition-colors text-sm flex items-center justify-center gap-2"
+                className="ollaic-chamfer-tr mb-3 w-full px-3 py-2 rounded bg-primary text-primary-foreground hover:opacity-90 transition-colors text-sm flex items-center justify-center gap-2"
               >
                 <Plus className="w-4 h-4" />
                 添加新角色
@@ -890,7 +890,7 @@ export function CharacterPanel({
                   <div
                     key={ch.id}
                     className={`rounded border transition-all ${
-                      active ? 'border-secondary bg-secondary/10 story-os-hard-shadow' : 'border-border/60 bg-surface-container-lowest/80'
+                      active ? 'border-secondary bg-secondary/10 ollaic-hard-shadow' : 'border-border/60 bg-surface-container-lowest/80'
                     }`}
                   >
                     <button
@@ -985,7 +985,7 @@ export function CharacterPanel({
               </div>
             ) : mode === 'info' ? (
               <div className="relative z-10 p-4 space-y-4 max-w-5xl">
-                <section className="story-os-panel p-4">
+                <section className="ollaic-panel p-4">
                   <div className="mb-4 pb-3 border-b border-border">
                     <h4 className="text-xs uppercase tracking-wide text-muted-foreground font-mono-family">基本信息</h4>
                     <p className="mt-1 text-[10px] text-muted-foreground">
@@ -1144,7 +1144,7 @@ export function CharacterPanel({
                   </div>
                 </section>
 
-                <section className="story-os-panel p-4">
+                <section className="ollaic-panel p-4">
                   <label className={labelClass}>内部备注</label>
                   <p className="mb-2 text-[10px] text-muted-foreground">制作备注、待办、设定来源；不参与立绘或配音生成。</p>
                   <textarea
@@ -1158,9 +1158,9 @@ export function CharacterPanel({
             ) : (
               <div className="relative z-10 p-4 space-y-4 max-w-6xl">
                 {/* 区域1：主体立绘 — 角色设定图 / 三视图 */}
-                <section className="story-os-panel p-4 border-2 border-primary/25 bg-primary/[0.04]">
+                <section className="ollaic-panel p-4 border-2 border-primary/25 bg-primary/[0.04]">
                   <div className="mb-3 flex items-center gap-2">
-                    <div className="story-os-chamfer-tr rounded bg-primary/15 border border-primary/30 p-1.5">
+                    <div className="ollaic-chamfer-tr rounded bg-primary/15 border border-primary/30 p-1.5">
                       <Sparkles className="w-3.5 h-3.5 text-primary" />
                     </div>
                     <div>
@@ -1308,7 +1308,7 @@ export function CharacterPanel({
                 </section>
 
                 {/* 区域2：表情变体 — 醒目情绪标签 + 各自提示词 */}
-                <section className="story-os-panel p-4">
+                <section className="ollaic-panel p-4">
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <div>
                       <h4 className="text-xs uppercase tracking-wide text-muted-foreground font-mono-family">表情变体</h4>
@@ -1530,7 +1530,7 @@ export function CharacterPanel({
                 </section>
 
                 {/* 区域3：立绘素材库 — 可折叠 */}
-                <section className="story-os-panel p-4">
+                <section className="ollaic-panel p-4">
                   <button
                     type="button"
                     onClick={() => setFigureLibraryOpen((v) => !v)}
@@ -1598,7 +1598,7 @@ export function CharacterPanel({
                   )}
                 </section>
 
-                <section className="story-os-panel p-4">
+                <section className="ollaic-panel p-4">
                   <button
                     type="button"
                     onClick={() => setUsageOpen((value) => !value)}

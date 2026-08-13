@@ -26,11 +26,11 @@ import {
 
 import { Switch } from './ui/switch';
 
-type StoryOsSection = 'home' | 'flow' | 'script' | 'world' | 'characters' | 'assets' | 'preview' | 'build';
+type OllaicSection = 'home' | 'flow' | 'script' | 'world' | 'characters' | 'assets' | 'preview' | 'build';
 
-export type StoryOsSaveStatus = 'idle' | 'saving' | 'saved' | 'error';
+export type OllaicSaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
-interface StoryOsTopBarProps {
+interface OllaicTopBarProps {
   title?: string;
   onUndo?: () => void;
   onRedo?: () => void;
@@ -46,21 +46,21 @@ interface StoryOsTopBarProps {
   onSearchChange?: (value: string) => void;
   searchValue?: string;
   searchPlaceholder?: string;
-  saveStatus?: StoryOsSaveStatus;
+  saveStatus?: OllaicSaveStatus;
   autoSave?: boolean;
   onAutoSaveChange?: (enabled: boolean) => void;
   onSettings?: () => void;
 }
 
-interface StoryOsSideNavProps {
-  active: StoryOsSection;
+interface OllaicSideNavProps {
+  active: OllaicSection;
   projectId?: string;
   projectLabel?: string;
   onCreate?: () => void;
   onBeforeNavigate?: (action: () => void) => void;
 }
 
-interface StoryOsPanelProps {
+interface OllaicPanelProps {
   title: string;
   icon?: LucideIcon;
   action?: React.ReactNode;
@@ -69,7 +69,7 @@ interface StoryOsPanelProps {
   headerClassName?: string;
 }
 
-const navItems: Array<{ id: StoryOsSection; label: string; icon: LucideIcon }> = [
+const navItems: Array<{ id: OllaicSection; label: string; icon: LucideIcon }> = [
   { id: 'home', label: '首页', icon: Home },
   { id: 'flow', label: '生产流', icon: Workflow },
   { id: 'script', label: '脚本流', icon: BookOpen },
@@ -77,7 +77,7 @@ const navItems: Array<{ id: StoryOsSection; label: string; icon: LucideIcon }> =
   { id: 'assets', label: '资源库', icon: Boxes },
 ];
 
-export function StoryOsTopBar({
+export function OllaicTopBar({
   title,
   onUndo,
   onRedo,
@@ -97,7 +97,7 @@ export function StoryOsTopBar({
   autoSave,
   onAutoSaveChange,
   onSettings,
-}: StoryOsTopBarProps) {
+}: OllaicTopBarProps) {
   const topActions = [
     { label: '撤销', icon: RotateCcw, handler: onUndo },
     { label: '重做', icon: RotateCw, handler: onRedo },
@@ -136,7 +136,7 @@ export function StoryOsTopBar({
         : 'text-muted-foreground';
 
   return (
-    <header className="story-os-topbar">
+    <header className="ollaic-topbar">
       <div className="flex min-w-0 items-center gap-4">
         <div className="font-display-family text-[22px] font-semibold leading-none tracking-normal text-primary">
           故事编辑室
@@ -157,8 +157,8 @@ export function StoryOsTopBar({
             onClick={handler}
             className={
               primary
-                ? `story-os-top-action text-primary hover:text-primary ${dimWhenAutoSave && autoSave ? 'opacity-50' : ''}`
-                : 'story-os-top-action'
+                ? `ollaic-top-action text-primary hover:text-primary ${dimWhenAutoSave && autoSave ? 'opacity-50' : ''}`
+                : 'ollaic-top-action'
             }
             title={dimWhenAutoSave && autoSave ? '已开启自动保存，也可手动保存' : label}
           >
@@ -174,7 +174,7 @@ export function StoryOsTopBar({
             key={label}
             type="button"
             onClick={handler}
-            className="story-os-top-action text-muted-foreground hover:text-foreground"
+            className="ollaic-top-action text-muted-foreground hover:text-foreground"
             aria-label={label}
           >
             <Icon className="h-4 w-4" />
@@ -188,7 +188,7 @@ export function StoryOsTopBar({
           <button
             type="button"
             onClick={onToggleScript}
-            className={`story-os-top-action text-xs ${scriptMode ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground'}`}
+            className={`ollaic-top-action text-xs ${scriptMode ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground'}`}
             aria-label={scriptMode ? '切换到指令流视图' : '切换到脚本编辑器'}
             title={scriptMode ? '指令流视图' : '脚本编辑器'}
           >
@@ -196,14 +196,14 @@ export function StoryOsTopBar({
           </button>
         )}
         {onSearchChange && (
-          <div className="story-os-top-search">
+          <div className="ollaic-top-search">
             <Search className="h-4 w-4 text-muted-foreground" />
             <input
               type="text"
               value={searchValue ?? ''}
               onChange={(e) => onSearchChange(e.target.value)}
               placeholder={searchPlaceholder ?? '搜索...'}
-              className="story-os-top-search-input"
+              className="ollaic-top-search-input"
               aria-label="搜索"
             />
           </div>
@@ -233,7 +233,7 @@ export function StoryOsTopBar({
           </div>
         )}
         {onSettings && (
-          <button type="button" onClick={onSettings} className="story-os-icon-button" aria-label="设置">
+          <button type="button" onClick={onSettings} className="ollaic-icon-button" aria-label="设置">
             <Settings className="h-5 w-5" />
           </button>
         )}
@@ -242,10 +242,10 @@ export function StoryOsTopBar({
   );
 }
 
-export function StoryOsSideNav({ active, projectId, projectLabel = 'ALPHA', onBeforeNavigate }: StoryOsSideNavProps) {
+export function OllaicSideNav({ active, projectId, projectLabel = 'ALPHA', onBeforeNavigate }: OllaicSideNavProps) {
   const navigate = useNavigate();
 
-  const doNavigate = (target: StoryOsSection) => {
+  const doNavigate = (target: OllaicSection) => {
     if (target === 'home') {
       navigate('/');
       return;
@@ -273,7 +273,7 @@ export function StoryOsSideNav({ active, projectId, projectLabel = 'ALPHA', onBe
     }
   };
 
-  const handleNavigate = (target: StoryOsSection) => {
+  const handleNavigate = (target: OllaicSection) => {
     if (onBeforeNavigate) {
       onBeforeNavigate(() => doNavigate(target));
     } else {
@@ -282,9 +282,9 @@ export function StoryOsSideNav({ active, projectId, projectLabel = 'ALPHA', onBe
   };
 
   return (
-    <aside className="story-os-sidenav">
+    <aside className="ollaic-sidenav">
       <div className="mb-4 mt-2 flex flex-col items-center gap-1 px-1 text-center" title={projectLabel}>
-        <div className="story-os-avatar">
+        <div className="ollaic-avatar">
           {active === 'home' ? <Home className="h-6 w-6" /> : <UserCircle className="h-6 w-6" />}
         </div>
       </div>
@@ -297,7 +297,7 @@ export function StoryOsSideNav({ active, projectId, projectLabel = 'ALPHA', onBe
             type="button"
             key={id}
             onClick={() => handleNavigate(id)}
-            className={`story-os-nav-item ${active === id ? 'story-os-nav-item-active' : ''}`}
+            className={`ollaic-nav-item ${active === id ? 'ollaic-nav-item-active' : ''}`}
             aria-current={active === id ? 'page' : undefined}
           >
             <Icon className="h-5 w-5" />
@@ -309,17 +309,17 @@ export function StoryOsSideNav({ active, projectId, projectLabel = 'ALPHA', onBe
   );
 }
 
-export function StoryOsPanel({
+export function OllaicPanel({
   title,
   icon: Icon,
   action,
   children,
   className = '',
   headerClassName = '',
-}: StoryOsPanelProps) {
+}: OllaicPanelProps) {
   return (
-    <section className={`story-os-panel ${className}`}>
-      <header className={`story-os-panel-header ${headerClassName}`}>
+    <section className={`ollaic-panel ${className}`}>
+      <header className={`ollaic-panel-header ${headerClassName}`}>
         <div className="flex min-w-0 items-center gap-2">
           {Icon && <Icon className="h-4 w-4 text-primary" />}
           <span className="truncate">{title}</span>

@@ -237,7 +237,7 @@ function ScriptCommandCard({
         ref={ref}
         className={`relative w-full max-w-3xl overflow-hidden border shadow-sm transition-all ${
           isBranch
-            ? `border-2 bg-tertiary/5 ${selected ? 'border-tertiary' : 'border-tertiary/30'} story-os-chamfer-tr`
+            ? `border-2 bg-tertiary/5 ${selected ? 'border-tertiary' : 'border-tertiary/30'} ollaic-chamfer-tr`
             : `bg-surface-bright ${selected ? 'border-primary ring-1 ring-primary/20' : 'border-outline-variant/40 hover:border-secondary'}`
         }`}
       >
@@ -614,7 +614,7 @@ export function ScriptCommandStream({
 
   return (
     <section className="relative flex min-w-0 flex-1 flex-col bg-background">
-      <div className="pointer-events-none absolute inset-0 opacity-[0.03] story-os-dot-grid" />
+      <div className="pointer-events-none absolute inset-0 opacity-[0.03] ollaic-dot-grid" />
       <div className="relative z-10 flex h-10 shrink-0 items-center justify-between border-b border-outline-variant/20 bg-surface-bright/50 px-4">
         <div className="flex min-w-0 items-center gap-4">
           <span className="shrink-0 text-xs font-bold tracking-widest text-on-surface-variant">指令流编辑</span>
@@ -678,7 +678,7 @@ export function ScriptCommandStream({
           <div className="flex min-h-[360px] flex-col items-center justify-center gap-3 border border-dashed border-outline-variant/50 bg-surface-bright p-8 text-center text-muted-foreground">
             <FileText className="h-10 w-10 opacity-50" />
             <div className="text-base text-foreground">当前场景还没有命令</div>
-            <button type="button" onClick={() => onInsertNode('dialogue', 0)} className="bg-primary px-4 py-2 text-sm font-semibold text-on-primary story-os-chamfer-tr">
+            <button type="button" onClick={() => onInsertNode('dialogue', 0)} className="bg-primary px-4 py-2 text-sm font-semibold text-on-primary ollaic-chamfer-tr">
               添加第一句对白
             </button>
           </div>

@@ -72,7 +72,7 @@ export function SceneManagerPanel({
         <button
           type="button"
           onClick={onClose}
-          className="story-os-icon-button h-6 w-6"
+          className="ollaic-icon-button h-6 w-6"
           aria-label="关闭场景管理"
         >
           <X className="h-3.5 w-3.5" />
