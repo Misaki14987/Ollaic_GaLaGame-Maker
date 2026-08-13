@@ -117,7 +117,7 @@ export function AiAssistantPanel({
             type="button"
             onClick={aiAgent.startNewSession}
             disabled={aiAgent.busy}
-            className="story-os-icon-button h-7 w-7 disabled:opacity-40"
+            className="ollaic-icon-button h-7 w-7 disabled:opacity-40"
             aria-label="新建 AI 会话"
             title="新建会话"
           >
@@ -128,7 +128,7 @@ export function AiAssistantPanel({
               <button
                 type="button"
                 disabled={aiAgent.busy}
-                className="story-os-icon-button h-7 w-7 text-foreground disabled:opacity-40"
+                className="ollaic-icon-button h-7 w-7 text-foreground disabled:opacity-40"
                 aria-label="AI 会话管理"
                 title="会话管理"
               >

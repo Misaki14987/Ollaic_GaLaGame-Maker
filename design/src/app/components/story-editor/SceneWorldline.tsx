@@ -275,7 +275,7 @@ export function SceneWorldlinePanel({
           <button
             type="button"
             onClick={onOpenSceneManager}
-            className="story-os-icon-button h-6 w-6"
+            className="ollaic-icon-button h-6 w-6"
             aria-label="场景管理"
             title="场景管理"
           >

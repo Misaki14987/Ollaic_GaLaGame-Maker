@@ -2,7 +2,7 @@ import { AlertTriangle } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router';
 import { FlowBoard } from './FlowBoard';
 import { Button } from './ui/button';
-import { StoryOsSideNav, StoryOsTopBar } from './StoryOsChrome';
+import { OllaicSideNav, OllaicTopBar } from './OllaicChrome';
 import type { FlowStepView } from '../lib/flow-state';
 import type { StoryPlan } from '../lib/pipeline-types';
 
@@ -29,13 +29,13 @@ export function FlowBoardPage() {
 
   return (
     <div className="story-shell h-full overflow-hidden">
-      <StoryOsTopBar title="Agent Flow" />
-      <StoryOsSideNav
+      <OllaicTopBar title="Agent Flow" />
+      <OllaicSideNav
         active="flow"
         projectId={projectId}
         projectLabel={projectPath.split('/').pop() || 'ALPHA'}
       />
-      <main className="story-os-workspace min-h-0 bg-surface-container-lowest">
+      <main className="ollaic-workspace min-h-0 bg-surface-container-lowest">
         {projectPath ? (
           <FlowBoard projectPath={projectPath} onOpenArtifact={openArtifact} />
         ) : (

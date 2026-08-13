@@ -58,7 +58,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from './ui/alert-dialog';
-import { StoryOsSideNav, StoryOsTopBar } from './StoryOsChrome';
+import { OllaicSideNav, OllaicTopBar } from './OllaicChrome';
 import { PerformanceTimeline } from './PerformanceTimeline';
 import { AiAssistantPanel } from './story-editor/AiAssistantPanel';
 import { FullScreenWorldline, SceneWorldlinePanel } from './story-editor/SceneWorldline';
@@ -427,7 +427,7 @@ function SceneWorldlinePanel({
           <button
             type="button"
             onClick={onOpenSceneManager}
-            className="story-os-icon-button h-6 w-6"
+            className="ollaic-icon-button h-6 w-6"
             aria-label="场景管理"
             title="场景管理"
           >
@@ -628,7 +628,7 @@ function AiAssistantPanel({
             type="button"
             onClick={aiAgent.startNewSession}
             disabled={aiAgent.busy}
-            className="story-os-icon-button h-7 w-7 disabled:opacity-40"
+            className="ollaic-icon-button h-7 w-7 disabled:opacity-40"
             aria-label="新建 AI 会话"
             title="新建会话"
           >
@@ -639,7 +639,7 @@ function AiAssistantPanel({
               <button
                 type="button"
                 disabled={aiAgent.busy}
-                className="story-os-icon-button h-7 w-7 text-foreground disabled:opacity-40"
+                className="ollaic-icon-button h-7 w-7 text-foreground disabled:opacity-40"
                 aria-label="AI 会话管理"
                 title="会话管理"
               >
@@ -1005,7 +1005,7 @@ function ScriptCommandCard({
         ref={ref}
         className={`relative w-full max-w-3xl overflow-hidden border shadow-sm transition-all ${
           isBranch
-            ? `border-2 bg-tertiary/5 ${selected ? 'border-tertiary' : 'border-tertiary/30'} story-os-chamfer-tr`
+            ? `border-2 bg-tertiary/5 ${selected ? 'border-tertiary' : 'border-tertiary/30'} ollaic-chamfer-tr`
             : `bg-surface-bright ${selected ? 'border-primary ring-1 ring-primary/20' : 'border-outline-variant/40 hover:border-secondary'}`
         }`}
       >
@@ -1382,7 +1382,7 @@ function ScriptCommandStream({
 
   return (
     <section className="relative flex min-w-0 flex-1 flex-col bg-background">
-      <div className="pointer-events-none absolute inset-0 opacity-[0.03] story-os-dot-grid" />
+      <div className="pointer-events-none absolute inset-0 opacity-[0.03] ollaic-dot-grid" />
       <div className="relative z-10 flex h-10 shrink-0 items-center justify-between border-b border-outline-variant/20 bg-surface-bright/50 px-4">
         <div className="flex min-w-0 items-center gap-4">
           <span className="shrink-0 text-xs font-bold tracking-widest text-on-surface-variant">指令流编辑</span>
@@ -1446,7 +1446,7 @@ function ScriptCommandStream({
           <div className="flex min-h-[360px] flex-col items-center justify-center gap-3 border border-dashed border-outline-variant/50 bg-surface-bright p-8 text-center text-muted-foreground">
             <FileText className="h-10 w-10 opacity-50" />
             <div className="text-base text-foreground">当前场景还没有命令</div>
-            <button type="button" onClick={() => onInsertNode('dialogue', 0)} className="bg-primary px-4 py-2 text-sm font-semibold text-on-primary story-os-chamfer-tr">
+            <button type="button" onClick={() => onInsertNode('dialogue', 0)} className="bg-primary px-4 py-2 text-sm font-semibold text-on-primary ollaic-chamfer-tr">
               添加第一句对白
             </button>
           </div>
@@ -2450,7 +2450,7 @@ export function StoryEditor() {
             {exportToast}
           </div>
         )}
-        <StoryOsTopBar
+        <OllaicTopBar
           onUndo={undo}
           onRedo={redo}
           onRun={handleOpenRuntime}
@@ -2470,7 +2470,7 @@ export function StoryEditor() {
           onAutoSaveChange={setAutoSaveEnabled}
           onSettings={() => setAppSettingsOpen(true)}
         />
-        <StoryOsSideNav
+        <OllaicSideNav
           active={viewMode === 'worldline' ? 'world' : 'script'}
           projectId={projectId}
           projectLabel={gameName}
@@ -2478,7 +2478,7 @@ export function StoryEditor() {
           onBeforeNavigate={guardedNavigate}
         />
 
-        <div className="story-os-workspace flex flex-col">
+        <div className="ollaic-workspace flex flex-col">
         {viewMode === 'worldline' ? (
           <FullScreenWorldline
             scenes={projectInfo?.scenes ?? [currentSceneName]}

@@ -441,7 +441,7 @@
     background-size: 20px 20px, 40px 40px, 40px 40px;
   }
 
-  .story-os-topbar {
+  .ollaic-topbar {
     position: fixed;
     inset: 0 0 auto 0;
     z-index: 50;
@@ -458,7 +458,7 @@
     -webkit-backdrop-filter: blur(16px);
   }
 
-  .story-os-top-action {
+  .ollaic-top-action {
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -471,18 +471,18 @@
     transition: background 160ms ease, color 160ms ease, border-color 160ms ease, box-shadow 160ms ease, transform 120ms ease;
   }
 
-  .story-os-top-action:hover,
-  .story-os-icon-button:hover {
+  .ollaic-top-action:hover,
+  .ollaic-icon-button:hover {
     background: color-mix(in srgb, var(--color-scene) 22%, transparent);
     box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--color-scene) 35%, transparent);
   }
 
-  .story-os-top-action:active,
-  .story-os-icon-button:active {
+  .ollaic-top-action:active,
+  .ollaic-icon-button:active {
     transform: scale(0.97);
   }
 
-  .story-os-icon-button {
+  .ollaic-icon-button {
     display: inline-flex;
     height: 32px;
     width: 32px;
@@ -493,7 +493,7 @@
     transition: background 160ms ease, color 160ms ease, transform 120ms ease;
   }
 
-  .story-os-top-search {
+  .ollaic-top-search {
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -505,12 +505,12 @@
     transition: border-color 160ms ease, background 160ms ease;
   }
 
-  .story-os-top-search:focus-within {
+  .ollaic-top-search:focus-within {
     border-bottom-color: var(--secondary);
     background: var(--surface-container-lowest);
   }
 
-  .story-os-top-search-input {
+  .ollaic-top-search-input {
     background: transparent;
     border: none;
     outline: none;
@@ -520,11 +520,11 @@
     padding: 0;
   }
 
-  .story-os-top-search-input::placeholder {
+  .ollaic-top-search-input::placeholder {
     color: var(--outline);
   }
 
-  .story-os-sidenav {
+  .ollaic-sidenav {
     position: fixed;
     left: 0;
     top: 48px;
@@ -542,7 +542,7 @@
     -webkit-backdrop-filter: blur(12px);
   }
 
-  .story-os-nav-item {
+  .ollaic-nav-item {
     position: relative;
     display: flex;
     min-height: 64px;
@@ -559,22 +559,22 @@
     transition: background 160ms ease, color 160ms ease, border-color 160ms ease, transform 120ms ease;
   }
 
-  .story-os-nav-item:hover {
+  .ollaic-nav-item:hover {
     background: var(--surface-container-high);
     color: var(--foreground);
   }
 
-  .story-os-nav-item-active {
+  .ollaic-nav-item-active {
     border-left-color: var(--nav-active);
     background: color-mix(in srgb, var(--nav-active) 28%, transparent);
     color: var(--foreground);
   }
 
-  .story-os-nav-item:active {
+  .ollaic-nav-item:active {
     transform: translateX(1px);
   }
 
-  .story-os-avatar {
+  .ollaic-avatar {
     display: flex;
     height: 40px;
     width: 40px;
@@ -588,7 +588,7 @@
     color: var(--primary);
   }
 
-  .story-os-add-button {
+  .ollaic-add-button {
     display: flex;
     height: 48px;
     width: 48px;
@@ -600,15 +600,15 @@
     transition: filter 160ms ease, transform 120ms ease;
   }
 
-  .story-os-add-button:hover {
+  .ollaic-add-button:hover {
     filter: brightness(1.08);
   }
 
-  .story-os-add-button:active {
+  .ollaic-add-button:active {
     transform: scale(0.97);
   }
 
-  .story-os-workspace {
+  .ollaic-workspace {
     margin-left: 80px;
     margin-top: 48px;
     height: calc(100vh - 48px);
@@ -616,19 +616,19 @@
     background: var(--surface-container-low);
   }
 
-  .story-os-blueprint {
+  .ollaic-blueprint {
     background-image:
       linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
       linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
     background-size: 40px 40px;
   }
 
-  .story-os-dot-grid {
+  .ollaic-dot-grid {
     background-image: radial-gradient(var(--grid-dot) 1px, transparent 1px);
     background-size: 20px 20px;
   }
 
-  .story-os-panel {
+  .ollaic-panel {
     overflow: hidden;
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -638,7 +638,7 @@
     -webkit-backdrop-filter: blur(12px);
   }
 
-  .story-os-command {
+  .ollaic-command {
     display: inline-flex;
     min-height: 28px;
     align-items: center;
@@ -654,49 +654,49 @@
     transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease, transform 120ms ease;
   }
 
-  .story-os-command:hover {
+  .ollaic-command:hover {
     border-color: color-mix(in srgb, var(--color-scene) 62%, var(--border));
     background: color-mix(in srgb, var(--color-scene) 14%, var(--background));
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-scene) 20%, transparent);
   }
 
-  .story-os-command:active {
+  .ollaic-command:active {
     transform: translate(1px, 1px);
     box-shadow: none;
   }
 
-  .story-os-command:disabled {
+  .ollaic-command:disabled {
     background: var(--surface-container-low);
     color: var(--muted-foreground);
     opacity: 0.5;
     box-shadow: none;
   }
 
-  .story-os-command-primary {
+  .ollaic-command-primary {
     border-color: transparent;
     background: var(--primary);
     color: var(--primary-foreground);
   }
 
-  .story-os-command-primary:hover {
+  .ollaic-command-primary:hover {
     border-color: transparent;
     background: color-mix(in srgb, var(--primary) 90%, white);
   }
 
-  .story-os-interactive {
+  .ollaic-interactive {
     transition: background 160ms ease, border-color 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 120ms ease;
   }
 
-  .story-os-interactive:hover {
+  .ollaic-interactive:hover {
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-scene) 18%, transparent);
   }
 
-  .story-os-interactive:active {
+  .ollaic-interactive:active {
     transform: translate(1px, 1px);
     box-shadow: none;
   }
 
-  .story-os-panel-header {
+  .ollaic-panel-header {
     display: flex;
     min-height: 40px;
     align-items: center;
@@ -712,19 +712,19 @@
     text-transform: uppercase;
   }
 
-  .story-os-chamfer-tr {
+  .ollaic-chamfer-tr {
     clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%);
   }
 
-  .story-os-chamfer-bl {
+  .ollaic-chamfer-bl {
     clip-path: polygon(0 0, 100% 0, 100% 100%, 6px 100%, 0 calc(100% - 6px));
   }
 
-  .story-os-hard-shadow {
+  .ollaic-hard-shadow {
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-scene) 14%, transparent);
   }
 
-  .story-os-layered-tab-active {
+  .ollaic-layered-tab-active {
     border-left: 1px solid var(--border);
     border-right: 1px solid var(--border);
     border-top: 1px solid var(--border);

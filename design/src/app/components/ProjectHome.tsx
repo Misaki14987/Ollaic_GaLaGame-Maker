@@ -25,7 +25,7 @@ import {
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { initProject, openProject, type ProjectInfo } from '../lib/webgal-ipc';
 import { saveProjectMemory } from '../lib/project-memory';
-import { StoryOsPanel } from './StoryOsChrome';
+import { OllaicPanel } from './OllaicChrome';
 
 export interface Project {
   id: string;
@@ -92,7 +92,7 @@ export function ProjectHome() {
       : hour < 18 ? '下午好，创作者'
       : '晚上好，创作者';
     const pad = (n: number) => String(n).padStart(2, '0');
-    const tag = `STORY OS · ${now.getFullYear()}.${pad(now.getMonth() + 1)}.${pad(now.getDate())} · 在线`;
+    const tag = `Ollaic · ${now.getFullYear()}.${pad(now.getMonth() + 1)}.${pad(now.getDate())} · 在线`;
     return { title, tag };
   }, []);
 
@@ -284,11 +284,11 @@ export function ProjectHome() {
       {/* Home header */}
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-border bg-surface-bright px-4">
         <div className="flex items-center gap-3">
-          <div className="story-os-chamfer-tr flex h-7 w-7 items-center justify-center bg-primary/10 text-primary">
+          <div className="ollaic-chamfer-tr flex h-7 w-7 items-center justify-center bg-primary/10 text-primary">
             <Home className="h-4 w-4" />
           </div>
           <span className="font-display-family text-base font-semibold tracking-tight text-primary">
-            Story OS
+            Ollaic
           </span>
           <span className="hidden font-mono-family text-[10px] font-semibold uppercase tracking-widest text-muted-foreground sm:inline">工作台</span>
         </div>
@@ -307,7 +307,7 @@ export function ProjectHome() {
         </div>
       </header>
 
-      <main className="story-os-blueprint min-h-0 flex-1 overflow-hidden bg-surface-container-low p-4">
+      <main className="ollaic-blueprint min-h-0 flex-1 overflow-hidden bg-surface-container-low p-4">
         <div className="mx-auto flex h-full max-w-7xl flex-col gap-5 pt-2">
           {/* Greeting */}
           <div className="relative shrink-0">
@@ -316,7 +316,7 @@ export function ProjectHome() {
               {greeting.tag}
             </div>
             <h1 className="font-display-family text-3xl font-semibold tracking-tight text-foreground">{greeting.title}</h1>
-            <p className="mt-1 text-sm text-muted-foreground">Story OS 2.0 准备就绪，今天想创造怎样的世界？</p>
+            <p className="mt-1 text-sm text-muted-foreground">Ollaic 2.0 准备就绪，今天想创造怎样的世界？</p>
           </div>
 
           {/* Quick actions */}
@@ -324,9 +324,9 @@ export function ProjectHome() {
             <button
               type="button"
               onClick={openCreateDialog}
-              className="story-os-hard-shadow story-os-chamfer-tr group relative flex items-center gap-4 overflow-hidden border border-l-4 border-border border-l-primary bg-surface-container-lowest p-5 text-left transition-all hover:-translate-y-0.5 hover:bg-surface-container"
+              className="ollaic-hard-shadow ollaic-chamfer-tr group relative flex items-center gap-4 overflow-hidden border border-l-4 border-border border-l-primary bg-surface-container-lowest p-5 text-left transition-all hover:-translate-y-0.5 hover:bg-surface-container"
             >
-              <div className="story-os-dot-grid pointer-events-none absolute inset-0 opacity-40" />
+              <div className="ollaic-dot-grid pointer-events-none absolute inset-0 opacity-40" />
               <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary transition-transform group-hover:scale-110">
                 <Plus className="h-6 w-6" />
               </div>
@@ -339,9 +339,9 @@ export function ProjectHome() {
             <button
               type="button"
               onClick={handleOpenProject}
-              className="story-os-hard-shadow story-os-chamfer-tr group relative flex items-center gap-4 overflow-hidden border border-l-4 border-border border-l-accent bg-surface-container-lowest p-5 text-left transition-all hover:-translate-y-0.5 hover:bg-surface-container"
+              className="ollaic-hard-shadow ollaic-chamfer-tr group relative flex items-center gap-4 overflow-hidden border border-l-4 border-border border-l-accent bg-surface-container-lowest p-5 text-left transition-all hover:-translate-y-0.5 hover:bg-surface-container"
             >
-              <div className="story-os-dot-grid pointer-events-none absolute inset-0 opacity-40" />
+              <div className="ollaic-dot-grid pointer-events-none absolute inset-0 opacity-40" />
               <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-secondary/10 text-secondary transition-transform group-hover:scale-110">
                 <FileDown className="h-6 w-6" />
               </div>
@@ -354,7 +354,7 @@ export function ProjectHome() {
           </div>
 
           {/* Project library */}
-          <StoryOsPanel
+          <OllaicPanel
             title="项目库"
             icon={Folder}
             className="flex min-h-0 flex-1 flex-col"
@@ -520,7 +520,7 @@ export function ProjectHome() {
                 </div>
               </div>
             </div>
-          </StoryOsPanel>
+          </OllaicPanel>
         </div>
       </main>
 
@@ -586,9 +586,9 @@ function ProjectRecord({
           onOpen();
         }
       }}
-      className={`story-os-interactive story-os-chamfer-tr group cursor-pointer overflow-hidden border border-border bg-surface-container-lowest text-left hover:border-primary/40 ${project.deleted ? 'opacity-70' : ''}`}
+      className={`ollaic-interactive ollaic-chamfer-tr group cursor-pointer overflow-hidden border border-border bg-surface-container-lowest text-left hover:border-primary/40 ${project.deleted ? 'opacity-70' : ''}`}
     >
-      <div className="story-os-blueprint relative aspect-[16/9] overflow-hidden bg-gradient-to-br from-secondary/25 to-surface-container">
+      <div className="ollaic-blueprint relative aspect-[16/9] overflow-hidden bg-gradient-to-br from-secondary/25 to-surface-container">
         <div className="flex h-full w-full items-center justify-center">
           <BookOpen className="h-16 w-16 text-muted-foreground opacity-15 transition-transform duration-300 group-hover:scale-110" />
         </div>
@@ -653,7 +653,7 @@ function ProjectRow(props: ProjectRecordProps) {
           onOpen();
         }
       }}
-      className={`story-os-interactive group flex w-full cursor-pointer items-center gap-4 rounded border border-border bg-surface-container-lowest p-3 text-left hover:border-primary/40 ${project.deleted ? 'opacity-70' : ''}`}
+      className={`ollaic-interactive group flex w-full cursor-pointer items-center gap-4 rounded border border-border bg-surface-container-lowest p-3 text-left hover:border-primary/40 ${project.deleted ? 'opacity-70' : ''}`}
     >
       <div className="flex h-14 w-20 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-secondary/30 to-surface-container">
         <BookOpen className="h-5 w-5 text-muted-foreground opacity-20" />
@@ -717,10 +717,10 @@ function ProjectModal(props: ProjectModalProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-md">
-      <div className="story-os-panel w-full max-w-lg">
+      <div className="ollaic-panel w-full max-w-lg">
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <div className="flex items-center gap-3">
-            <div className="story-os-chamfer-tr rounded bg-primary/15 p-2 text-primary">
+            <div className="ollaic-chamfer-tr rounded bg-primary/15 p-2 text-primary">
               <Sparkles className="h-5 w-5" />
             </div>
             <div>
@@ -775,7 +775,7 @@ function ProjectModal(props: ProjectModalProps) {
             type="button"
             onClick={onCreate}
             disabled={!projectName.trim() || !selectedDir || isCreating}
-            className="story-os-chamfer-tr flex w-full items-center justify-center gap-2 rounded bg-primary py-3 font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+            className="ollaic-chamfer-tr flex w-full items-center justify-center gap-2 rounded bg-primary py-3 font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
           >
             {isCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
             {isCreating ? '创建中...' : '创建项目'}
@@ -807,7 +807,7 @@ function EditProjectDialog({
 }: EditProjectDialogProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-md" onClick={onClose}>
-      <div className="story-os-panel w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+      <div className="ollaic-panel w-full max-w-md" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <h2 className="text-base font-semibold">编辑项目信息</h2>
           <button type="button" onClick={onClose} className="rounded p-1.5 text-muted-foreground hover:bg-surface-container-high" aria-label="关闭">

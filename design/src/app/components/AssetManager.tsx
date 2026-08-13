@@ -70,7 +70,7 @@ import { getScenePath, loadScene, openProject, saveScene } from '../lib/webgal-i
 import type { WebGalNode } from '../lib/webgal-types';
 import { listCharacters } from '../lib/character-ipc';
 import { CharacterPanel } from './CharacterPanel';
-import { StoryOsSideNav, StoryOsTopBar } from './StoryOsChrome';
+import { OllaicSideNav, OllaicTopBar } from './OllaicChrome';
 import { VoiceDubbingPanel } from './VoiceDubbingPanel';
 
 type TabId = 'scene' | 'cg' | 'music' | 'character' | 'dubbing';
@@ -1204,12 +1204,12 @@ export function AssetManager() {
 
   return (
     <div className="h-full story-shell">
-      <StoryOsTopBar
+      <OllaicTopBar
         title="素材库"
         onRun={() => navigate(`/editor/${projectId}?action=preview`)}
         onPublish={() => navigate(`/editor/${projectId}?action=export`)}
       />
-      <StoryOsSideNav
+      <OllaicSideNav
         active={activeTab === 'character' ? 'characters' : 'assets'}
         projectId={projectId}
         projectLabel={projectPath ? projectPath.split('/').pop() : 'ALPHA'}
@@ -1217,14 +1217,14 @@ export function AssetManager() {
       />
 
       {!projectPath ? (
-        <div className="story-os-workspace flex items-center justify-center text-muted-foreground">
+        <div className="ollaic-workspace flex items-center justify-center text-muted-foreground">
           <div className="text-center">
             <AlertTriangle className="w-12 h-12 mx-auto mb-3 opacity-40" />
             <p>未找到项目路径，请从编辑器重新进入素材库</p>
           </div>
         </div>
       ) : (
-        <div className="story-os-workspace flex bg-surface-container-lowest">
+        <div className="ollaic-workspace flex bg-surface-container-lowest">
           <main className="relative flex-1 flex flex-col overflow-hidden bg-surface">
             <div className="flex h-12 items-end gap-1 border-b border-border bg-surface-container-low px-4 pt-2">
               {tabConfig.map(({ id, label, icon: Icon }) => (
@@ -1241,7 +1241,7 @@ export function AssetManager() {
                   }}
                   className={`flex items-center gap-1.5 px-4 py-2 text-xs font-semibold tracking-wide transition-colors ${
                     activeTab === id
-                      ? 'story-os-layered-tab-active text-foreground'
+                      ? 'ollaic-layered-tab-active text-foreground'
                       : 'rounded-t text-muted-foreground hover:bg-surface-container-highest hover:text-foreground'
                   }`}
                 >
@@ -1271,7 +1271,7 @@ export function AssetManager() {
                     setAiMusicFilename(null);
                     setAiGenerateOpen(true);
                   }}
-                  className="story-os-command border-primary/30 bg-primary/10 text-primary"
+                  className="ollaic-command border-primary/30 bg-primary/10 text-primary"
                 >
                   <Sparkles className="h-3.5 w-3.5" />
                   {aiActionLabel}
@@ -1281,7 +1281,7 @@ export function AssetManager() {
                 <button
                   onClick={handleImport}
                   disabled={!projectPath || importing}
-                  className="story-os-command story-os-command-primary story-os-chamfer-tr disabled:opacity-50"
+                  className="ollaic-command ollaic-command-primary ollaic-chamfer-tr disabled:opacity-50"
                 >
                   {importing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
                   {importing ? '导入中...' : importConfig.buttonLabel}
@@ -1816,13 +1816,13 @@ export function AssetManager() {
                           setSelectedVoiceCard(null);
                           setEditingSceneCard(null);
                         }}
-                        className={`story-os-interactive group relative cursor-pointer overflow-hidden rounded border bg-surface-container-low ${
+                        className={`ollaic-interactive group relative cursor-pointer overflow-hidden rounded border bg-surface-container-low ${
                           isSelected
-                            ? 'border-secondary ring-1 ring-secondary story-os-hard-shadow'
+                            ? 'border-secondary ring-1 ring-secondary ollaic-hard-shadow'
                             : 'border-border hover:border-secondary'
                         }`}
                       >
-                        <div className={`${String(activeTab) === 'scene' ? 'aspect-video' : 'aspect-square'} story-os-blueprint bg-surface-dim relative overflow-hidden`}>
+                        <div className={`${String(activeTab) === 'scene' ? 'aspect-video' : 'aspect-square'} ollaic-blueprint bg-surface-dim relative overflow-hidden`}>
                           {thumbnail ? (
                             <img
                               src={thumbnail}
@@ -1937,7 +1937,7 @@ export function AssetManager() {
                           setSelectedVoiceCard(null);
                           setEditingSceneCard(null);
                         }}
-                        className={`story-os-interactive flex cursor-pointer items-center gap-4 rounded border p-4 ${
+                        className={`ollaic-interactive flex cursor-pointer items-center gap-4 rounded border p-4 ${
                           isSelected
                             ? 'bg-secondary/10 border-secondary'
                             : 'bg-surface-container-lowest border-border hover:border-secondary'
@@ -2083,7 +2083,7 @@ export function AssetManager() {
                 </div>
               <div className="p-4">
                 <div className="mb-6">
-                  <div className="story-os-blueprint story-os-hard-shadow aspect-video rounded overflow-hidden bg-surface-dim mb-4 border border-border">
+                  <div className="ollaic-blueprint ollaic-hard-shadow aspect-video rounded overflow-hidden bg-surface-dim mb-4 border border-border">
                     {getThumbnail(selectedAsset) ? (
                       <img
                         src={getThumbnail(selectedAsset)!}
