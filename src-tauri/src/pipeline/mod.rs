@@ -4,6 +4,7 @@
 pub mod commands;
 pub mod dsl;
 pub mod events;
+pub mod registry;
 pub mod scheduler;
 pub mod state;
 pub mod store;
