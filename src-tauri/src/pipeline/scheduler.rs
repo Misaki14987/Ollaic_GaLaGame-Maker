@@ -7,6 +7,7 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use base64::Engine;
 use tokio::sync::{Mutex, Notify};
@@ -93,6 +94,7 @@ enum Action {
 pub struct Pipeline {
     agents: AgentRegistry,
     figure_matting_model: Result<std::path::PathBuf, String>,
+    step_timeout: Option<Duration>,
 }
 
 struct ConfiguredAssetGenerator {
@@ -336,6 +338,7 @@ impl Pipeline {
         Pipeline {
             agents,
             figure_matting_model: Err("figure matting model is not configured".to_string()),
+            step_timeout: None,
         }
     }
 
@@ -349,7 +352,15 @@ impl Pipeline {
         Self {
             agents: AgentRegistry::with_defaults(),
             figure_matting_model,
+            step_timeout: None,
         }
+    }
+
+    /// Cap each step's agent run with a timeout; on expiry the step fails and
+    /// the run terminates as `RunStatus::Timeout` instead of hanging forever.
+    pub fn with_step_timeout(mut self, timeout: Duration) -> Self {
+        self.step_timeout = Some(timeout);
+        self
     }
 
     /// Create + persist a run, emit `RunStarted`, return a handle set to
@@ -898,7 +909,17 @@ impl Pipeline {
             }
         } else {
             match self.agents.get(kind, agent_key.as_deref()) {
-                Some(agent) => agent.run(&ctx).await,
+                Some(agent) => match self.step_timeout {
+                    Some(timeout) => match tokio::time::timeout(timeout, agent.run(&ctx)).await {
+                        Ok(result) => result,
+                        Err(_elapsed) => {
+                            self.fail_step_timeout(project_path, handle, sink, clock, id, timeout)
+                                .await;
+                            return;
+                        }
+                    },
+                    None => agent.run(&ctx).await,
+                },
                 None => Err(AgentError(format!(
                     "no agent registered for step kind '{}'",
                     kind.as_str()
@@ -1073,6 +1094,34 @@ impl Pipeline {
         step_id: String,
         error: String,
     ) {
+        self.fail_step_with_status(project_path, handle, sink, clock, step_id, error, RunStatus::Failed)
+            .await;
+    }
+
+    async fn fail_step_timeout(
+        &self,
+        project_path: &Path,
+        handle: &Arc<RunHandle>,
+        sink: &dyn EventSink,
+        clock: &dyn Clock,
+        step_id: String,
+        timeout: Duration,
+    ) {
+        let error = format!("step timed out after {:?}", timeout);
+        self.fail_step_with_status(project_path, handle, sink, clock, step_id, error, RunStatus::Timeout)
+            .await;
+    }
+
+    async fn fail_step_with_status(
+        &self,
+        project_path: &Path,
+        handle: &Arc<RunHandle>,
+        sink: &dyn EventSink,
+        clock: &dyn Clock,
+        step_id: String,
+        error: String,
+        status: RunStatus,
+    ) {
         let mut state = handle.state.lock().await;
         if state.status == RunStatus::Cancelled
             || state.find_step(&step_id).map(|step| step.status) != Some(StepStatus::Running)
@@ -1090,7 +1139,7 @@ impl Pipeline {
                 attempt.duration_ms = Some(finished_at.saturating_sub(attempt.started_at));
             }
         }
-        state.status = RunStatus::Failed;
+        state.status = status;
         state.updated_at = finished_at;
         let run_id = state.run_id.clone();
         let _ = store::save_run_state(project_path, &state);
