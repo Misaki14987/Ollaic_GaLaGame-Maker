@@ -75,6 +75,17 @@ impl Agent for FailingAgent {
     }
 }
 
+/// An agent that never resolves, to exercise the step timeout.
+struct HangingAgent;
+impl Agent for HangingAgent {
+    fn run<'a>(
+        &'a self,
+        _ctx: &'a AgentContext<'a>,
+    ) -> Pin<Box<dyn Future<Output = Result<AgentOutput, AgentError>> + Send + 'a>> {
+        Box::pin(std::future::pending())
+    }
+}
+
 /// An agent that fails the first N calls, then succeeds. For retry tests.
 struct OnceFailingAgent {
     fails_left: Arc<AsyncMutex<u32>>,
@@ -644,6 +655,53 @@ async fn pause_then_resume_completes_run() {
         .unwrap()
         .unwrap();
     assert_eq!(run_state.status, RunStatus::Completed);
+}
+
+// ---------- scheduler: timeout ----------
+
+#[tokio::test]
+async fn step_timeout_terminates_run_as_timeout() {
+    let project = fresh_project("timeout");
+    let sink = Arc::new(RecordingSink::new());
+    let clock = StepClock::new();
+
+    let mut agents = AgentRegistry::with_defaults();
+    agents.register(StepKind::Plan, Box::new(HangingAgent));
+    agents.register(StepKind::Memory, Box::new(crate::agents::MemoryAgent));
+    agents.register(StepKind::Outline, Box::new(crate::agents::OutlineAgent));
+    agents.register(StepKind::Scene, Box::new(crate::agents::SceneAgent));
+    let pipeline = Pipeline::new(agents).with_step_timeout(Duration::from_millis(50));
+
+    let handle = pipeline
+        .create_run(
+            &project,
+            "run_timeout",
+            "brief",
+            &default_recipe(),
+            &clock,
+            sink.as_ref(),
+        )
+        .unwrap();
+
+    // The hanging Plan agent must be cut off by the step timeout, not hang the run.
+    timeout(
+        Duration::from_secs(3),
+        pipeline.execute(&project, handle.clone(), sink.as_ref(), &clock),
+    )
+    .await
+    .expect("run did not finish in time");
+
+    let run_state = crate::pipeline::load_run_state(&project, "run_timeout")
+        .unwrap()
+        .unwrap();
+    assert_eq!(run_state.status, RunStatus::Timeout);
+    let plan = run_state.find_step("plan").unwrap();
+    assert_eq!(plan.status, StepStatus::Failed);
+    assert!(plan
+        .error
+        .as_deref()
+        .unwrap()
+        .contains("timed out"));
 }
 
 // ---------- scheduler: crash-resume ----------

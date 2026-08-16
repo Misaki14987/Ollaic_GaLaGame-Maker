@@ -25,7 +25,7 @@ export type StepStatus =
   | 'awaitingInput'
   | 'skipped';
 
-export type RunStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
+export type RunStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled' | 'timeout';
 
 export interface StepDef {
   id: string;
