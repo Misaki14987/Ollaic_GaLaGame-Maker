@@ -853,3 +853,48 @@ export function describeEdit(edit: ChangeEdit, sceneHeaders?: Record<string, Sce
 export function summarizeChangeSet(set: PendingChangeSet, sceneHeaders?: Record<string, SceneHeader>): string {
   return set.edits.map((e) => describeEdit(e, sceneHeaders)).join(' · ');
 }
+
+/** Inputs needed to confirm no resource changed since the change set was staged. */
+export interface ConflictCheckContext {
+  currentSceneName: string;
+  /** The live buffer for the currently-open scene (already-serialized text). */
+  currentScriptSource: string;
+  /** Re-read a non-current scene's current on-disk content. */
+  readSceneContent: (file: string) => Promise<string>;
+  /** Current character by id (after any user edits). */
+  getCharacter: (id: string) => Character | undefined;
+  /** Current project memory (after any user edits). */
+  memory: ProjectMemory;
+}
+
+/**
+ * Detect confirm-time conflicts: any edit whose underlying resource changed
+ * since the change set was staged. Scene edits compare the live buffer (current
+ * scene) or re-read on-disk content (other scenes) against the staged
+ * `beforeContent`; character and memory edits compare against their staged
+ * `before`. create_scene/create_character/asset_plan are new resources and are
+ * never considered conflicted here.
+ */
+export async function detectConflicts(
+  set: PendingChangeSet,
+  ctx: ConflictCheckContext,
+): Promise<string[]> {
+  const conflicts: string[] = [];
+  for (const edit of set.edits) {
+    if (edit.kind === 'scene') {
+      if (edit.file === ctx.currentSceneName) {
+        const live = ctx.currentScriptSource;
+        if (live !== edit.afterContent && live !== edit.beforeContent) conflicts.push(edit.file);
+      } else {
+        const current = await ctx.readSceneContent(edit.file).catch(() => '');
+        if (current !== edit.beforeContent) conflicts.push(edit.file);
+      }
+    } else if (edit.kind === 'character') {
+      const current = ctx.getCharacter(edit.id);
+      if (current && JSON.stringify(current) !== JSON.stringify(edit.before)) conflicts.push(edit.id);
+    } else if (edit.kind === 'memory') {
+      if (JSON.stringify(ctx.memory) !== JSON.stringify(edit.before)) conflicts.push('memory');
+    }
+  }
+  return conflicts;
+}
