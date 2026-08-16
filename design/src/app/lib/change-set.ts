@@ -90,6 +90,14 @@ export interface PendingChangeSet {
   edits: ChangeEdit[];
 }
 
+/** In-turn staged state so create_scene/create_character are visible to later tools. */
+export interface StagingDraft {
+  /** scene file -> staged initial content ('' when the created scene starts empty). */
+  sceneFiles: Map<string, string>;
+  /** character id (tmp_ai_*) -> staged draft character. */
+  characters: Map<string, Character>;
+}
+
 /** Resources the staging functions read from (current editor state + lookups). */
 export interface StagingContext {
   currentSceneName: string;
@@ -108,6 +116,8 @@ export interface StagingContext {
   memory: ProjectMemory;
   /** Asset refs planned in the same AI turn and therefore allowed in script patches. */
   plannedAssetKeys?: Set<string>;
+  /** Read-your-writes overlay: staged creates visible to same-turn reads. */
+  draft?: StagingDraft;
 }
 
 /** A staging failure with a user-facing message (and optional missing-asset detail). */
@@ -499,11 +509,14 @@ export async function stageSceneEdit(
   const isCurrent = staged.file === ctx.currentSceneName;
   // Base content: an in-progress edit chains onto its own afterContent so that
   // multiple edit_scene calls on the same file compose.
+  const stagedContent = ctx.draft?.sceneFiles.get(staged.file);
   const beforeContent = existing
     ? existing.afterContent
     : isCurrent
       ? ctx.currentScriptSource
-      : await ctx.readSceneContent(staged.file);
+      : stagedContent !== undefined
+        ? stagedContent
+        : await ctx.readSceneContent(staged.file);
 
   // Resolve立绘意图（角色+表情）为真实文件名，再做格式/缺素材校验与应用。
   const patches = resolveFigurePatches(staged.patches, ctx);
@@ -659,6 +672,7 @@ export function stageCreateCharacterEdit(
     id: draft.id,
     colorTheme: draft.colorTheme,
   };
+  if (ctx.draft) ctx.draft.characters.set(draft.id, draft);
   return {
     kind: 'create_character',
     draft,
@@ -674,7 +688,8 @@ export function stageCharacterSpritesPlan(
   staged: Extract<StagedWrite, { tool: 'plan_character_sprites' }>,
   ctx: StagingContext,
 ): CharacterEdit {
-  const character = findCharacter(ctx.characters, staged.character);
+  const draftCharacters = ctx.draft ? Array.from(ctx.draft.characters.values()) : [];
+  const character = findCharacter([...ctx.characters, ...draftCharacters], staged.character);
   if (!character) throw new StageError(`找不到角色：${staged.character}`);
   const before = existing?.before ?? character;
   const baseAfter = existing?.after ?? before;
@@ -770,7 +785,7 @@ export function stageCharacterEdit(
   staged: Extract<StagedWrite, { tool: 'edit_character' }>,
   ctx: StagingContext,
 ): CharacterEdit {
-  const before = existing?.before ?? ctx.getCharacter(staged.id);
+  const before = existing?.before ?? ctx.draft?.characters.get(staged.id) ?? ctx.getCharacter(staged.id);
   if (!before) throw new StageError(`找不到角色 id：${staged.id}`);
   const baseAfter = existing?.after ?? before;
   const safePartial = sanitizePartial(staged.partial, CHARACTER_STRING_FIELDS, CHARACTER_STRING_ARRAY_FIELDS);
@@ -814,9 +829,13 @@ export async function stageCreateSceneEdit(
   const file = normalizeSceneFilename(staged.name);
   if (!file || file === '.txt') throw new StageError('create_scene 的场景名为空。');
   const existing = await ctx.listSceneFiles();
-  if (existing.some((f) => f.toLowerCase() === file.toLowerCase())) {
+  const stagedDuplicate = ctx.draft
+    ? Array.from(ctx.draft.sceneFiles.keys()).some((f) => f.toLowerCase() === file.toLowerCase())
+    : false;
+  if (existing.some((f) => f.toLowerCase() === file.toLowerCase()) || stagedDuplicate) {
     throw new StageError(`场景「${file}」已存在，换个名字，或用 edit_scene 修改它。`);
   }
+  if (ctx.draft) ctx.draft.sceneFiles.set(file, '');
   return { kind: 'create_scene', file, chapter: staged.chapter, outline: staged.outline };
 }
 
