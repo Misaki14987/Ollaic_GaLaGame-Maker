@@ -1261,3 +1261,24 @@ fn escape_choice_part(value: &str) -> String {
         .trim()
         .to_string()
 }
+
+#[test]
+fn media_download_url_rejects_ssrf_targets() {
+    // Non-http(s) schemes are rejected outright.
+    assert!(validate_media_download_url("file:///etc/passwd").is_err());
+    assert!(validate_media_download_url("ftp://example.com/x.png").is_err());
+    // Loopback / private / link-local hosts are rejected (SSRF).
+    assert!(validate_media_download_url("http://127.0.0.1:8080/x.png").is_err());
+    assert!(validate_media_download_url("http://localhost/x.png").is_err());
+    assert!(validate_media_download_url("http://169.254.169.254/latest/meta-data").is_err());
+    assert!(validate_media_download_url("http://10.0.0.1/x.png").is_err());
+    assert!(validate_media_download_url("http://192.168.1.1/x.png").is_err());
+    assert!(validate_media_download_url("http://172.16.0.5/x.png").is_err());
+    assert!(validate_media_download_url("http://[::1]/x.png").is_err());
+    // Public endpoints pass.
+    assert!(validate_media_download_url("https://example.com/image.png").is_ok());
+    assert!(validate_media_download_url(
+        "https://oaidalleapiprodscus.blob.core.windows.net/x.png"
+    )
+    .is_ok());
+}
