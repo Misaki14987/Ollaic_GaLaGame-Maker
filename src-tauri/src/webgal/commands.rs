@@ -36,7 +36,8 @@ pub fn save_scene(path: String, nodes: Vec<WebGalNode>) -> Result<(), String> {
         fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
     }
 
-    fs::write(&path, text).map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
+    crate::json_store::write_crash_safe(&path, text.as_bytes())
+        .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
     Ok(())
 }
 
@@ -54,7 +55,8 @@ pub fn write_file_text(path: String, content: String) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
     }
-    fs::write(&path, content).map_err(|e| format!("Failed to write {}: {}", path.display(), e))
+    crate::json_store::write_crash_safe(&path, content.as_bytes())
+        .map_err(|e| format!("Failed to write {}: {}", path.display(), e))
 }
 
 /// List all .txt scene files in a directory.
@@ -110,4 +112,36 @@ pub fn rename_scene(path: String, new_name: String) -> Result<String, String> {
         )
     })?;
     Ok(new_path.to_string_lossy().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn write_file_text_round_trips_and_leaves_no_atomic_residue() {
+        let dir = std::env::temp_dir().join("ollaic_write_text_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("start.txt");
+        let path_str = path.to_string_lossy().to_string();
+
+        write_file_text(path_str.clone(), "A:hello;".to_string()).unwrap();
+        assert_eq!(read_file_text(path_str.clone()).unwrap(), "A:hello;");
+
+        // Overwriting an existing file must not corrupt it.
+        write_file_text(path_str.clone(), "B:world;".to_string()).unwrap();
+        assert_eq!(read_file_text(path_str.clone()).unwrap(), "B:world;");
+
+        // The crash-safe writer leaves no .tmp/.bak residue.
+        let mut residue: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().to_string())
+            .collect();
+        residue.sort();
+        assert_eq!(residue, vec!["start.txt".to_string()]);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
