@@ -245,7 +245,7 @@ pub fn create_scene(project_path: String, scene_name: String) -> Result<String, 
         return Err(format!("Scene {} already exists", name));
     }
 
-    fs::write(&path, format!("; {}\n", name))
+    crate::json_store::write_crash_safe(&path, format!("; {}\n", name).as_bytes())
         .map_err(|e| format!("Failed to create scene: {}", e))?;
 
     Ok(path.to_string_lossy().to_string())
@@ -275,7 +275,8 @@ pub fn save_project_memory(project_path: String, memory: ProjectMemory) -> Resul
     let path = game_dir.join("ai-memory.json");
     let text = serde_json::to_string_pretty(&memory)
         .map_err(|e| format!("Failed to serialize ai-memory.json: {}", e))?;
-    fs::write(&path, text).map_err(|e| format!("Failed to write ai-memory.json: {}", e))
+    crate::json_store::write_crash_safe(&path, text.as_bytes())
+        .map_err(|e| format!("Failed to write ai-memory.json: {}", e))
 }
 
 #[tauri::command]
