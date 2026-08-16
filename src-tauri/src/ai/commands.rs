@@ -2024,6 +2024,7 @@ async fn download_generated_media(
     extension: &str,
     action: &str,
 ) -> Result<GeneratedMedia, String> {
+    validate_media_download_url(url)?;
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(HTTP_REQUEST_TIMEOUT_SECS))
         .build()
@@ -2041,6 +2042,47 @@ async fn download_generated_media(
         base64_data: base64::engine::general_purpose::STANDARD.encode(bytes),
         extension: extension.to_string(),
     })
+}
+
+/// Reject SSRF-prone media download URLs: non-http(s) schemes and loopback/
+/// private/link-local/reserved hosts. A provider-returned media URL must point
+/// at a public endpoint, never the local machine or an internal network.
+fn validate_media_download_url(url: &str) -> Result<(), String> {
+    let parsed = reqwest::Url::parse(url).map_err(|e| format!("无效的下载 URL: {e}"))?;
+    match parsed.scheme() {
+        "https" | "http" => {}
+        other => return Err(format!("不允许的下载协议: {other}")),
+    }
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "下载 URL 缺少主机名".to_string())?;
+    if is_private_download_host(host) {
+        return Err(format!("拒绝下载内部/保留地址: {host}"));
+    }
+    Ok(())
+}
+
+fn is_private_download_host(host: &str) -> bool {
+    let lower = host.to_ascii_lowercase();
+    if lower == "localhost" || lower.ends_with(".localhost") || lower.ends_with(".local") {
+        return true;
+    }
+    // host_str() brackets IPv6 literals; strip them before parsing.
+    let bare = lower.trim_start_matches('[').trim_end_matches(']');
+    if let Ok(ip) = bare.parse::<std::net::Ipv4Addr>() {
+        return ip.is_loopback()
+            || ip.is_private()
+            || ip.is_link_local()
+            || ip.is_unspecified()
+            || ip.is_broadcast();
+    }
+    if let Ok(ip) = bare.parse::<std::net::Ipv6Addr>() {
+        return ip.is_loopback()
+            || ip.is_unspecified()
+            || ip.is_unique_local()
+            || ip.is_unicast_link_local();
+    }
+    false
 }
 
 fn dashscope_endpoint(cfg: &AiProviderConfig, path: &str) -> String {
