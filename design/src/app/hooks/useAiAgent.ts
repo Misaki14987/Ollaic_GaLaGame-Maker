@@ -45,6 +45,7 @@ import {
   type SceneEdit,
   type StageError,
   type StagingContext,
+  type StagingDraft,
 } from '../lib/change-set';
 import { extractEditorResponse } from '../lib/editor-patch';
 import { getTool, toolDefs, type StagedWrite } from '../lib/ai-tools';
@@ -489,7 +490,8 @@ export function useAiAgent(params: UseAiAgentParams) {
     if (freshAssets !== assets) setAssets(freshAssets);
     trace.assetCount = freshAssets.length;
     const plannedAssetKeys = new Set<string>();
-    const stagingCtx = { ...buildStagingContext(freshAssets), plannedAssetKeys };
+    const draft: StagingDraft = { sceneFiles: new Map(), characters: new Map() };
+    const stagingCtx = { ...buildStagingContext(freshAssets), plannedAssetKeys, draft };
     const sceneEdits = new Map<string, SceneEdit>();
     const charEdits = new Map<string, CharacterEdit>();
     const createCharEdits = new Map<string, CreateCharacterEdit>();
@@ -508,7 +510,10 @@ export function useAiAgent(params: UseAiAgentParams) {
         } else if (staged.tool === 'create_branch') {
           const result = await stageBranchEdit(sceneEdits.get(staged.file), staged, stagingCtx);
           sceneEdits.set(staged.file, result.sourceEdit);
-          for (const edit of result.createSceneEdits) createSceneEdits.set(edit.file, edit);
+          for (const edit of result.createSceneEdits) {
+            createSceneEdits.set(edit.file, edit);
+            stagingCtx.draft?.sceneFiles.set(edit.file, edit.initialContent ?? '');
+          }
         } else if (staged.tool === 'insert_figure') {
           sceneEdits.set(staged.file, await stageFigureInsert(sceneEdits.get(staged.file), staged, stagingCtx));
         } else if (staged.tool === 'create_character') {
