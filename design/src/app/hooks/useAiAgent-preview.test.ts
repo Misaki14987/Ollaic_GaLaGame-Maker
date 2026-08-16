@@ -44,12 +44,14 @@ vi.mock('../lib/webgal-ipc', () => ({
   listScenes: vi.fn(async () => []),
   saveScene: vi.fn(async () => {}),
   createScene: vi.fn(async () => '/tmp/new.txt'),
+  deleteScene: vi.fn(async () => {}),
   updateSceneHeader: vi.fn(async () => {}),
   sceneDisplayName: (f: string) => f,
 }));
 
 import { aiChatTurn } from '../lib/ai-ipc';
 import { getTool } from '../lib/ai-tools';
+import { createScene, deleteScene, updateSceneHeader } from '../lib/webgal-ipc';
 import type { AiTurnResult } from '../lib/ai-ipc';
 
 function makeParams(overrides: Record<string, unknown> = {}) {
@@ -110,5 +112,34 @@ describe('AI pending preview isolation', () => {
     expect(params.setNodes).not.toHaveBeenCalled();
     expect(params.setScriptSource).not.toHaveBeenCalled();
     expect(params.setDirty).not.toHaveBeenCalled();
+  });
+});
+
+describe('create_scene rollback on mid-batch failure', () => {
+  it('deletes the scene file created before a later failure', async () => {
+    vi.mocked(aiChatTurn)
+      .mockResolvedValueOnce({
+        text: '',
+        toolCalls: [{ id: 'c1', name: 'create_scene', arguments: { name: 'chapter_02', chapter: '第一章' } }],
+      } as unknown as AiTurnResult)
+      .mockResolvedValue({ text: 'done', toolCalls: [] } as unknown as AiTurnResult);
+    vi.mocked(getTool).mockReturnValue({
+      name: 'create_scene',
+      kind: 'write',
+      schema: {},
+      run: async () => ({ tool: 'create_scene', name: 'chapter_02', chapter: '第一章' }),
+    } as never);
+    vi.mocked(createScene).mockResolvedValue('/tmp/proj/game/scene/chapter_02.txt');
+    vi.mocked(updateSceneHeader).mockRejectedValue(new Error('disk full'));
+
+    const params = makeParams();
+    const { result } = renderHook(() => useAiAgent(params), { wrapper: MemoryRouter });
+
+    await act(async () => { await result.current.sendPrompt('创建场景'); });
+    await waitFor(() => { expect(result.current.pendingChangeSet).toBeTruthy(); });
+
+    await act(async () => { await result.current.acceptChange(); });
+
+    expect(vi.mocked(deleteScene)).toHaveBeenCalledWith('/tmp/proj/game/scene/chapter_02.txt');
   });
 });

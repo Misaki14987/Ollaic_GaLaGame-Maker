@@ -63,7 +63,7 @@ import {
   truncateContextMessages,
   type MissingAssetIssue,
 } from '../lib/story-agent';
-import { createScene, getScenePath, listScenes, parseScene, readFileText, saveScene, sceneDisplayName, updateSceneHeader, type SceneHeader } from '../lib/webgal-ipc';
+import { createScene, deleteScene, getScenePath, listScenes, parseScene, readFileText, saveScene, sceneDisplayName, updateSceneHeader, type SceneHeader } from '../lib/webgal-ipc';
 import type { WebGalNode } from '../lib/webgal-types';
 import { useChatSession, type AssistantStep, type ChatAttachment, type ChatMessage, type StepToolCall } from './useChatSession';
 
@@ -884,15 +884,17 @@ export function useAiAgent(params: UseAiAgentParams) {
   const persistChangeSet = useCallback(async (set: PendingChangeSet) => {
     if (!projectPath) return;
     const currentSceneEdit = set.edits.find((e): e is SceneEdit => e.kind === 'scene' && e.file === currentSceneName);
-    // Create scenes last so a failure in earlier edits never leaves an orphan
-    // file (no delete_scene IPC to roll it back with). New characters can be
-    // deleted during rollback, so they do not need special ordering.
+    // Create scenes last so a failure in earlier edits rarely leaves an orphan
+    // file; any scene file created before the failure is still removed during
+    // rollback (see createdScenePaths below). New characters can be deleted
+    // during rollback, so they do not need special ordering.
     const ordered = [...set.edits].sort((a, b) => (a.kind === 'create_scene' ? 1 : 0) - (b.kind === 'create_scene' ? 1 : 0));
     let createdScene = false;
     let changedCharacters = false;
     const applied: ChangeEdit[] = [];
     const createdCharacterIds = new Map<CreateCharacterEdit, string>();
     const assetMetadataBefore = new Map<AssetPlanEdit, AssetMetadata>();
+    const createdScenePaths: string[] = [];
     try {
       for (const edit of ordered) {
         if (edit.kind === 'scene') {
@@ -916,7 +918,7 @@ export function useAiAgent(params: UseAiAgentParams) {
           if (after !== before) await saveAssetMetadata(projectPath, after);
         } else {
           // create_scene: make the file, then set its header if provided.
-          await createScene(projectPath, edit.file);
+          createdScenePaths.push(await createScene(projectPath, edit.file));
           if (edit.chapter || edit.outline) {
             const path = await getScenePath(projectPath, edit.file);
             await updateSceneHeader(path, { chapter: edit.chapter, outline: edit.outline });
@@ -931,8 +933,7 @@ export function useAiAgent(params: UseAiAgentParams) {
         applied.push(edit);
       }
     } catch (e) {
-      // Roll back everything already written, in reverse order. create_scene runs
-      // last, so if we're here it never succeeded — nothing to delete.
+      // Roll back everything already written, in reverse order.
       for (const edit of applied.reverse()) {
         try {
           if (edit.kind === 'scene') {
@@ -951,6 +952,11 @@ export function useAiAgent(params: UseAiAgentParams) {
             if (before) await saveAssetMetadata(projectPath, before);
           }
         } catch { /* best-effort rollback */ }
+      }
+      // create_scene has no beforeContent to restore, so its rollback is to
+      // remove the scene file it created before the failure.
+      for (const createdPath of createdScenePaths) {
+        try { await deleteScene(createdPath); } catch { /* best-effort rollback */ }
       }
       setStatus('error');
       setError({ kind: 'other', retryable: false, message: `落盘失败，已回滚全部修改：${String(e)}` });
