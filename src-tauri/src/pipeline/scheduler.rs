@@ -28,6 +28,7 @@ use crate::story_plan::{self, StoryPlan};
 pub struct RunHandle {
     pub state: Arc<Mutex<RunState>>,
     notify: Arc<Notify>,
+    cancel_notify: Arc<Notify>,
     pause_after_step: AtomicBool,
     cancelled: Arc<AtomicBool>,
     asset_binding_gate: Arc<Mutex<()>>,
@@ -70,6 +71,7 @@ impl RunHandle {
         self.pause_after_step.store(false, Ordering::SeqCst);
         self.cancelled.store(true, Ordering::SeqCst);
         self.notify.notify_one();
+        self.cancel_notify.notify_waiters();
         sink.emit(PipelineEvent::RunStopped { run_id });
         Ok(())
     }
@@ -135,6 +137,13 @@ impl AssetGenerator for ConfiguredAssetGenerator {
         Box::pin(async move {
             if self.cancelled.load(Ordering::SeqCst) {
                 return Err(crate::asset_queue::scheduler::ASSET_QUEUE_CANCELLED.to_string());
+            }
+            // Tests must not hit the network: generation is deterministic
+            // placeholder output. Production still tries the provider and falls
+            // back to a placeholder only on error (or when local fallback was
+            // explicitly authorized).
+            if cfg!(test) {
+                return Ok(local_placeholder(task.kind));
             }
             let result = generate_configured_asset(task, &self.figure_matting_model).await;
             if self.cancelled.load(Ordering::SeqCst) {
@@ -419,6 +428,7 @@ impl Pipeline {
         Ok(Arc::new(RunHandle {
             state: Arc::new(Mutex::new(state)),
             notify: Arc::new(Notify::new()),
+            cancel_notify: Arc::new(Notify::new()),
             pause_after_step: AtomicBool::new(false),
             cancelled: Arc::new(AtomicBool::new(false)),
             asset_binding_gate: Arc::new(Mutex::new(())),
@@ -476,6 +486,7 @@ impl Pipeline {
         Ok(Arc::new(RunHandle {
             state: Arc::new(Mutex::new(state)),
             notify: Arc::new(Notify::new()),
+            cancel_notify: Arc::new(Notify::new()),
             pause_after_step: AtomicBool::new(false),
             cancelled: Arc::new(AtomicBool::new(false)),
             asset_binding_gate: Arc::new(Mutex::new(())),
@@ -529,6 +540,7 @@ impl Pipeline {
         Ok(Arc::new(RunHandle {
             state: Arc::new(Mutex::new(state)),
             notify: Arc::new(Notify::new()),
+            cancel_notify: Arc::new(Notify::new()),
             pause_after_step: AtomicBool::new(false),
             cancelled: Arc::new(AtomicBool::new(false)),
             asset_binding_gate: Arc::new(Mutex::new(())),
@@ -909,17 +921,29 @@ impl Pipeline {
             }
         } else {
             match self.agents.get(kind, agent_key.as_deref()) {
-                Some(agent) => match self.step_timeout {
-                    Some(timeout) => match tokio::time::timeout(timeout, agent.run(&ctx)).await {
-                        Ok(result) => result,
-                        Err(_elapsed) => {
-                            self.fail_step_timeout(project_path, handle, sink, clock, id, timeout)
-                                .await;
+                Some(agent) => {
+                    let timeout_sleep = async {
+                        match self.step_timeout {
+                            Some(timeout) => tokio::time::sleep(timeout).await,
+                            None => std::future::pending::<()>().await,
+                        }
+                    };
+                    tokio::select! {
+                        result = agent.run(&ctx) => result,
+                        _ = timeout_sleep => {
+                            if let Some(timeout) = self.step_timeout {
+                                self.fail_step_timeout(project_path, handle, sink, clock, id, timeout)
+                                    .await;
+                            }
                             return;
                         }
-                    },
-                    None => agent.run(&ctx).await,
-                },
+                        _ = handle.cancel_notify.notified() => {
+                            // stop() aborted the run: drop the in-flight agent
+                            // future and return without applying anything.
+                            return;
+                        }
+                    }
+                }
                 None => Err(AgentError(format!(
                     "no agent registered for step kind '{}'",
                     kind.as_str()

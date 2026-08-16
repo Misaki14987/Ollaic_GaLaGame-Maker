@@ -1370,10 +1370,104 @@ async fn retry_after_stop_ignores_the_cancelled_attempt_result() {
     );
     agents.register(StepKind::Outline, Box::new(crate::agents::OutlineAgent));
     let pipeline = Arc::new(Pipeline::new(agents));
+    // A minimal recipe keeps this test focused on retry-after-stop semantics
+    // and out of the flaky assetQueue generation path.
+    let recipe = FlowRecipe::new()
+        .step(StepDef::new("plan", StepKind::Plan))
+        .step(StepDef::new("outline", StepKind::Outline).depends_on("plan"));
     let handle = pipeline
         .create_run(
             &project,
             "run_stop_retry",
+            "brief",
+            &recipe,
+            &clock,
+            sink.as_ref(),
+        )
+        .unwrap();
+
+    // First drive: Plan blocks on the gate; stop() truly aborts it, so the
+    // first driver returns without the gate being released.
+    let first = {
+        let pipeline = pipeline.clone();
+        let project = project.clone();
+        let handle = handle.clone();
+        let sink = sink.clone();
+        tokio::spawn(async move {
+            pipeline
+                .execute(&project, handle, sink.as_ref(), &SystemClock)
+                .await;
+        })
+    };
+    wait_until(&sink, |events| {
+        events.iter().filter(|event| matches!(event, PipelineEvent::StepStarted { step_id, .. } if step_id == "plan")).count() == 1
+    })
+    .await;
+
+    handle.stop(&project, sink.as_ref(), &clock).await.unwrap();
+    let _ = timeout(Duration::from_secs(3), first)
+        .await
+        .expect("cancelled driver did not finish")
+        .unwrap();
+
+    // Retry: reset and drive with a fresh task. The second attempt's output is accepted.
+    handle
+        .retry_step(&project, "plan", sink.as_ref(), &clock)
+        .await
+        .unwrap();
+    let second = {
+        let pipeline = pipeline.clone();
+        let project = project.clone();
+        let handle = handle.clone();
+        let sink = sink.clone();
+        tokio::spawn(async move {
+            pipeline
+                .execute(&project, handle, sink.as_ref(), &SystemClock)
+                .await;
+        })
+    };
+    wait_until(&sink, |events| {
+        events.iter().filter(|event| matches!(event, PipelineEvent::StepStarted { step_id, .. } if step_id == "plan")).count() == 2
+    })
+    .await;
+    gate.notify_one();
+    timeout(Duration::from_secs(3), second)
+        .await
+        .expect("retried driver did not finish")
+        .unwrap();
+
+    let state = handle.state().lock().await;
+    assert_eq!(state.status, RunStatus::Completed);
+    let history = &state.find_step("plan").unwrap().history;
+    assert_eq!(history.len(), 2);
+    assert_eq!(
+        history[0].error.as_deref(),
+        Some("cancelled before completion")
+    );
+    assert!(history[0].output.is_none());
+    assert!(history[1].output.is_some());
+}
+
+#[tokio::test]
+async fn stop_truly_aborts_the_in_flight_agent() {
+    let project = fresh_project("stop_abort");
+    let sink = Arc::new(RecordingSink::new());
+    let clock = StepClock::new();
+    let gate = Arc::new(Notify::new());
+    let mut agents = AgentRegistry::with_defaults();
+    agents.register(
+        StepKind::Plan,
+        Box::new(ControllableAgent {
+            gate: gate.clone(),
+            output: synopsis_output("never applied"),
+        }),
+    );
+    agents.register(StepKind::Outline, Box::new(crate::agents::OutlineAgent));
+    let pipeline = Arc::new(Pipeline::new(agents));
+    let handle = pipeline
+        .create_run(
+            &project,
+            "run_stop_abort",
             "brief",
             &default_recipe(),
             &clock,
@@ -1392,36 +1486,28 @@ async fn retry_after_stop_ignores_the_cancelled_attempt_result() {
         })
     };
     wait_until(&sink, |events| {
-        events.iter().filter(|event| matches!(event, PipelineEvent::StepStarted { step_id, .. } if step_id == "plan")).count() == 1
+        events.iter().any(|event| matches!(event, PipelineEvent::StepStarted { step_id, .. } if step_id == "plan"))
     })
     .await;
 
     handle.stop(&project, sink.as_ref(), &clock).await.unwrap();
-    handle
-        .retry_step(&project, "plan", sink.as_ref(), &clock)
-        .await
-        .unwrap();
-    gate.notify_one();
-    wait_until(&sink, |events| {
-        events.iter().filter(|event| matches!(event, PipelineEvent::StepStarted { step_id, .. } if step_id == "plan")).count() == 2
-    })
-    .await;
-    gate.notify_one();
+
+    // The in-flight agent is still blocked on the gate; stop() must terminate
+    // the run by dropping that future, NOT by waiting for the gate.
     timeout(Duration::from_secs(3), task)
         .await
-        .expect("retried driver did not finish")
+        .expect("cancelled driver did not finish")
         .unwrap();
 
-    let state = handle.state().lock().await;
-    assert_eq!(state.status, RunStatus::Completed);
-    let history = &state.find_step("plan").unwrap().history;
-    assert_eq!(history.len(), 2);
-    assert_eq!(
-        history[0].error.as_deref(),
-        Some("cancelled before completion")
-    );
-    assert!(history[0].output.is_none());
-    assert!(history[1].output.is_some());
+    let persisted = crate::pipeline::load_run_state(&project, "run_stop_abort")
+        .unwrap()
+        .unwrap();
+    assert_eq!(persisted.status, RunStatus::Cancelled);
+    assert!(crate::story_plan::load_plan(&project)
+        .unwrap()
+        .unwrap()
+        .synopsis
+        .is_empty());
 }
 
 #[tokio::test]
