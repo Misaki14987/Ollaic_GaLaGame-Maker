@@ -303,9 +303,6 @@ export function useAiAgent(params: UseAiAgentParams) {
   const cancelledRef = useRef(false);
   const streamingIdRef = useRef<string | null>(null);
   const inFlightRef = useRef(false);
-  // Snapshot of `dirty` taken right before a preview forces it to true, so a
-  // revert can restore the canvas to its real pre-preview modified state.
-  const dirtyBeforePreviewRef = useRef(false);
   // Monotonic token identifying the in-flight request. A new prompt bumps this;
   // an old request's finally only touches shared UI state when its token still
   // matches, so a stale request can't clobber a newer one.
@@ -459,20 +456,19 @@ export function useAiAgent(params: UseAiAgentParams) {
     const liveSceneName = currentSceneNameRef.current;
     const currentSceneEdit = edits.find((e): e is SceneEdit => e.kind === 'scene' && e.file === liveSceneName);
     if (currentSceneEdit) {
-      setNodes(currentSceneEdit.afterNodes);
-      setScriptSource(currentSceneEdit.afterContent);
+      // The pending preview must NOT enter the live saveable buffer: autosave /
+      // Ctrl+S would persist un-accepted AI content to disk. The preview is
+      // rendered read-only from pendingChangeSet (aiPreviewEntries), so only
+      // view state changes here — never nodes/scriptSource/dirty.
       setSelectedNode(null);
       setShowScript(false);
-      dirtyBeforePreviewRef.current = dirty;
-      setDirty(true);
-      setSaveStatus('idle');
     }
     replaceAssistantMessage(sourceMessageId, `已生成修改预览：${summarizeChangeSet(changeSet, sceneHeaders)}`);
     setPendingChangeSet(changeSet);
     setStatus('pending');
     setError(null);
     return true;
-  }, [dirty, sceneHeaders, replaceAssistantMessage, setDirty, setNodes, setSaveStatus, setScriptSource, setSelectedNode, setShowScript]);
+  }, [sceneHeaders, replaceAssistantMessage, setSelectedNode, setShowScript]);
 
   // --- Function-calling agent loop ----------------------------------------
   const runAgentLoop = useCallback(async (text: string, assistantId: string, attachedUploadIds: string[]) => {
@@ -1013,19 +1009,12 @@ export function useAiAgent(params: UseAiAgentParams) {
 
   const revertChange = useCallback(() => {
     if (!pendingChangeSet) return;
-    // Only restore the live canvas if the edited scene is the one open now.
-    const currentSceneEdit = pendingChangeSet.edits.find((e): e is SceneEdit => e.kind === 'scene' && e.file === currentSceneName);
-    if (currentSceneEdit) {
-      setNodes(currentSceneEdit.beforeNodes);
-      setScriptSource(currentSceneEdit.beforeContent);
-      setSelectedNode(null);
-      setDirty(dirtyBeforePreviewRef.current);
-      setSaveStatus('idle');
-    }
+    // The preview never entered the live buffer (see finalizeChangeSet), so
+    // rejecting only marks the set reverted — no buffer/disk restore needed.
     replaceAssistantMessage(pendingChangeSet.sourceMessageId, `已拒绝：${summarizeChangeSet(pendingChangeSet, sceneHeaders)}`);
     setPendingChangeSet({ ...pendingChangeSet, status: 'reverted' });
     setStatus('reverted');
-  }, [currentSceneName, sceneHeaders, pendingChangeSet, replaceAssistantMessage, setDirty, setNodes, setSaveStatus, setScriptSource, setSelectedNode]);
+  }, [sceneHeaders, pendingChangeSet, replaceAssistantMessage]);
 
   const forceApplyChange = useCallback(async () => {
     if (!pendingChangeSet) return;

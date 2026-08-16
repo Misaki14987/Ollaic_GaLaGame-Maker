@@ -1643,7 +1643,6 @@ export function StoryEditor() {
 
   // In-memory draft cache: sceneName -> nodes snapshot for unsaved scenes
   const sceneDraftCache = useRef<Map<string, WebGalNode[]>>(new Map());
-  const aiPreviewingCurrentSceneRef = useRef(false);
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const autoSaveRef = useRef<ReturnType<typeof setInterval>>();
@@ -2067,11 +2066,10 @@ export function StoryEditor() {
   const handleSwitchScene = useCallback(async (sceneName: string) => {
     if (!projectPath) return;
 
-    // Stash current unsaved nodes in the in-memory draft cache
-    if (dirty && !aiPreviewingCurrentSceneRef.current) {
+    // Stash current unsaved nodes in the in-memory draft cache. A pending AI
+    // preview no longer lives in `nodes`, so `dirty` means real user edits.
+    if (dirty) {
       sceneDraftCache.current.set(currentSceneName, nodes);
-    } else if (aiPreviewingCurrentSceneRef.current) {
-      sceneDraftCache.current.delete(currentSceneName);
     }
 
     // Guard against out-of-order async results: a fast A→B→A switch must not
@@ -2411,7 +2409,6 @@ export function StoryEditor() {
   }, [aiAgent.pendingChangeSet, currentSceneName]);
 
   useEffect(() => {
-    aiPreviewingCurrentSceneRef.current = Boolean(aiPreviewEntries);
     const set = aiAgent.pendingChangeSet;
     if (set?.status === 'accepted') {
       set.edits.forEach((edit) => {
@@ -2422,7 +2419,7 @@ export function StoryEditor() {
     if (set?.status === 'reverted' && set.edits.some((edit) => edit.kind === 'scene' && edit.file === currentSceneName)) {
       sceneDraftCache.current.delete(currentSceneName);
     }
-  }, [aiPreviewEntries, aiAgent.pendingChangeSet, currentSceneName]);
+  }, [aiAgent.pendingChangeSet, currentSceneName]);
 
   const handleAiSend = useCallback((text: string) => { void aiAgent.sendPrompt(text); }, [aiAgent.sendPrompt]);
   // ---------------------------------------------------------------------------
