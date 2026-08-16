@@ -34,6 +34,7 @@ import {
   stageAssetPlanEdit,
   stageSceneEdit,
   stageSceneHeaderEdit,
+  detectConflicts,
   type AssetPlanEdit,
   summarizeChangeSet,
   type ChangeEdit,
@@ -997,21 +998,24 @@ export function useAiAgent(params: UseAiAgentParams) {
 
   const acceptChange = useCallback(async () => {
     if (!pendingChangeSet || pendingChangeSet.status !== 'pending' || !projectPath) return;
-    // Conflict guard only applies when the edited scene is the one open now.
-    // If the request finished while the user was on another scene, the buffer
-    // may still be the original content; accepting should still apply the
-    // preview. Anything else means the user changed the scene after staging.
-    const currentSceneEdit = pendingChangeSet.edits.find((e): e is SceneEdit => e.kind === 'scene' && e.file === currentSceneName);
-    if (
-      currentSceneEdit &&
-      scriptSource !== currentSceneEdit.afterContent &&
-      scriptSource !== currentSceneEdit.beforeContent
-    ) {
+    // Confirm no edited resource changed since staging: the open scene's live
+    // buffer, other scenes' on-disk content, characters, and memory.
+    const conflicts = await detectConflicts(pendingChangeSet, {
+      currentSceneName,
+      currentScriptSource: scriptSource,
+      readSceneContent: async (file) => {
+        const path = await getScenePath(projectPath, file);
+        return readFileText(path);
+      },
+      getCharacter: (id) => characters.find((c) => c.id === id),
+      memory: memory ?? emptyProjectMemory(),
+    });
+    if (conflicts.length > 0) {
       setStatus('conflict');
       return;
     }
     await persistChangeSet(pendingChangeSet);
-  }, [currentSceneName, pendingChangeSet, persistChangeSet, projectPath, scriptSource]);
+  }, [characters, currentSceneName, memory, pendingChangeSet, persistChangeSet, projectPath, scriptSource]);
 
   const revertChange = useCallback(() => {
     if (!pendingChangeSet) return;
