@@ -205,8 +205,16 @@ describe('AI conversational orchestration -> Tauri change-set command seam', () 
     expect(result.current.status).toBe('accepted');
     expect(project.scenes.get('chapter-2.txt')).toContain('B:staged;');
     expect(project.requests).toHaveLength(1);
-    expect(project.requests[0].operations).toHaveLength(1);
+    expect(project.requests[0].operations).toHaveLength(2);
     expect(project.requests[0].operations[0]).toMatchObject({ kind: 'create_scene', file: 'chapter-2.txt' });
+    expect(project.requests[0].operations[1]).toMatchObject({
+      kind: 'narrative_context',
+      document: expect.objectContaining({
+        acceptedFacts: [expect.objectContaining({
+          values: expect.arrayContaining([expect.stringContaining('场景 chapter-2.txt 初始内容：B:staged;')]),
+        })],
+      }),
+    });
   });
 
   it('preserves a user write when the staged baseline is stale', async () => {
