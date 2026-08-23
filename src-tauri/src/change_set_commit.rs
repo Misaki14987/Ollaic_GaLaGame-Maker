@@ -415,10 +415,10 @@ fn baseline_matches(write: &PreparedWrite) -> bool {
 
 fn missing_json_matches(resource: &ResourceId, expected: &serde_json::Value) -> bool {
     match resource {
-        ResourceId::Characters => serde_json::from_value::<
-            crate::characters::types::CharactersDocument,
-        >(expected.clone())
-        .is_ok_and(|document| document.version == 1 && document.characters.is_empty()),
+        ResourceId::Characters => {
+            serde_json::from_value::<crate::characters::types::CharactersDocument>(expected.clone())
+                .is_ok_and(|document| document.version == 1 && document.characters.is_empty())
+        }
         ResourceId::ProjectMemory => {
             serde_json::from_value::<crate::webgal::project::ProjectMemory>(expected.clone())
                 .is_ok_and(|memory| {

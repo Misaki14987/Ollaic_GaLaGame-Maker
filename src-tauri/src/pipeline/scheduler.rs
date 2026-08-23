@@ -1212,8 +1212,16 @@ impl Pipeline {
         step_id: String,
         error: String,
     ) {
-        self.fail_step_with_status(project_path, handle, sink, clock, step_id, error, RunStatus::Failed)
-            .await;
+        self.fail_step_with_status(
+            project_path,
+            handle,
+            sink,
+            clock,
+            step_id,
+            error,
+            RunStatus::Failed,
+        )
+        .await;
     }
 
     async fn fail_step_timeout(
@@ -1226,8 +1234,16 @@ impl Pipeline {
         timeout: Duration,
     ) {
         let error = format!("step timed out after {:?}", timeout);
-        self.fail_step_with_status(project_path, handle, sink, clock, step_id, error, RunStatus::Timeout)
-            .await;
+        self.fail_step_with_status(
+            project_path,
+            handle,
+            sink,
+            clock,
+            step_id,
+            error,
+            RunStatus::Timeout,
+        )
+        .await;
     }
 
     async fn fail_step_with_status(

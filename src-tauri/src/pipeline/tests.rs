@@ -743,11 +743,7 @@ async fn step_timeout_terminates_run_as_timeout() {
     assert_eq!(run_state.status, RunStatus::Timeout);
     let plan = run_state.find_step("plan").unwrap();
     assert_eq!(plan.status, StepStatus::Failed);
-    assert!(plan
-        .error
-        .as_deref()
-        .unwrap()
-        .contains("timed out"));
+    assert!(plan.error.as_deref().unwrap().contains("timed out"));
 }
 
 #[tokio::test]
