@@ -1,7 +1,6 @@
+use crate::webgal::project_paths::{ProjectPaths, SceneName};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -128,9 +127,8 @@ fn apply_change_set_impl(
     request: ApplyChangeSetRequest,
     failures: &FailurePlan,
 ) -> ApplyChangeSetResult {
-    let project = PathBuf::from(&request.project_path);
-    let project_key = match project.canonicalize() {
-        Ok(path) => path,
+    let project_paths = match ProjectPaths::open(&request.project_path) {
+        Ok(paths) => paths,
         Err(_) => {
             return ApplyChangeSetResult::FailedAndRolledBack {
                 failed_resource: ResourceId::Project,
@@ -138,10 +136,9 @@ fn apply_change_set_impl(
             }
         }
     };
-    let project_guard = project_write_guard(&project_key);
-    let _guard = project_guard
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
+    let project_key = project_paths.root().to_path_buf();
+    let project = project_key.clone();
+    let _guard = project_paths.lock_for_write();
     if !project.join("game").is_dir() {
         return ApplyChangeSetResult::FailedAndRolledBack {
             failed_resource: ResourceId::Project,
@@ -329,19 +326,6 @@ fn duplicate_resource(writes: &[PreparedWrite]) -> Option<ResourceId> {
     None
 }
 
-fn project_write_guard(project: &Path) -> Arc<Mutex<()>> {
-    static GUARDS: OnceLock<Mutex<HashMap<PathBuf, Weak<Mutex<()>>>>> = OnceLock::new();
-    let guards = GUARDS.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut guards = guards.lock().unwrap_or_else(|error| error.into_inner());
-    if let Some(guard) = guards.get(project).and_then(Weak::upgrade) {
-        return guard;
-    }
-    guards.retain(|_, guard| guard.strong_count() > 0);
-    let guard = Arc::new(Mutex::new(()));
-    guards.insert(project.to_path_buf(), Arc::downgrade(&guard));
-    guard
-}
-
 fn prepare_write(
     project: &Path,
     operation: ChangeSetOperation,
@@ -352,9 +336,9 @@ fn prepare_write(
             baseline,
             content,
         } => {
-            if !is_scene_name(&file) {
-                return Err((ResourceId::Scene { file }, "invalid scene name".into()));
-            }
+            let name = SceneName::parse(&file)
+                .map_err(|message| (ResourceId::Scene { file: file.clone() }, message))?;
+            let file = name.as_str().to_string();
             PreparedWrite::new(
                 ResourceId::Scene { file: file.clone() },
                 project.join("game/scene").join(file),
@@ -381,9 +365,9 @@ fn prepare_write(
             serialize_json(ResourceId::AssetMetadata, &metadata)?,
         ),
         ChangeSetOperation::CreateScene { file, content } => {
-            if !is_scene_name(&file) {
-                return Err((ResourceId::Scene { file }, "invalid scene name".into()));
-            }
+            let name = SceneName::parse(&file)
+                .map_err(|message| (ResourceId::Scene { file: file.clone() }, message))?;
+            let file = name.as_str().to_string();
             PreparedWrite::new(
                 ResourceId::Scene { file: file.clone() },
                 project.join("game/scene").join(file),
@@ -425,7 +409,7 @@ fn baseline_matches(write: &PreparedWrite) -> bool {
             }
             Err(_) => false,
         },
-        Baseline::Missing => !write.path.exists(),
+        Baseline::Missing => !case_insensitive_sibling_exists(&write.path),
     }
 }
 
@@ -462,15 +446,21 @@ fn missing_json_matches(resource: &ResourceId, expected: &serde_json::Value) -> 
     }
 }
 
-fn is_scene_name(value: &str) -> bool {
-    let path = Path::new(value);
-    !value.is_empty()
-        && value.ends_with(".txt")
-        && path.components().count() == 1
-        && path.file_name().and_then(|name| name.to_str()) == Some(value)
-        && value != "."
-        && value != ".."
-        && !value.contains('\\')
+fn case_insensitive_sibling_exists(path: &Path) -> bool {
+    let Some(parent) = path.parent() else {
+        return true;
+    };
+    let Some(expected) = path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_lowercase())
+    else {
+        return true;
+    };
+    std::fs::read_dir(parent).map_or(true, |entries| {
+        entries
+            .filter_map(Result::ok)
+            .any(|entry| entry.file_name().to_string_lossy().to_lowercase() == expected)
+    })
 }
 
 #[cfg(test)]
@@ -842,10 +832,8 @@ mod tests {
         assert_eq!(
             result,
             ApplyChangeSetResult::FailedAndRolledBack {
-                failed_resource: ResourceId::Scene {
-                    file: "victim.txt".into()
-                },
-                message: "resource path escapes project".into(),
+                failed_resource: ResourceId::Project,
+                message: "invalid project".into(),
             }
         );
         assert_eq!(
@@ -1240,6 +1228,34 @@ mod tests {
             fs::read_to_string(project.join("game/scene/new.txt")).unwrap(),
             "existing"
         );
+        fs::remove_dir_all(project).unwrap();
+    }
+
+    #[test]
+    fn change_set_commit_create_scene_rejects_case_insensitive_collision() {
+        let project = temp_project("create_case_collision");
+        fs::write(project.join("game/scene/Chapter.txt"), "existing").unwrap();
+        let result = apply_change_set(ApplyChangeSetRequest {
+            project_path: project.to_string_lossy().into_owned(),
+            operations: vec![ChangeSetOperation::CreateScene {
+                file: "chapter.TXT".into(),
+                content: "replacement".into(),
+            }],
+        });
+
+        assert_eq!(
+            result,
+            ApplyChangeSetResult::Conflict {
+                resources: vec![ResourceId::Scene {
+                    file: "chapter.txt".into()
+                }]
+            }
+        );
+        assert_eq!(
+            fs::read_to_string(project.join("game/scene/Chapter.txt")).unwrap(),
+            "existing"
+        );
+        assert!(!project.join("game/scene/chapter.txt").exists());
         fs::remove_dir_all(project).unwrap();
     }
 

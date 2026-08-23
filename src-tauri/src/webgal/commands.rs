@@ -1,5 +1,5 @@
 use super::parser;
-use super::project_paths::ProjectPaths;
+use super::project_paths::{ProjectPaths, SceneName};
 use super::serializer;
 use super::types::WebGalNode;
 use std::fs;
@@ -82,9 +82,10 @@ pub fn rename_scene(
 ) -> Result<String, String> {
     let paths = ProjectPaths::open(project_path)?;
     let path = paths.existing_scene(&scene_name)?;
-    let new_path = paths.scene_candidate(&new_name)?;
-    if new_path.exists() {
-        return Err(format!("Scene {new_name} already exists"));
+    let normalized_name = SceneName::parse(&new_name)?;
+    let new_path = paths.scene_candidate(normalized_name.as_str())?;
+    if paths.has_case_insensitive_scene(&normalized_name)? {
+        return Err(format!("Scene {} already exists", normalized_name.as_str()));
     }
     fs::rename(&path, &new_path).map_err(|e| {
         format!(
@@ -94,7 +95,7 @@ pub fn rename_scene(
             e
         )
     })?;
-    Ok(new_name)
+    Ok(normalized_name.as_str().to_string())
 }
 
 /// Write a user-selected standalone scene export. This is intentionally not a

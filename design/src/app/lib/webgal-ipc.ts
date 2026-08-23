@@ -151,7 +151,7 @@ export async function getScenePath(projectPath: string, sceneName: string): Prom
   return invoke<string>('get_scene_path', { projectPath, sceneName });
 }
 
-/** Create a new scene file in the project. */
+/** Atomically create a Scene and return its normalized Scene name. */
 export async function createScene(projectPath: string, sceneName: string): Promise<string> {
   return invoke<string>('create_scene', { projectPath, sceneName });
 }

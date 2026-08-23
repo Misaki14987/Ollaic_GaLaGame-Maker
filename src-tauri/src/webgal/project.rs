@@ -1,3 +1,4 @@
+use super::project_paths::{ProjectPaths, SceneName};
 use super::references;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -221,34 +222,19 @@ pub fn save_config(project_path: String, config: HashMap<String, String>) -> Res
 /// Get the full path for a scene file within a project.
 #[tauri::command]
 pub fn get_scene_path(project_path: String, scene_name: String) -> Result<String, String> {
-    let path = PathBuf::from(&project_path)
-        .join("game")
-        .join("scene")
-        .join(&scene_name);
+    let path = ProjectPaths::open(project_path)?.scene_candidate(&scene_name)?;
     Ok(path.to_string_lossy().to_string())
 }
 
 /// Create a new scene file in the project.
 #[tauri::command]
 pub fn create_scene(project_path: String, scene_name: String) -> Result<String, String> {
-    let scene_dir = PathBuf::from(&project_path).join("game").join("scene");
-    fs::create_dir_all(&scene_dir).map_err(|e| format!("Failed to create scene dir: {}", e))?;
-
-    let name = if scene_name.ends_with(".txt") {
-        scene_name
-    } else {
-        format!("{}.txt", scene_name)
-    };
-
-    let path = scene_dir.join(&name);
-    if path.exists() {
-        return Err(format!("Scene {} already exists", name));
-    }
-
-    crate::json_store::write_crash_safe(&path, format!("; {}\n", name).as_bytes())
-        .map_err(|e| format!("Failed to create scene: {}", e))?;
-
-    Ok(path.to_string_lossy().to_string())
+    let paths = ProjectPaths::open(project_path)?;
+    let name = SceneName::parse(&scene_name)?;
+    let content = format!("; {}\n", name.as_str());
+    paths
+        .create_scene(name.as_str(), content.as_bytes())
+        .map(|created| created.as_str().to_string())
 }
 
 #[tauri::command]

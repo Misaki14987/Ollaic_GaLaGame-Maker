@@ -1,10 +1,63 @@
+use std::collections::HashMap;
 use std::fs;
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SceneName(String);
+
+impl SceneName {
+    pub fn parse(value: &str) -> Result<Self, String> {
+        if value.is_empty() || value.trim() != value {
+            return Err(format!("Invalid scene name: {value}"));
+        }
+        let raw = Path::new(value);
+        if raw.is_absolute()
+            || !matches!(
+                raw.components().collect::<Vec<_>>().as_slice(),
+                [Component::Normal(_)]
+            )
+            || value.contains(['/', '\\'])
+            || value.chars().any(char::is_control)
+            || value
+                .chars()
+                .any(|character| r#"<>:"|?*"#.contains(character))
+        {
+            return Err(format!("Invalid scene name: {value}"));
+        }
+
+        let normalized = match raw.extension().and_then(|extension| extension.to_str()) {
+            None => format!("{value}.txt"),
+            Some(extension) if extension.eq_ignore_ascii_case("txt") => {
+                format!("{}.txt", raw.with_extension("").to_string_lossy())
+            }
+            Some(_) => return Err(format!("Scene name must use the .txt extension: {value}")),
+        };
+        let stem = Path::new(&normalized)
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .ok_or_else(|| format!("Invalid scene name: {value}"))?;
+        if stem.is_empty() || stem.ends_with(['.', ' ']) || is_reserved_stem(stem) {
+            return Err(format!("Invalid or reserved scene name: {value}"));
+        }
+        Ok(Self(normalized))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    fn case_key(&self) -> String {
+        self.0.to_lowercase()
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct ProjectPaths {
     root: PathBuf,
     scene_dir: PathBuf,
+    write_guard: Arc<Mutex<()>>,
 }
 
 impl ProjectPaths {
@@ -14,12 +67,20 @@ impl ProjectPaths {
             .canonicalize()
             .map_err(|error| format!("Invalid project {}: {error}", requested_root.display()))?;
         if !root.is_dir() {
-            return Err(format!("Invalid project {}: not a directory", root.display()));
+            return Err(format!(
+                "Invalid project {}: not a directory",
+                root.display()
+            ));
         }
 
         let game = canonical_domain_dir(&root, &root.join("game"), "game")?;
         let scene_dir = canonical_domain_dir(&game, &game.join("scene"), "scene")?;
-        Ok(Self { root, scene_dir })
+        let write_guard = project_write_guard(&root);
+        Ok(Self {
+            root,
+            scene_dir,
+            write_guard,
+        })
     }
 
     pub fn existing_scene(&self, scene_name: &str) -> Result<PathBuf, String> {
@@ -39,12 +100,54 @@ impl ProjectPaths {
     }
 
     pub fn scene_candidate(&self, scene_name: &str) -> Result<PathBuf, String> {
-        validate_scene_identifier(scene_name)?;
-        let path = self.scene_dir.join(scene_name);
+        let scene_name = SceneName::parse(scene_name)?;
+        let path = self.scene_dir.join(scene_name.as_str());
         if path.parent() != Some(self.scene_dir.as_path()) {
-            return Err(format!("Invalid scene identifier: {scene_name}"));
+            return Err(format!("Invalid scene identifier: {}", scene_name.as_str()));
         }
         Ok(path)
+    }
+
+    pub fn create_scene(&self, scene_name: &str, content: &[u8]) -> Result<SceneName, String> {
+        let scene_name = SceneName::parse(scene_name)?;
+        let _guard = self
+            .write_guard
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if self.has_case_insensitive_scene(&scene_name)? {
+            return Err(format!("Scene {} already exists", scene_name.as_str()));
+        }
+        let path = self.scene_dir.join(scene_name.as_str());
+        let create_result = (|| {
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)?;
+            file.write_all(content)?;
+            file.sync_all()
+        })();
+        if let Err(error) = create_result {
+            let _ = fs::remove_file(&path);
+            return Err(format!(
+                "Failed to create scene {}: {error}",
+                scene_name.as_str()
+            ));
+        }
+        Ok(scene_name)
+    }
+
+    pub fn has_case_insensitive_scene(&self, scene_name: &SceneName) -> Result<bool, String> {
+        let expected = scene_name.case_key();
+        for entry in fs::read_dir(&self.scene_dir)
+            .map_err(|error| format!("Failed to inspect project scenes: {error}"))?
+        {
+            let entry =
+                entry.map_err(|error| format!("Failed to inspect project scenes: {error}"))?;
+            if entry.file_name().to_string_lossy().to_lowercase() == expected {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     pub fn list_scenes(&self) -> Result<Vec<String>, String> {
@@ -71,8 +174,10 @@ impl ProjectPaths {
         &self.root
     }
 
-    pub fn scene_dir(&self) -> &Path {
-        &self.scene_dir
+    pub fn lock_for_write(&self) -> MutexGuard<'_, ()> {
+        self.write_guard
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
     }
 }
 
@@ -87,22 +192,39 @@ fn canonical_domain_dir(owner: &Path, requested: &Path, label: &str) -> Result<P
 }
 
 fn validate_scene_identifier(scene_name: &str) -> Result<(), String> {
-    let path = Path::new(scene_name);
-    let single_normal_component = matches!(
-        path.components().collect::<Vec<_>>().as_slice(),
-        [Component::Normal(_)]
-    );
-    if scene_name.is_empty()
-        || path.is_absolute()
-        || !single_normal_component
-        || scene_name.contains(['/', '\\'])
-        || path.file_name().and_then(|name| name.to_str()) != Some(scene_name)
-        || path.file_stem().and_then(|stem| stem.to_str()).is_none_or(str::is_empty)
-        || path.extension().and_then(|extension| extension.to_str()) != Some("txt")
-    {
+    let normalized = SceneName::parse(scene_name)?;
+    if normalized.as_str() != scene_name {
         return Err(format!("Invalid scene identifier: {scene_name}"));
     }
     Ok(())
+}
+
+fn is_reserved_stem(stem: &str) -> bool {
+    let device = stem.split('.').next().unwrap_or(stem).to_ascii_uppercase();
+    matches!(device.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || device
+            .strip_prefix("COM")
+            .or_else(|| device.strip_prefix("LPT"))
+            .is_some_and(|suffix| {
+                suffix.len() == 1
+                    && suffix
+                        .as_bytes()
+                        .first()
+                        .is_some_and(|digit| (b'1'..=b'9').contains(digit))
+            })
+}
+
+fn project_write_guard(project: &Path) -> Arc<Mutex<()>> {
+    static GUARDS: OnceLock<Mutex<HashMap<PathBuf, Weak<Mutex<()>>>>> = OnceLock::new();
+    let guards = GUARDS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut guards = guards.lock().unwrap_or_else(|error| error.into_inner());
+    if let Some(guard) = guards.get(project).and_then(Weak::upgrade) {
+        return guard;
+    }
+    guards.retain(|_, guard| guard.strong_count() > 0);
+    let guard = Arc::new(Mutex::new(()));
+    guards.insert(project.to_path_buf(), Arc::downgrade(&guard));
+    guard
 }
 
 #[cfg(test)]
@@ -162,7 +284,11 @@ mod tests {
         fs::create_dir_all(&outside).unwrap();
         fs::create_dir_all(project.join("game/scene")).unwrap();
         fs::write(outside.join("secret.txt"), "secret").unwrap();
-        symlink(outside.join("secret.txt"), project.join("game/scene/link.txt")).unwrap();
+        symlink(
+            outside.join("secret.txt"),
+            project.join("game/scene/link.txt"),
+        )
+        .unwrap();
 
         let paths = ProjectPaths::open(&project).unwrap();
         assert!(paths.existing_scene("link.txt").is_err());
@@ -172,6 +298,73 @@ mod tests {
         symlink(&outside, escaped_project.join("game/scene")).unwrap();
         assert!(ProjectPaths::open(&escaped_project).is_err());
 
+        fs::remove_dir_all(workspace).unwrap();
+    }
+
+    #[test]
+    fn scene_name_normalizes_extension_and_preserves_unicode() {
+        assert_eq!(SceneName::parse("雨夜").unwrap().as_str(), "雨夜.txt");
+        assert_eq!(SceneName::parse("雨夜.TXT").unwrap().as_str(), "雨夜.txt");
+        assert_eq!(SceneName::parse("雨夜.txt").unwrap().as_str(), "雨夜.txt");
+    }
+
+    #[test]
+    fn scene_name_rejects_traversal_separators_extensions_and_reserved_names() {
+        for invalid in [
+            "../escape",
+            "nested/scene",
+            r"nested\scene",
+            "/absolute",
+            "chapter.md",
+            "CON",
+            "lpt1.txt",
+            "trailing. ",
+        ] {
+            assert!(
+                SceneName::parse(invalid).is_err(),
+                "{invalid} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn atomic_scene_create_rejects_case_insensitive_collisions() {
+        let workspace = temp_root("case_collision");
+        let project = workspace.join("project");
+        fs::create_dir_all(project.join("game/scene")).unwrap();
+        fs::write(project.join("game/scene/Chapter.txt"), "existing").unwrap();
+        let paths = ProjectPaths::open(&project).unwrap();
+
+        assert!(paths.create_scene("chapter", b"replacement").is_err());
+        assert_eq!(
+            fs::read_to_string(project.join("game/scene/Chapter.txt")).unwrap(),
+            "existing"
+        );
+        fs::remove_dir_all(workspace).unwrap();
+    }
+
+    #[test]
+    fn concurrent_same_name_scene_creates_have_exactly_one_winner() {
+        let workspace = temp_root("concurrent_create");
+        let project = workspace.join("project");
+        fs::create_dir_all(project.join("game/scene")).unwrap();
+        let paths = ProjectPaths::open(&project).unwrap();
+        let threads: Vec<_> = (0..8)
+            .map(|index| {
+                let paths = paths.clone();
+                std::thread::spawn(move || {
+                    paths.create_scene("chapter", format!("writer-{index}").as_bytes())
+                })
+            })
+            .collect();
+        let results: Vec<_> = threads
+            .into_iter()
+            .map(|thread| thread.join().unwrap())
+            .collect();
+
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        let content = fs::read_to_string(project.join("game/scene/chapter.txt")).unwrap();
+        assert!(content.starts_with("writer-"));
         fs::remove_dir_all(workspace).unwrap();
     }
 }
