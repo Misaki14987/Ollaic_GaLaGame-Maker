@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import { useAiAgent } from './useAiAgent';
 
@@ -51,8 +51,13 @@ vi.mock('../lib/webgal-ipc', () => ({
 
 import { aiChatTurn } from '../lib/ai-ipc';
 import { getTool } from '../lib/ai-tools';
-import { createScene, deleteScene, updateSceneHeader } from '../lib/webgal-ipc';
+import { createCharacter, updateCharacter } from '../lib/character-ipc';
+import { createScene, deleteScene, readFileText, saveScene, updateSceneHeader } from '../lib/webgal-ipc';
 import type { AiTurnResult } from '../lib/ai-ipc';
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 function makeParams(overrides: Record<string, unknown> = {}) {
   return {
@@ -141,5 +146,218 @@ describe('create_scene rollback on mid-batch failure', () => {
     await act(async () => { await result.current.acceptChange(); });
 
     expect(vi.mocked(deleteScene)).toHaveBeenCalledWith('/tmp/proj/game/scene/chapter_02.txt');
+  });
+});
+
+describe('same-turn created resource acceptance', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(createScene).mockResolvedValue('/tmp/proj/game/scene/chapter_02.txt');
+    vi.mocked(saveScene).mockResolvedValue();
+    vi.mocked(deleteScene).mockResolvedValue();
+    vi.mocked(readFileText).mockResolvedValue('');
+    vi.mocked(updateSceneHeader).mockResolvedValue();
+    vi.mocked(createCharacter).mockResolvedValue({ id: 'c-new' } as never);
+    vi.mocked(updateCharacter).mockResolvedValue({ id: 'c-updated' } as never);
+  });
+
+  it('creates a scene before applying its same-turn edit through acceptChange', async () => {
+    let sceneExists = false;
+    vi.mocked(aiChatTurn)
+      .mockResolvedValueOnce({
+        text: '',
+        toolCalls: [
+          { id: 'c1', name: 'create_scene', arguments: { name: 'chapter_02', chapter: '第一章' } },
+          { id: 'c2', name: 'edit_scene', arguments: { file: 'chapter_02.txt' } },
+        ],
+      } as unknown as AiTurnResult)
+      .mockResolvedValue({ text: 'done', toolCalls: [] } as unknown as AiTurnResult);
+    vi.mocked(getTool).mockImplementation((name) => {
+      if (name === 'create_scene') {
+        return {
+          name,
+          kind: 'write',
+          schema: {},
+          run: async () => ({ tool: 'create_scene', name: 'chapter_02', chapter: '第一章' }),
+        } as never;
+      }
+      if (name === 'edit_scene') {
+        return {
+          name,
+          kind: 'write',
+          schema: {},
+          run: async () => ({
+            tool: 'edit_scene',
+            file: 'chapter_02.txt',
+            patches: [{ type: 'insert', file: 'chapter_02.txt', afterLine: 'end', text: 'B:world;' }],
+          }),
+        } as never;
+      }
+      return undefined;
+    });
+    vi.mocked(createScene).mockImplementation(async () => {
+      sceneExists = true;
+      return '/tmp/proj/game/scene/chapter_02.txt';
+    });
+    vi.mocked(saveScene).mockImplementation(async () => {
+      if (!sceneExists) throw new Error('scene path does not exist');
+    });
+    vi.mocked(updateSceneHeader).mockImplementation(async () => {
+      if (!sceneExists) throw new Error('scene path does not exist');
+    });
+
+    const params = makeParams();
+    const { result } = renderHook(() => useAiAgent(params), { wrapper: MemoryRouter });
+
+    await act(async () => { await result.current.sendPrompt('创建并填写场景'); });
+    await waitFor(() => { expect(result.current.pendingChangeSet).toBeTruthy(); });
+    await act(async () => { await result.current.acceptChange(); });
+
+    expect(result.current.status).toBe('accepted');
+    expect(vi.mocked(createScene)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(saveScene)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(deleteScene)).not.toHaveBeenCalled();
+  });
+
+  it('deletes a newly created scene when its merged content cannot be saved', async () => {
+    vi.mocked(aiChatTurn)
+      .mockResolvedValueOnce({
+        text: '',
+        toolCalls: [
+          { id: 'c1', name: 'create_scene', arguments: { name: 'chapter_02' } },
+          { id: 'c2', name: 'edit_scene', arguments: { file: 'chapter_02.txt' } },
+        ],
+      } as unknown as AiTurnResult)
+      .mockResolvedValue({ text: 'done', toolCalls: [] } as unknown as AiTurnResult);
+    vi.mocked(getTool).mockImplementation((name) => ({
+      name,
+      kind: 'write',
+      schema: {},
+      run: async () => name === 'create_scene'
+        ? { tool: 'create_scene', name: 'chapter_02' }
+        : {
+          tool: 'edit_scene',
+          file: 'chapter_02.txt',
+          patches: [{ type: 'insert', file: 'chapter_02.txt', afterLine: 'end', text: 'B:world;' }],
+        },
+    }) as never);
+    vi.mocked(saveScene).mockRejectedValue(new Error('disk full'));
+
+    const params = makeParams();
+    const { result } = renderHook(() => useAiAgent(params), { wrapper: MemoryRouter });
+    await act(async () => { await result.current.sendPrompt('创建并填写场景'); });
+    await waitFor(() => { expect(result.current.pendingChangeSet).toBeTruthy(); });
+    await act(async () => { await result.current.acceptChange(); });
+
+    expect(result.current.status).toBe('error');
+    expect(vi.mocked(deleteScene)).toHaveBeenCalledWith('/tmp/proj/game/scene/chapter_02.txt');
+  });
+
+  it('keeps the pending change retryable when conflict re-read fails', async () => {
+    vi.mocked(aiChatTurn)
+      .mockResolvedValueOnce({
+        text: '',
+        toolCalls: [{ id: 'c1', name: 'edit_scene', arguments: { file: 'other.txt' } }],
+      } as unknown as AiTurnResult)
+      .mockResolvedValue({ text: 'done', toolCalls: [] } as unknown as AiTurnResult);
+    vi.mocked(getTool).mockReturnValue({
+      name: 'edit_scene',
+      kind: 'write',
+      schema: {},
+      run: async () => ({
+        tool: 'edit_scene',
+        file: 'other.txt',
+        patches: [{ type: 'insert', file: 'other.txt', afterLine: 'end', text: 'B:world;' }],
+      }),
+    } as never);
+    vi.mocked(readFileText)
+      .mockResolvedValueOnce('')
+      .mockRejectedValueOnce(new Error('permission denied'));
+
+    const params = makeParams();
+    const { result } = renderHook(() => useAiAgent(params), { wrapper: MemoryRouter });
+    await act(async () => { await result.current.sendPrompt('修改其他场景'); });
+    await waitFor(() => { expect(result.current.pendingChangeSet).toBeTruthy(); });
+    await act(async () => { await result.current.acceptChange(); });
+
+    expect(result.current.status).toBe('error');
+    expect(result.current.error).toEqual(expect.objectContaining({ retryable: true }));
+    expect(result.current.error?.message).toContain('项目尚未写入');
+    expect(result.current.pendingChangeSet?.status).toBe('pending');
+    expect(vi.mocked(saveScene)).not.toHaveBeenCalled();
+  });
+
+  it('merges sprite planning and edits into a new character before the create IPC', async () => {
+    const dateNow = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    const temporaryId = `tmp_ai_1700000000000_${(0.5).toString(36).slice(2)}`;
+    vi.mocked(aiChatTurn)
+      .mockResolvedValueOnce({
+        text: '',
+        toolCalls: [
+          { id: 'c1', name: 'create_character', arguments: { name: '艾拉' } },
+          { id: 'c2', name: 'plan_character_sprites', arguments: {} },
+          { id: 'c3', name: 'edit_character', arguments: {} },
+        ],
+      } as unknown as AiTurnResult)
+      .mockResolvedValue({ text: 'done', toolCalls: [] } as unknown as AiTurnResult);
+    vi.mocked(getTool).mockImplementation((name) => {
+      if (name === 'create_character') {
+        return {
+          name,
+          kind: 'write',
+          schema: {},
+          run: async () => ({ tool: 'create_character', draft: { name: '艾拉' } }),
+        } as never;
+      }
+      if (name === 'plan_character_sprites') {
+        return {
+          name,
+          kind: 'write',
+          schema: {},
+          run: async () => ({
+            tool: 'plan_character_sprites',
+            character: temporaryId,
+            sprites: [{ emotion: 'happy', prompt: 'smiling' }],
+          }),
+        } as never;
+      }
+      if (name === 'edit_character') {
+        return {
+          name,
+          kind: 'write',
+          schema: {},
+          run: async () => ({
+            tool: 'edit_character',
+            id: temporaryId,
+            partial: { personality: '勇敢' },
+          }),
+        } as never;
+      }
+      return undefined;
+    });
+
+    const params = makeParams();
+    const { result } = renderHook(() => useAiAgent(params), { wrapper: MemoryRouter });
+
+    await act(async () => { await result.current.sendPrompt('创建角色并完善设定'); });
+    await waitFor(() => { expect(result.current.pendingChangeSet).toBeTruthy(); });
+    const createEdit = result.current.pendingChangeSet?.edits.find((edit) => edit.kind === 'create_character');
+    expect(createEdit?.kind).toBe('create_character');
+    if (createEdit?.kind !== 'create_character') throw new Error('missing create edit');
+    expect(createEdit.draft.id).toBe(temporaryId);
+
+    await act(async () => { await result.current.acceptChange(); });
+
+    expect(result.current.status).toBe('accepted');
+    expect(vi.mocked(createCharacter)).toHaveBeenCalledTimes(1);
+    const createdDraft = vi.mocked(createCharacter).mock.calls[0]?.[1];
+    expect(createdDraft.personality).toBe('勇敢');
+    expect(createdDraft.sprites).toEqual(expect.arrayContaining([
+      expect.objectContaining({ emotion: 'happy', prompt: 'smiling' }),
+    ]));
+    expect(vi.mocked(updateCharacter)).not.toHaveBeenCalled();
+    dateNow.mockRestore();
+    random.mockRestore();
   });
 });

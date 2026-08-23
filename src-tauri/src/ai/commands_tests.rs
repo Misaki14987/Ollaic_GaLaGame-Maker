@@ -1277,8 +1277,113 @@ fn media_download_url_rejects_ssrf_targets() {
     assert!(validate_media_download_url("http://[::1]/x.png").is_err());
     // Public endpoints pass.
     assert!(validate_media_download_url("https://example.com/image.png").is_ok());
-    assert!(validate_media_download_url(
-        "https://oaidalleapiprodscus.blob.core.windows.net/x.png"
-    )
-    .is_ok());
+    assert!(
+        validate_media_download_url("https://oaidalleapiprodscus.blob.core.windows.net/x.png")
+            .is_ok()
+    );
+}
+
+struct StaticMediaResolver {
+    host: String,
+    addresses: Vec<std::net::SocketAddr>,
+}
+
+impl MediaDnsResolver for StaticMediaResolver {
+    fn resolve<'a>(
+        &'a self,
+        host: &'a str,
+        _port: u16,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<Vec<std::net::SocketAddr>, String>> + Send + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            if host == self.host {
+                Ok(self.addresses.clone())
+            } else {
+                Err(format!("unexpected DNS host: {host}"))
+            }
+        })
+    }
+}
+
+#[tokio::test]
+async fn media_download_rejects_custom_dns_resolution_to_loopback() {
+    let resolver = StaticMediaResolver {
+        host: "media.example".to_string(),
+        addresses: vec!["127.0.0.1:80".parse().unwrap()],
+    };
+
+    let error =
+        fetch_media_bytes_with_policy("http://media.example/image.png", &resolver, |_, ip| {
+            is_public_download_ip(ip)
+        })
+        .await
+        .unwrap_err();
+
+    assert!(error.contains("内部/保留地址"), "unexpected error: {error}");
+}
+
+#[tokio::test]
+async fn media_download_validates_each_local_http_redirect_hop() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = vec![0_u8; 1024];
+        let _ = stream.read(&mut request).await.unwrap();
+        let response = format!(
+            "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:{}/private.png\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            address.port()
+        );
+        stream.write_all(response.as_bytes()).await.unwrap();
+    });
+    let resolver = StaticMediaResolver {
+        host: "public-media.test".to_string(),
+        addresses: vec![address],
+    };
+    let initial = format!("http://public-media.test:{}/start", address.port());
+
+    // The initial loopback connection is permitted only by this test seam so
+    // a real local server can emit the redirect. The redirect target itself
+    // still goes through the production public-address policy and is rejected.
+    let error = fetch_media_bytes_with_policy(&initial, &resolver, |url, ip| {
+        url.host_str() == Some("public-media.test") || is_public_download_ip(ip)
+    })
+    .await
+    .unwrap_err();
+
+    assert!(error.contains("内部/保留地址"), "unexpected error: {error}");
+    tokio::time::timeout(Duration::from_secs(1), server)
+        .await
+        .expect("local redirect server was never contacted")
+        .unwrap();
+}
+
+#[test]
+fn media_download_ip_policy_rejects_reserved_ranges() {
+    for address in [
+        "0.0.0.1",
+        "100.64.0.1",
+        "192.0.2.1",
+        "198.18.0.1",
+        "224.0.0.1",
+        "240.0.0.1",
+        "::1",
+        "fc00::1",
+        "fe80::1",
+        "2001:db8::1",
+        "ff00::1",
+        "::ffff:127.0.0.1",
+    ] {
+        let ip: std::net::IpAddr = address.parse().unwrap();
+        assert!(!is_public_download_ip(ip), "{address} must be rejected");
+    }
+    assert!(is_public_download_ip("8.8.8.8".parse().unwrap()));
+    assert!(is_public_download_ip(
+        "2606:4700:4700::1111".parse().unwrap()
+    ));
 }

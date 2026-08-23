@@ -98,29 +98,66 @@ mod tests {
     use crate::pipeline::events::RecordingSink;
     use crate::pipeline::scheduler::Pipeline;
     use crate::pipeline::state::SystemClock;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
-    fn make_run(project: &str, run_id: &str) -> ManagedRun {
-        let project_path = std::env::temp_dir().join("ollaic_registry").join(project);
-        let _ = std::fs::remove_dir_all(&project_path);
+    static NEXT_TEST_ROOT: AtomicU64 = AtomicU64::new(1);
+
+    struct TestRoot(PathBuf);
+
+    impl TestRoot {
+        fn new(label: &str) -> Self {
+            let nonce = NEXT_TEST_ROOT.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "ollaic_registry_{}_{}_{}",
+                label,
+                std::process::id(),
+                nonce
+            ));
+            std::fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+
+        fn project(&self, name: &str) -> PathBuf {
+            self.0.join(name)
+        }
+    }
+
+    impl Drop for TestRoot {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn make_run(project_path: &Path, run_id: &str) -> ManagedRun {
         std::fs::create_dir_all(&project_path).unwrap();
         let pipeline = Pipeline::with_default_agents();
         let sink = RecordingSink::new();
         let handle = pipeline
-            .create_run(&project_path, run_id, "brief", &default_recipe(), &SystemClock, &sink)
+            .create_run(
+                &project_path,
+                run_id,
+                "brief",
+                &default_recipe(),
+                &SystemClock,
+                &sink,
+            )
             .unwrap();
         ManagedRun {
             handle,
-            project_path,
+            project_path: project_path.to_path_buf(),
             driving: Arc::new(AtomicBool::new(false)),
         }
     }
 
     #[tokio::test]
     async fn resolve_rejects_cross_project_access() {
+        let root = TestRoot::new("resolve");
         let registry = RunRegistry::new();
-        let path_a = std::env::temp_dir().join("ollaic_registry").join("a");
-        let path_b = std::env::temp_dir().join("ollaic_registry").join("b");
-        registry.insert("run_a".to_string(), make_run("a", "run_a")).await;
+        let path_a = root.project("a");
+        let path_b = root.project("b");
+        registry
+            .insert("run_a".to_string(), make_run(&path_a, "run_a"))
+            .await;
         assert!(registry.resolve("run_a", &path_a).await.is_ok());
         let err = registry.resolve("run_a", &path_b).await.err().unwrap();
         assert!(err.contains("belongs to project"));
@@ -128,9 +165,13 @@ mod tests {
 
     #[tokio::test]
     async fn attach_if_needed_rejects_project_mismatch() {
+        let root = TestRoot::new("attach");
         let registry = RunRegistry::new();
-        let path_b = std::env::temp_dir().join("ollaic_registry").join("b");
-        registry.insert("run_a".to_string(), make_run("a", "run_a")).await;
+        let path_a = root.project("a");
+        let path_b = root.project("b");
+        registry
+            .insert("run_a".to_string(), make_run(&path_a, "run_a"))
+            .await;
         let err = registry
             .attach_if_needed("run_a", &path_b, || unreachable!())
             .await

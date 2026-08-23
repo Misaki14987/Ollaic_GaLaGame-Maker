@@ -9,8 +9,11 @@ use genai::chat::{
 use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
 use genai::{Client, ModelIden, ServiceTarget};
 use serde::{Deserialize, Serialize};
+use std::future::Future;
+use std::net::{IpAddr, SocketAddr};
 #[cfg(test)]
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
 
@@ -19,6 +22,7 @@ const DEFAULT_LOG_LIMIT: usize = 100;
 const MAX_LOG_FIELD_CHARS: usize = 50_000;
 const MAX_TRACE_FIELD_CHARS: usize = 50_000;
 const HTTP_REQUEST_TIMEOUT_SECS: u64 = 180;
+const MAX_MEDIA_REDIRECTS: usize = 10;
 
 /// A reqwest client with the standard request timeout applied. Using this
 /// everywhere prevents media/TTS HTTP calls from hanging forever when a
@@ -2024,19 +2028,10 @@ async fn download_generated_media(
     extension: &str,
     action: &str,
 ) -> Result<GeneratedMedia, String> {
-    validate_media_download_url(url)?;
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(HTTP_REQUEST_TIMEOUT_SECS))
-        .build()
-        .map_err(|e| format!("创建下载客户端失败: {e}"))?;
-    let bytes = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| format!("下载生成媒体失败: {e}"))?
-        .bytes()
-        .await
-        .map_err(|e| format!("读取生成媒体失败: {e}"))?;
+    let bytes = fetch_media_bytes_with_policy(url, &SystemMediaDnsResolver, |_, ip| {
+        is_public_download_ip(ip)
+    })
+    .await?;
     log_provider_event(action, cfg, model, endpoint, true, "media generated");
     Ok(GeneratedMedia {
         base64_data: base64::engine::general_purpose::STANDARD.encode(bytes),
@@ -2069,20 +2064,172 @@ fn is_private_download_host(host: &str) -> bool {
     }
     // host_str() brackets IPv6 literals; strip them before parsing.
     let bare = lower.trim_start_matches('[').trim_end_matches(']');
-    if let Ok(ip) = bare.parse::<std::net::Ipv4Addr>() {
-        return ip.is_loopback()
-            || ip.is_private()
-            || ip.is_link_local()
-            || ip.is_unspecified()
-            || ip.is_broadcast();
-    }
-    if let Ok(ip) = bare.parse::<std::net::Ipv6Addr>() {
-        return ip.is_loopback()
-            || ip.is_unspecified()
-            || ip.is_unique_local()
-            || ip.is_unicast_link_local();
+    if let Ok(ip) = bare.parse::<IpAddr>() {
+        return !is_public_download_ip(ip);
     }
     false
+}
+
+trait MediaDnsResolver: Send + Sync {
+    fn resolve<'a>(
+        &'a self,
+        host: &'a str,
+        port: u16,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<SocketAddr>, String>> + Send + 'a>>;
+}
+
+struct SystemMediaDnsResolver;
+
+impl MediaDnsResolver for SystemMediaDnsResolver {
+    fn resolve<'a>(
+        &'a self,
+        host: &'a str,
+        port: u16,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<SocketAddr>, String>> + Send + 'a>> {
+        Box::pin(async move {
+            let addresses = tokio::net::lookup_host((host, port))
+                .await
+                .map_err(|error| {
+                    format!("解析媒体下载主机 {host} 失败：{error}。请检查网络后重试。")
+                })?
+                .collect::<Vec<_>>();
+            if addresses.is_empty() {
+                return Err(format!("媒体下载主机 {host} 没有可用地址，请稍后重试。"));
+            }
+            Ok(addresses)
+        })
+    }
+}
+
+async fn fetch_media_bytes_with_policy<P>(
+    initial_url: &str,
+    resolver: &dyn MediaDnsResolver,
+    allow_address: P,
+) -> Result<Vec<u8>, String>
+where
+    P: Fn(&reqwest::Url, IpAddr) -> bool,
+{
+    let mut current =
+        reqwest::Url::parse(initial_url).map_err(|error| format!("无效的下载 URL: {error}"))?;
+
+    for redirect_count in 0..=MAX_MEDIA_REDIRECTS {
+        validate_media_download_url(current.as_str())?;
+        let host = current
+            .host_str()
+            .ok_or_else(|| "下载 URL 缺少主机名".to_string())?;
+        let port = current
+            .port_or_known_default()
+            .ok_or_else(|| "下载 URL 缺少有效端口".to_string())?;
+        let bare_host = host.trim_start_matches('[').trim_end_matches(']');
+        let resolved = match bare_host.parse::<IpAddr>() {
+            Ok(ip) => vec![SocketAddr::new(ip, port)],
+            Err(_) => resolver.resolve(host, port).await?,
+        };
+        let mut public_addresses = resolved
+            .into_iter()
+            .filter(|address| allow_address(&current, address.ip()))
+            .collect::<Vec<_>>();
+        public_addresses.sort_unstable();
+        public_addresses.dedup();
+        if public_addresses.is_empty() {
+            return Err(format!("拒绝下载内部/保留地址: {host}"));
+        }
+
+        // Disable environment proxies and pin this hop's validated addresses.
+        // Otherwise a proxy or a second resolver lookup could bypass the DNS
+        // result that was just checked (DNS rebinding / TOCTOU).
+        let mut builder = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .no_proxy()
+            .timeout(Duration::from_secs(HTTP_REQUEST_TIMEOUT_SECS));
+        if bare_host.parse::<IpAddr>().is_err() {
+            builder = builder.resolve_to_addrs(host, &public_addresses);
+        }
+        let client = builder
+            .build()
+            .map_err(|error| format!("创建安全下载客户端失败: {error}"))?;
+        let response = client
+            .get(current.clone())
+            .send()
+            .await
+            .map_err(|error| format!("下载生成媒体失败: {error}。可稍后重试。"))?;
+
+        if response.status().is_redirection() {
+            if redirect_count == MAX_MEDIA_REDIRECTS {
+                return Err("媒体下载重定向次数过多，请重试或检查供应商返回地址。".to_string());
+            }
+            let location = response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .ok_or_else(|| {
+                    "媒体下载返回重定向，但缺少 Location 地址。可稍后重试。".to_string()
+                })?
+                .to_str()
+                .map_err(|_| "媒体下载重定向地址不是有效文本。可稍后重试。".to_string())?;
+            current = current
+                .join(location)
+                .map_err(|error| format!("媒体下载重定向地址无效: {error}"))?;
+            continue;
+        }
+
+        if !response.status().is_success() {
+            return Err(format!(
+                "媒体下载失败（HTTP {}）。可稍后重试。",
+                response.status()
+            ));
+        }
+        return response
+            .bytes()
+            .await
+            .map(|bytes| bytes.to_vec())
+            .map_err(|error| format!("读取生成媒体失败: {error}。可稍后重试。"));
+    }
+
+    unreachable!("redirect loop returns at its configured bound")
+}
+
+fn is_public_download_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => {
+            let [a, b, c, _] = ip.octets();
+            !(a == 0
+                || a == 10
+                || a == 127
+                || (a == 100 && (64..=127).contains(&b))
+                || (a == 169 && b == 254)
+                || (a == 172 && (16..=31).contains(&b))
+                || (a == 192 && b == 0 && c == 0)
+                || (a == 192 && b == 0 && c == 2)
+                || (a == 192 && b == 88 && c == 99)
+                || (a == 192 && b == 168)
+                || (a == 198 && (b == 18 || b == 19))
+                || (a == 198 && b == 51 && c == 100)
+                || (a == 203 && b == 0 && c == 113)
+                || a >= 224)
+        }
+        IpAddr::V6(ip) => {
+            if let Some(mapped) = ip.to_ipv4() {
+                return is_public_download_ip(IpAddr::V4(mapped));
+            }
+            let segments = ip.segments();
+            let globally_allocated = segments[0] & 0xe000 == 0x2000;
+            let documentation = segments[0] == 0x2001 && segments[1] == 0x0db8;
+            let benchmarking = segments[0] == 0x2001 && segments[1] == 0x0002;
+            let teredo = segments[0] == 0x2001 && segments[1] == 0;
+            let orchid = segments[0] == 0x2001 && (0x0010..=0x002f).contains(&segments[1]);
+            let six_to_four = segments[0] == 0x2002;
+            let documentation_v2 = segments[0] & 0xfff0 == 0x3ff0;
+            let segment_routing = segments[0] == 0x5f00;
+            globally_allocated
+                && !documentation
+                && !benchmarking
+                && !teredo
+                && !orchid
+                && !six_to_four
+                && !documentation_v2
+                && !segment_routing
+        }
+    }
 }
 
 fn dashscope_endpoint(cfg: &AiProviderConfig, path: &str) -> String {

@@ -23,6 +23,10 @@ use crate::pipeline::store;
 use crate::story_plan::types::PipelineRunSummary;
 use crate::story_plan::{self, StoryPlan};
 
+/// Production deadline for one Flow Step. Individual tests may override it,
+/// but every production constructor enables this cap by default.
+pub(crate) const DEFAULT_STEP_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+
 /// Shared, lockable handle to a running (or paused) run. The scheduler and
 /// the pause/resume/retry/skip commands all reach the run through this.
 pub struct RunHandle {
@@ -344,11 +348,10 @@ fn local_placeholder(kind: AssetKind) -> GeneratedArtifact {
 
 impl Pipeline {
     pub fn new(agents: AgentRegistry) -> Self {
-        Pipeline {
+        Self::with_agents_and_matting(
             agents,
-            figure_matting_model: Err("figure matting model is not configured".to_string()),
-            step_timeout: None,
-        }
+            Err("figure matting model is not configured".to_string()),
+        )
     }
 
     pub fn with_default_agents() -> Self {
@@ -358,10 +361,17 @@ impl Pipeline {
     pub fn with_default_agents_and_matting(
         figure_matting_model: Result<std::path::PathBuf, String>,
     ) -> Self {
+        Self::with_agents_and_matting(AgentRegistry::with_defaults(), figure_matting_model)
+    }
+
+    pub(crate) fn with_agents_and_matting(
+        agents: AgentRegistry,
+        figure_matting_model: Result<std::path::PathBuf, String>,
+    ) -> Self {
         Self {
-            agents: AgentRegistry::with_defaults(),
+            agents,
             figure_matting_model,
-            step_timeout: None,
+            step_timeout: Some(DEFAULT_STEP_TIMEOUT),
         }
     }
 
@@ -922,6 +932,19 @@ impl Pipeline {
         } else {
             match self.agents.get(kind, agent_key.as_deref()) {
                 Some(agent) => {
+                    let cancel_wait = handle.cancel_notify.notified();
+                    tokio::pin!(cancel_wait);
+                    // notify_waiters() stores no permit. Register this waiter
+                    // before checking the durable atomic flag so stop() cannot
+                    // land in the gap between the check and select polling.
+                    cancel_wait.as_mut().enable();
+                    if handle.cancelled.load(Ordering::SeqCst) {
+                        return;
+                    }
+                    let agent_run = agent.run(&ctx);
+                    if handle.cancelled.load(Ordering::SeqCst) {
+                        return;
+                    }
                     let timeout_sleep = async {
                         match self.step_timeout {
                             Some(timeout) => tokio::time::sleep(timeout).await,
@@ -929,17 +952,18 @@ impl Pipeline {
                         }
                     };
                     tokio::select! {
-                        result = agent.run(&ctx) => result,
+                        biased;
+                        _ = &mut cancel_wait => {
+                            // stop() aborted the run: drop the in-flight agent
+                            // future and return without applying anything.
+                            return;
+                        }
+                        result = agent_run => result,
                         _ = timeout_sleep => {
                             if let Some(timeout) = self.step_timeout {
                                 self.fail_step_timeout(project_path, handle, sink, clock, id, timeout)
                                     .await;
                             }
-                            return;
-                        }
-                        _ = handle.cancel_notify.notified() => {
-                            // stop() aborted the run: drop the in-flight agent
-                            // future and return without applying anything.
                             return;
                         }
                     }
