@@ -513,9 +513,10 @@ describe('FlowBoard', () => {
     current.runId = 'run_current';
     current.projectPath = '/tmp/current';
     current.prompt = 'current brief';
-    mockedInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+    mockedInvoke.mockImplementation((cmd, args) => {
       if (cmd === 'pipeline_list_runs') {
-        return (args?.projectPath === '/tmp/old' ? oldRuns : Promise.resolve([current])) as Promise<never>;
+        const projectPath = (args as { projectPath?: string } | undefined)?.projectPath;
+        return (projectPath === '/tmp/old' ? oldRuns : Promise.resolve([current])) as Promise<never>;
       }
       if (cmd === 'pipeline_get_plan') return Promise.resolve(null as never);
       return Promise.resolve(undefined);
