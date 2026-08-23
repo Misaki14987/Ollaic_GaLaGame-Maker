@@ -9,6 +9,7 @@ mod characters;
 mod json_store;
 mod matting;
 mod pipeline;
+mod project_transaction;
 mod story_plan;
 mod webgal;
 
