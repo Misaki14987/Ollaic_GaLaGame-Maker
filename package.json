@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "pnpm --dir design dev",
     "build": "pnpm --dir design build",
+    "typecheck": "pnpm --dir design typecheck",
     "preview": "pnpm --dir design preview",
     "test": "pnpm --dir design test && cargo test --manifest-path src-tauri/Cargo.toml",
     "test:ui": "pnpm --dir design test",
@@ -17,14 +18,5 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.10.1"
-  },
-  "pnpm": {
-    "overrides": {
-      "vite": "6.3.5"
-    },
-    "onlyBuiltDependencies": [
-      "@tailwindcss/oxide",
-      "esbuild"
-    ]
   }
 }
