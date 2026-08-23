@@ -1166,6 +1166,33 @@ mod tests {
     }
 
     #[test]
+    fn conversational_persistence_seam_executes_frontend_fixture_through_production_command() {
+        let project = temp_project("conversational_seam");
+        let scene = project.join("game/scene/chapter-2.txt");
+        let mut request: ApplyChangeSetRequest = serde_json::from_str(include_str!(
+            "../../design/src/app/integration/fixtures/create-edit-change-set.json"
+        ))
+        .unwrap();
+        request.project_path = project.to_string_lossy().into_owned();
+
+        // The frontend staging half produces this shared request without
+        // touching the Project. Confirmation is the first production command.
+        assert!(!scene.exists());
+        let result = apply_change_set(request);
+
+        assert_eq!(
+            result,
+            ApplyChangeSetResult::Committed {
+                resources: vec![ResourceId::Scene {
+                    file: "chapter-2.txt".into()
+                }]
+            }
+        );
+        assert_eq!(fs::read_to_string(&scene).unwrap(), "\nB:staged;");
+        fs::remove_dir_all(project).unwrap();
+    }
+
+    #[test]
     fn change_set_commit_multiple_create_scenes_succeed() {
         let project = temp_project("multiple_create");
         let result = apply_change_set(ApplyChangeSetRequest {
