@@ -174,6 +174,23 @@ impl ProjectPaths {
     pub fn lock_for_write(&self) -> OwnedMutexGuard<()> {
         futures::executor::block_on(self.write_guard.clone().lock_owned())
     }
+
+    #[cfg(test)]
+    pub fn lock_for_write_with_wait_hook(&self, on_wait: impl FnOnce()) -> OwnedMutexGuard<()> {
+        use std::future::Future;
+        use std::task::{Context, Poll};
+
+        let mut lock = Box::pin(self.write_guard.clone().lock_owned());
+        let waker = futures::task::noop_waker();
+        let mut context = Context::from_waker(&waker);
+        match lock.as_mut().poll(&mut context) {
+            Poll::Ready(guard) => guard,
+            Poll::Pending => {
+                on_wait();
+                futures::executor::block_on(lock)
+            }
+        }
+    }
 }
 
 fn canonical_domain_dir(owner: &Path, requested: &Path, label: &str) -> Result<PathBuf, String> {

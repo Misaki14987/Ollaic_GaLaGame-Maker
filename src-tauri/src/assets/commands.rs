@@ -280,9 +280,28 @@ fn with_asset_metadata_write_lock<T>(
     operation: impl FnOnce(&str) -> Result<T, String>,
 ) -> Result<T, String> {
     let project = ProjectPaths::open(project_path)?;
+    #[cfg(not(test))]
     let _guard = project.lock_for_write();
+    #[cfg(test)]
+    let _guard = ASSET_METADATA_LOCK_WAIT_HOOK.with(|slot| match slot.borrow_mut().take() {
+        Some(hook) => project.lock_for_write_with_wait_hook(hook),
+        None => project.lock_for_write(),
+    });
     let project_path = project.root().to_str().ok_or("项目路径不是有效 UTF-8")?;
     operation(project_path)
+}
+
+#[cfg(test)]
+thread_local! {
+    static ASSET_METADATA_LOCK_WAIT_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        std::cell::RefCell::new(None);
+}
+
+#[cfg(test)]
+fn set_asset_metadata_lock_wait_hook(hook: impl FnOnce() + 'static) {
+    ASSET_METADATA_LOCK_WAIT_HOOK.with(|slot| {
+        *slot.borrow_mut() = Some(Box::new(hook));
+    });
 }
 
 fn asset_metadata_key(category: &str, filename: &str) -> String {
@@ -1645,35 +1664,32 @@ mod tests {
             .aliases
             .insert("background/writer.webp".to_string(), "Writer".to_string());
         let writer_project = tmp.to_string_lossy().to_string();
-        let (writer_started_tx, writer_started_rx) = mpsc::channel();
+        let (writer_waiting_tx, writer_waiting_rx) = mpsc::channel();
         let (writer_done_tx, writer_done_rx) = mpsc::channel();
         let writer = thread::spawn(move || {
-            writer_started_tx.send(()).unwrap();
+            set_asset_metadata_lock_wait_hook(move || writer_waiting_tx.send(()).unwrap());
             let result = save_asset_metadata(writer_project, writer_metadata);
             writer_done_tx.send(()).unwrap();
             result
         });
-        writer_started_rx.recv().unwrap();
-        let writer_completed_during_transaction = writer_done_rx
-            .recv_timeout(Duration::from_millis(150))
-            .is_ok();
+        writer_waiting_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("metadata writer never waited for the Project transaction lock");
+        assert!(
+            matches!(writer_done_rx.try_recv(), Err(mpsc::TryRecvError::Empty)),
+            "public metadata writer completed while the Project transaction lock was held"
+        );
 
         resume_tx.send(()).unwrap();
         let transaction_error = transaction.join().unwrap().unwrap_err();
         assert!(transaction_error.contains("injected asset mutation failure"));
-        if !writer_completed_during_transaction {
-            writer_done_rx
-                .recv_timeout(Duration::from_secs(5))
-                .expect("metadata writer did not resume after rollback");
-        }
+        writer_done_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("metadata writer did not resume after rollback");
         writer.join().unwrap().unwrap();
 
         let final_metadata = read_asset_metadata(tmp.to_str().unwrap()).unwrap();
         let _ = fs::remove_dir_all(&tmp);
-        assert!(
-            !writer_completed_during_transaction,
-            "public metadata writer bypassed the Project transaction lock"
-        );
         assert_eq!(
             final_metadata.aliases.get("background/writer.webp"),
             Some(&"Writer".to_string())
