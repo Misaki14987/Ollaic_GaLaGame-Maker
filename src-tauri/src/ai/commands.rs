@@ -1,4 +1,6 @@
+use super::chat_runs::ChatRunRegistry;
 use super::config::{self, AiConfig, AiProviderConfig};
+use super::provider_capability::{capability_for_config, ProviderCapability, RequiredCapability};
 use base64::Engine;
 use futures::{SinkExt, StreamExt};
 use genai::adapter::AdapterKind;
@@ -22,6 +24,7 @@ const DEFAULT_LOG_LIMIT: usize = 100;
 const MAX_LOG_FIELD_CHARS: usize = 50_000;
 const MAX_TRACE_FIELD_CHARS: usize = 50_000;
 const HTTP_REQUEST_TIMEOUT_SECS: u64 = 180;
+const MEDIA_DNS_TIMEOUT_SECS: u64 = 10;
 const MAX_MEDIA_REDIRECTS: usize = 10;
 
 /// A reqwest client with the standard request timeout applied. Using this
@@ -272,7 +275,20 @@ pub fn get_ai_config() -> AiConfig {
 
 #[tauri::command]
 pub fn set_ai_config(config: AiConfig) -> Result<(), String> {
+    capability_for_config(&config)?;
     config::save_config(&config)
+}
+
+/// Resolve the live provider capability for the saved config (or an override
+/// passed from the UI for preview). Re-reads from disk on every call so
+/// changes to provider, model, or `flow_step_deadline_ms` show up the moment a
+/// new Flow is created, without restarting the app.
+#[tauri::command]
+pub fn get_ai_provider_capability(
+    config: Option<AiConfig>,
+) -> Result<ProviderCapability, String> {
+    let config = config.unwrap_or_else(config::load_config);
+    capability_for_config(&config)
 }
 
 #[tauri::command]
@@ -664,6 +680,7 @@ fn find_audio_url(v: &serde_json::Value) -> Option<String> {
 #[tauri::command]
 pub async fn validate_ai_config(config: AiConfig) -> Result<AiValidationResult, String> {
     validate_config_basics(&config)?;
+    capability_for_config(&config)?;
 
     let endpoint = effective_endpoint(&config);
     let request = ChatRequest::new(vec![ChatMessage::user("Reply with exactly OK.")]);
@@ -705,6 +722,7 @@ pub async fn ai_chat_stream(
 ) -> Result<(), String> {
     let cfg = config::load_config();
     validate_config_basics(&cfg)?;
+    capability_for_config(&cfg)?;
 
     let mut chat_messages: Vec<ChatMessage> = Vec::new();
     let mut sys_text = config::default_system_prompt();
@@ -816,13 +834,20 @@ fn to_chat_messages(messages: Vec<AiMessageInput>) -> Vec<ChatMessage> {
 /// Single non-streaming turn used by the multi-step agent loop. Returns either
 /// the model's tool calls (to be executed by the frontend) or its final text.
 #[tauri::command]
-pub async fn ai_chat_turn(
+/// Internal helper. Not registered as a Tauri command. Callers must go
+/// through [`ai_chat_turn_owned`] so a single `run_id` is owned by the
+/// `ChatRunRegistry` and a Stop can revoke the in-flight provider work.
+pub(crate) async fn ai_chat_turn(
     messages: Vec<AiMessageInput>,
     tools: Vec<ToolDef>,
     character_context: Option<String>,
 ) -> Result<AiTurnResult, String> {
     let cfg = config::load_config();
     validate_config_basics(&cfg)?;
+    let capability = capability_for_config(&cfg)?;
+    if !tools.is_empty() {
+        capability.require(RequiredCapability::ChatTools)?;
+    }
 
     let mut chat_messages: Vec<ChatMessage> = Vec::new();
     if let Some(ctx) = character_context {
@@ -872,6 +897,31 @@ pub async fn ai_chat_turn(
     }
 }
 
+/// Public conversational entry point. Every awaited Provider turn runs
+/// through the [`ChatRunRegistry`] so a later Stop can revoke it; the
+/// unowned helper [`ai_chat_turn`] is **not** registered as a Tauri command.
+#[tauri::command]
+pub async fn ai_chat_turn_owned(
+    runs: tauri::State<'_, ChatRunRegistry>,
+    run_id: String,
+    messages: Vec<AiMessageInput>,
+    tools: Vec<ToolDef>,
+    character_context: Option<String>,
+) -> Result<AiTurnResult, String> {
+    runs.run_cancellable(&run_id, ai_chat_turn(messages, tools, character_context))
+        .await
+}
+
+/// Frontend Stop signal. Returns `true` if a live Run was signalled, `false`
+/// if the id was already completed or never started. Idempotent.
+#[tauri::command]
+pub async fn ai_chat_cancel(
+    runs: tauri::State<'_, ChatRunRegistry>,
+    run_id: String,
+) -> Result<bool, String> {
+    Ok(runs.cancel(&run_id).await)
+}
+
 /// Pipeline Agent entry point. `None` means no usable chat model is configured,
 /// so the caller may use an explicit local fallback. Provider failures remain
 /// errors and must not be silently downgraded.
@@ -883,12 +933,13 @@ pub(crate) async fn complete_agent_text(
     if validate_config_basics(&cfg).is_err() {
         return Ok(None);
     }
+    let capability = capability_for_config(&cfg)?;
     let request = ChatRequest::new(vec![
         ChatMessage::system(system_prompt),
         ChatMessage::user(user_prompt),
     ]);
     let endpoint = effective_endpoint(&cfg);
-    let options = if matches!(cfg.provider.as_str(), "openai" | "deepseek") {
+    let options = if capability.json_mode {
         chat_debug_options().with_response_format(ChatResponseFormat::JsonMode)
     } else {
         chat_debug_options()
@@ -2123,7 +2174,17 @@ where
         let bare_host = host.trim_start_matches('[').trim_end_matches(']');
         let resolved = match bare_host.parse::<IpAddr>() {
             Ok(ip) => vec![SocketAddr::new(ip, port)],
-            Err(_) => resolver.resolve(host, port).await?,
+            Err(_) => tokio::time::timeout(
+                Duration::from_secs(MEDIA_DNS_TIMEOUT_SECS),
+                resolver.resolve(host, port),
+            )
+            .await
+            .map_err(|_| {
+                format!(
+                    "媒体下载 DNS 解析 {host} 超时（{} 秒）。请检查网络后重试。",
+                    MEDIA_DNS_TIMEOUT_SECS
+                )
+            })??,
         };
         let mut public_addresses = resolved
             .into_iter()

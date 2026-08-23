@@ -1288,6 +1288,27 @@ struct StaticMediaResolver {
     addresses: Vec<std::net::SocketAddr>,
 }
 
+struct HangingMediaResolver {
+    started: std::sync::Arc<tokio::sync::Semaphore>,
+}
+
+impl MediaDnsResolver for HangingMediaResolver {
+    fn resolve<'a>(
+        &'a self,
+        _host: &'a str,
+        _port: u16,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<Vec<std::net::SocketAddr>, String>> + Send + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            self.started.add_permits(1);
+            std::future::pending().await
+        })
+    }
+}
+
 impl MediaDnsResolver for StaticMediaResolver {
     fn resolve<'a>(
         &'a self,
@@ -1323,6 +1344,31 @@ async fn media_download_rejects_custom_dns_resolution_to_loopback() {
         .unwrap_err();
 
     assert!(error.contains("内部/保留地址"), "unexpected error: {error}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn media_download_dns_resolution_has_a_retryable_deadline() {
+    let started = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
+    let resolver = HangingMediaResolver {
+        started: started.clone(),
+    };
+    let task = tokio::spawn(async move {
+        fetch_media_bytes_with_policy("https://media.example/image.png", &resolver, |_, ip| {
+            is_public_download_ip(ip)
+        })
+        .await
+    });
+
+    started.acquire().await.unwrap().forget();
+    tokio::time::advance(Duration::from_secs(HTTP_REQUEST_TIMEOUT_SECS)).await;
+    tokio::task::yield_now().await;
+    assert!(
+        task.is_finished(),
+        "DNS resolution remained outside the media deadline"
+    );
+
+    let error = task.await.unwrap().unwrap_err();
+    assert!(error.contains("DNS") && error.contains("超时") && error.contains("重试"));
 }
 
 #[tokio::test]
