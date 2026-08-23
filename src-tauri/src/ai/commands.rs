@@ -1,8 +1,7 @@
-use super::config::{self, AiConfig, AiProviderConfig};
 use super::chat_runs::ChatRunRegistry;
-use super::provider_capability::{
-    capability_for_config, ProviderCapability, RequiredCapability,
-};
+use super::config::{self, AiConfig, AiProviderConfig};
+use super::provider_capability::{capability_for_config, ProviderCapability, RequiredCapability};
+use super::safe_media_fetch::{self, ExpectedMedia};
 use base64::Engine;
 use futures::{SinkExt, StreamExt};
 use genai::adapter::AdapterKind;
@@ -891,11 +890,8 @@ pub async fn ai_chat_turn_owned(
     tools: Vec<ToolDef>,
     character_context: Option<String>,
 ) -> Result<AiTurnResult, String> {
-    runs.run_cancellable(
-        &run_id,
-        ai_chat_turn(messages, tools, character_context),
-    )
-    .await
+    runs.run_cancellable(&run_id, ai_chat_turn(messages, tools, character_context))
+        .await
 }
 
 #[tauri::command]
@@ -2011,10 +2007,7 @@ async fn response_to_generated_media(
         log_provider_event(action, cfg, model, endpoint, false, &text);
         return Err(format!("音频生成失败 ({status}): {text}"));
     }
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|e| format!("读取音频生成响应失败: {e}"))?;
+    let bytes = safe_media_fetch::read_bounded_response(response, ExpectedMedia::Audio).await?;
     log_provider_event(action, cfg, model, endpoint, true, "audio generated");
     Ok(GeneratedMedia {
         base64_data: base64::engine::general_purpose::STANDARD.encode(bytes),
@@ -2063,19 +2056,21 @@ async fn download_generated_media(
     extension: &str,
     action: &str,
 ) -> Result<GeneratedMedia, String> {
-    validate_media_download_url(url)?;
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(HTTP_REQUEST_TIMEOUT_SECS))
-        .build()
-        .map_err(|e| format!("创建下载客户端失败: {e}"))?;
-    let bytes = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| format!("下载生成媒体失败: {e}"))?
-        .bytes()
-        .await
-        .map_err(|e| format!("读取生成媒体失败: {e}"))?;
+    let chat_config = AiConfig {
+        provider: cfg.provider.clone(),
+        model: model.to_string(),
+        api_key: cfg.api_key.clone(),
+        base_url: cfg.base_url.clone(),
+        capabilities: cfg.capabilities.clone(),
+    };
+    let capability = capability_for_config(&chat_config)?;
+    capability.require(RequiredCapability::MediaUrlOutput)?;
+    let bytes = safe_media_fetch::fetch_generated_media(
+        url,
+        ExpectedMedia::from_extension(extension),
+        Duration::from_millis(capability.media_fetch_deadline_ms),
+    )
+    .await?;
     log_provider_event(action, cfg, model, endpoint, true, "media generated");
     Ok(GeneratedMedia {
         base64_data: base64::engine::general_purpose::STANDARD.encode(bytes),
@@ -2087,41 +2082,7 @@ async fn download_generated_media(
 /// private/link-local/reserved hosts. A provider-returned media URL must point
 /// at a public endpoint, never the local machine or an internal network.
 fn validate_media_download_url(url: &str) -> Result<(), String> {
-    let parsed = reqwest::Url::parse(url).map_err(|e| format!("无效的下载 URL: {e}"))?;
-    match parsed.scheme() {
-        "https" | "http" => {}
-        other => return Err(format!("不允许的下载协议: {other}")),
-    }
-    let host = parsed
-        .host_str()
-        .ok_or_else(|| "下载 URL 缺少主机名".to_string())?;
-    if is_private_download_host(host) {
-        return Err(format!("拒绝下载内部/保留地址: {host}"));
-    }
-    Ok(())
-}
-
-fn is_private_download_host(host: &str) -> bool {
-    let lower = host.to_ascii_lowercase();
-    if lower == "localhost" || lower.ends_with(".localhost") || lower.ends_with(".local") {
-        return true;
-    }
-    // host_str() brackets IPv6 literals; strip them before parsing.
-    let bare = lower.trim_start_matches('[').trim_end_matches(']');
-    if let Ok(ip) = bare.parse::<std::net::Ipv4Addr>() {
-        return ip.is_loopback()
-            || ip.is_private()
-            || ip.is_link_local()
-            || ip.is_unspecified()
-            || ip.is_broadcast();
-    }
-    if let Ok(ip) = bare.parse::<std::net::Ipv6Addr>() {
-        return ip.is_loopback()
-            || ip.is_unspecified()
-            || ip.is_unique_local()
-            || ip.is_unicast_link_local();
-    }
-    false
+    safe_media_fetch::validate_media_download_url(url).map(|_| ())
 }
 
 fn dashscope_endpoint(cfg: &AiProviderConfig, path: &str) -> String {
@@ -2249,7 +2210,7 @@ fn log_provider_event(
         model: model.to_string(),
         api_key: cfg.api_key.clone(),
         base_url: cfg.base_url.clone(),
-        capabilities: None,
+        capabilities: cfg.capabilities.clone(),
     };
     log_ai_event(action, &chat_cfg, endpoint, success, message);
 }

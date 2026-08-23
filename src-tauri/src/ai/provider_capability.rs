@@ -52,6 +52,12 @@ pub fn capability_for_config(config: &AiConfig) -> Result<ProviderCapability, St
         "deepseek" => builtin(true, true, true, false, 180_000),
         "groq" | "xai" | "cohere" => builtin(true, true, true, false, 120_000),
         "ollama" => builtin(false, true, false, false, 600_000),
+        "aliyun" | "volcengine" | "zhipu" | "siliconflow" | "elevenlabs" => {
+            builtin(false, false, true, true, 600_000)
+        }
+        "sd-webui" | "comfyui" | "edge-tts" => {
+            builtin(false, false, false, false, 900_000)
+        }
         "custom" => from_custom(config.capabilities.as_ref()),
         "" => return Err("尚未选择 AI 供应商".to_string()),
         _ => return Err(format!("未知 AI 供应商：{}", config.provider.trim())),

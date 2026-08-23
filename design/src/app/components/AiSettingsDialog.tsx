@@ -525,6 +525,24 @@ function ProviderConfigPanel({
         apiKeyHint={preset?.keyHint || '存储在本地配置文件中'}
         baseUrlHint={config.provider === 'custom' ? '按目标服务填写图片或音频接口端点' : '留空使用供应商默认地址'}
       />
+      {config.provider === 'custom' && (
+        <label className="flex items-center justify-between gap-4 border-t border-border pt-4 text-sm">
+          <span>接口可能返回媒体下载 URL</span>
+          <input
+            type="checkbox"
+            checked={Boolean(config.capabilities?.media_url_output)}
+            onChange={() => onUpdate({
+              capabilities: {
+                ...defaultCustomCapabilities(),
+                ...config.capabilities,
+                media_url_output: !config.capabilities?.media_url_output,
+              },
+            })}
+            aria-label="返回媒体下载 URL"
+            className="h-4 w-4"
+          />
+        </label>
+      )}
     </div>
   );
 }

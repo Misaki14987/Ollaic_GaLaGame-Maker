@@ -39,6 +39,7 @@ pub struct AiProviderConfig {
     pub model: String,
     pub api_key: String,
     pub base_url: String,
+    pub capabilities: Option<ProviderCapabilityDeclaration>,
 }
 
 impl Default for AiConfig {
@@ -60,6 +61,7 @@ impl AiProviderConfig {
             model: "dall-e-3".into(),
             api_key: String::new(),
             base_url: String::new(),
+            capabilities: None,
         }
     }
 
@@ -69,6 +71,7 @@ impl AiProviderConfig {
             model: "tts-1".into(),
             api_key: String::new(),
             base_url: String::new(),
+            capabilities: None,
         }
     }
 
@@ -78,6 +81,7 @@ impl AiProviderConfig {
             model: "music-1".into(),
             api_key: String::new(),
             base_url: String::new(),
+            capabilities: None,
         }
     }
 }
