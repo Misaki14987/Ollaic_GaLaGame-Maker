@@ -373,6 +373,37 @@ fn rename_scene_asset_references(
     Ok(())
 }
 
+fn delete_scene_asset_references(
+    project_path: &str,
+    category: &str,
+    filename: &str,
+    failure: AssetMutationFailure,
+) -> Result<(), String> {
+    let scene_dir = PathBuf::from(project_path).join("game").join("scene");
+    let entries = fs::read_dir(&scene_dir)
+        .map_err(|e| format!("无法读取场景目录 {}: {e}", scene_dir.display()))?;
+    let mut updates = Vec::new();
+    for entry in entries {
+        let path = entry.map_err(|e| e.to_string())?.path();
+        if !path.is_file() || path.extension().and_then(|ext| ext.to_str()) != Some("txt") {
+            continue;
+        }
+        let source = fs::read_to_string(&path)
+            .map_err(|e| format!("无法读取场景文件 {}: {e}", path.display()))?;
+        let (rewritten, count) = references::remove_asset_references(&source, category, filename);
+        if count > 0 {
+            updates.push((path, rewritten));
+        }
+    }
+    updates.sort_by(|left, right| left.0.cmp(&right.0));
+    for (index, (path, source)) in updates.into_iter().enumerate() {
+        fs::write(&path, source)
+            .map_err(|e| format!("无法更新场景文件 {}: {e}", path.display()))?;
+        fail_asset_mutation(failure, AssetMutationFailure::AfterScene(index))?;
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AssetMutationFailure {
     Never,
@@ -437,6 +468,18 @@ fn rollback_asset_mutation(error: String, rollback: Result<(), String>) -> Strin
         Ok(()) => error,
         Err(rollback) => format!("{error}; rollback failed: {rollback}"),
     }
+}
+
+fn validate_asset_mutation_source(path: &Path) -> Result<(), String> {
+    let metadata =
+        fs::symlink_metadata(path).map_err(|_| format!("文件不存在: {}", path.display()))?;
+    if metadata.file_type().is_symlink() {
+        return Err(format!("素材不能是 symbolic link: {}", path.display()));
+    }
+    if !metadata.is_file() {
+        return Err(format!("素材不是项目内的常规文件: {}", path.display()));
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -646,15 +689,13 @@ async fn delete_asset_inner(
         None,
         project_root,
     )?;
+    crate::project_transaction::validate_snapshot_paths(project_root, &transaction_paths)?;
+    validate_asset_mutation_source(&path)?;
     let mut transaction =
         ProjectFileTransaction::begin(project_root, "delete-asset", transaction_paths).await?;
 
     let mutation = (|| {
-        let metadata =
-            fs::symlink_metadata(&path).map_err(|_| format!("文件不存在: {}", path.display()))?;
-        if metadata.file_type().is_symlink() || !metadata.is_file() {
-            return Err(format!("素材不是项目内的常规文件: {}", path.display()));
-        }
+        validate_asset_mutation_source(&path)?;
         fs::remove_file(&path).map_err(|e| format!("删除失败: {e}"))?;
         fail_asset_mutation(failure, AssetMutationFailure::AfterAsset)?;
         if let Some(reference_dir) = reference_dir {
@@ -665,6 +706,7 @@ async fn delete_asset_inner(
             }
         }
         fail_asset_mutation(failure, AssetMutationFailure::AfterReference)?;
+        delete_scene_asset_references(&project_path, &subdir, &filename, failure)?;
         delete_asset_metadata(&project_path, &subdir, &filename)?;
         fail_asset_mutation(failure, AssetMutationFailure::AfterMetadata)
     })();
@@ -734,15 +776,21 @@ async fn rename_asset_inner(
         new_reference_dir.as_deref(),
         project_root,
     )?;
+    crate::project_transaction::validate_snapshot_paths(project_root, &transaction_paths)?;
+    validate_asset_mutation_source(&old_path)?;
+    if new_path.exists() {
+        return Err(format!("目标文件已存在: {}", new_path.display()));
+    }
+    if let Some(path) = &new_reference_dir {
+        if path.exists() {
+            return Err(format!("目标素材参考目录已存在: {}", path.display()));
+        }
+    }
     let mut transaction =
         ProjectFileTransaction::begin(project_root, "rename-asset", transaction_paths).await?;
 
     let mutation = (|| {
-        let metadata = fs::symlink_metadata(&old_path)
-            .map_err(|_| format!("文件不存在: {}", old_path.display()))?;
-        if metadata.file_type().is_symlink() || !metadata.is_file() {
-            return Err(format!("素材不是项目内的常规文件: {}", old_path.display()));
-        }
+        validate_asset_mutation_source(&old_path)?;
         if new_path.exists() {
             return Err(format!("目标文件已存在: {}", new_path.display()));
         }
@@ -1306,6 +1354,9 @@ mod tests {
         assert!(!renamed_reference_dir.exists());
         let metadata = load_asset_metadata(tmp.to_string_lossy().to_string()).unwrap();
         assert!(!metadata.aliases.contains_key("background/garden.webp"));
+        let scene = fs::read_to_string(scene_dir.join("start.txt")).unwrap();
+        assert!(!scene.contains("changeBg:garden.webp"));
+        assert!(scene.contains(":park.webp is dialogue text;"));
         let _ = fs::remove_dir_all(&tmp);
     }
 
@@ -1572,6 +1623,7 @@ mod tests {
         for (label, failure) in [
             ("asset", AssetMutationFailure::AfterAsset),
             ("reference", AssetMutationFailure::AfterReference),
+            ("scene", AssetMutationFailure::AfterScene(0)),
         ] {
             let tmp =
                 std::env::temp_dir().join(format!("ollaic_asset_mutation_delete_stage_{label}"));
@@ -1583,6 +1635,11 @@ mod tests {
             fs::write(
                 tmp.join("game/config/references/backgrounds/park.webp/sketch.webp"),
                 "reference",
+            )
+            .unwrap();
+            fs::write(
+                tmp.join("game/scene/start.txt"),
+                "changeBg:park.webp;\n:park.webp is dialogue text;\n",
             )
             .unwrap();
 
@@ -1600,7 +1657,71 @@ mod tests {
                     .exists(),
                 "{label}"
             );
+            assert_eq!(
+                fs::read_to_string(tmp.join("game/scene/start.txt")).unwrap(),
+                "changeBg:park.webp;\n:park.webp is dialogue text;\n",
+                "{label}"
+            );
             let _ = fs::remove_dir_all(tmp);
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn asset_mutation_rejects_outside_symlink_before_snapshot() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = std::env::temp_dir().join("ollaic_asset_mutation_outside_symlink");
+        let _ = fs::remove_dir_all(&workspace);
+        let project = workspace.join("project");
+        let outside = workspace.join("outside.webp");
+        fs::create_dir_all(project.join("game/background")).unwrap();
+        fs::create_dir_all(project.join("game/scene")).unwrap();
+        fs::write(&outside, "outside").unwrap();
+        symlink(&outside, project.join("game/background/linked.webp")).unwrap();
+
+        let error = block_on(delete_asset(
+            project.to_string_lossy().to_string(),
+            "background".to_string(),
+            "linked.webp".to_string(),
+        ))
+        .unwrap_err();
+
+        assert!(error.contains("symbolic link"));
+        assert_eq!(fs::read_to_string(&outside).unwrap(), "outside");
+        assert!(!project.join(".ollaic/transactions").exists());
+        let _ = fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn deleting_vocal_asset_removes_voice_and_effect_references_only() {
+        let project = std::env::temp_dir().join("ollaic_delete_vocal_references");
+        let _ = fs::remove_dir_all(&project);
+        fs::create_dir_all(project.join("game/vocal")).unwrap();
+        fs::create_dir_all(project.join("game/scene")).unwrap();
+        fs::write(project.join("game/vocal/v1.wav"), "voice").unwrap();
+        fs::write(
+            project.join("game/scene/start.txt"),
+            concat!(
+                "Alice:hello -v1.wav;\n",
+                "playEffect:v1.wav;\n",
+                ":v1.wav is dialogue text;\n",
+            ),
+        )
+        .unwrap();
+
+        block_on(delete_asset(
+            project.to_string_lossy().to_string(),
+            "vocal".to_string(),
+            "v1.wav".to_string(),
+        ))
+        .unwrap();
+
+        let scene = fs::read_to_string(project.join("game/scene/start.txt")).unwrap();
+        assert!(scene.contains("Alice:hello;"));
+        assert!(!scene.contains("playEffect:v1.wav"));
+        assert!(scene.contains(":v1.wav is dialogue text;"));
+        assert!(references::find_asset_references(&scene).is_empty());
+        let _ = fs::remove_dir_all(project);
     }
 }
