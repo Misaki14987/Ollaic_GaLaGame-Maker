@@ -151,8 +151,14 @@ describe('stageFigureInsert', () => {
 
   it('builds a valid scene edit from character + emotion intent', async () => {
     invokeMock.mockImplementation(async (command, args) => {
-      if (command === 'parse_scene') return args.source.split('\n').map((line: string) => ({ id: line, type: 'comment', content: line, flags: [], position: { x: 0, y: 0 }, connections: [] }));
-      if (command === 'serialize_scene') return args.nodes.map((node: { content: string }) => node.content).join('\n');
+      if (command === 'parse_scene') {
+        const source = String((args as { source?: string } | undefined)?.source ?? '');
+        return source.split('\n').map((line) => ({ id: line, type: 'comment', content: line, flags: [], position: { x: 0, y: 0 }, connections: [] }));
+      }
+      if (command === 'serialize_scene') {
+        const nodes = (args as { nodes?: Array<{ content: string }> } | undefined)?.nodes ?? [];
+        return nodes.map((node) => node.content).join('\n');
+      }
       throw new Error(`unexpected invoke: ${command}`);
     });
 
@@ -315,7 +321,7 @@ describe('stageCharacterEdit', () => {
       },
       makeCtx(),
     );
-    expect((edit.after as Record<string, unknown>).evil).toBeUndefined();
+    expect((edit.after as unknown as Record<string, unknown>).evil).toBeUndefined();
     expect(edit.after.id).toBe('c1');           // id never changes
     expect(edit.after.aliases).toEqual(['明明']); // wrong type ignored, base kept
     expect(edit.after.personality).toBe('开朗');  // number ignored, base kept
@@ -465,7 +471,7 @@ describe('stageMemoryEdit', () => {
       makeCtx(),
     );
     expect(edit.after.worldSetting).toBe('魔法世界');
-    expect((edit.after as Record<string, unknown>).junk).toBeUndefined();
+    expect((edit.after as unknown as Record<string, unknown>).junk).toBeUndefined();
     expect(edit.after.writingStyle).toBe(''); // number ignored
     expect(edit.changedFields).toEqual(['worldSetting']); // updatedAt filtered out
   });

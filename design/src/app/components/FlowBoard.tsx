@@ -604,8 +604,9 @@ export function FlowBoard({ projectPath, onOpenArtifact }: FlowBoardProps) {
     source: dependency,
     target: step.id,
     animated: step.status === 'running',
+    deletable: state.runStatus === 'paused' && !detached,
     style: { strokeWidth: 1.5 },
-  }))), [state.steps]);
+  }))), [detached, state.runStatus, state.steps]);
 
   const selectedStep = state.steps.find((step) => step.id === selectedStepId) ?? null;
   const running = state.runStatus === 'running';
@@ -784,8 +785,7 @@ export function FlowBoard({ projectPath, onOpenArtifact }: FlowBoardProps) {
                 onConnect={connect}
                 onEdgesDelete={deleteEdges}
                 nodesConnectable={paused && !detached}
-                edgesReconnectable={false}
-                edgesDeletable={paused && !detached}
+                edgesUpdatable={false}
                 minZoom={0.35}
                 maxZoom={1.75}
                 onlyRenderVisibleElements
