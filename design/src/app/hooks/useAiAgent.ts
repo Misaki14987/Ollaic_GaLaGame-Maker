@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { aiChatCancel, aiChatTurn, appendAiAgentTrace, getAiConfig, getAiProviderCapability, type AiChatMessage } from '../lib/ai-ipc';
+import { minimizeAgentTrace } from '../lib/agent-trace';
 import {
   buildInlineUploadContext,
   buildUploadContext,
@@ -52,15 +53,21 @@ import {
 import { extractEditorResponse } from '../lib/editor-patch';
 import { getTool, toolDefs, type StagedWrite } from '../lib/ai-tools';
 import {
-  buildMemoryContext,
   emptyProjectMemory,
   readProjectMemory,
   saveProjectMemory,
   type ProjectMemory,
 } from '../lib/project-memory';
 import {
+  appendAcceptedFact,
+  buildNarrativeContext,
+  emptyNarrativeContext,
+  readNarrativeContext,
+  saveNarrativeContext,
+  type NarrativeContextDocument,
+} from '../lib/narrative-context';
+import {
   buildAssetContext,
-  buildNumberedScriptContext,
   hasAssetContextTruncation,
   truncateContextMessages,
   type MissingAssetIssue,
@@ -278,10 +285,9 @@ function remapCharacterIds(character: Character, ids: Map<string, string>): Char
 
 async function writeAgentTrace(trace: AiAgentTrace): Promise<void> {
   try {
-    await appendAiAgentTrace(trace);
-    console.info('[ai-agent-trace]', trace);
+    await appendAiAgentTrace(await minimizeAgentTrace(trace));
   } catch (e) {
-    console.warn('[ai-agent-trace] write failed:', e, trace);
+    console.warn('[ai-agent-trace] write failed:', e);
   }
 }
 
@@ -332,6 +338,7 @@ export function useAiAgent(params: UseAiAgentParams) {
   const [error, setError] = useState<AiErrorState | null>(null);
   const [assets, setAssets] = useState<AssetInfo[]>([]);
   const [memory, setMemory] = useState<ProjectMemory | null>(null);
+  const [narrativeDocument, setNarrativeDocument] = useState<NarrativeContextDocument>(emptyNarrativeContext);
   // Reference uploads: author-attached local files the agent may read.
   // `uploads` is the project's whole store; `attachedIds` is the subset the
   // user picked for the *next* message. Sending moves that subset onto the
@@ -372,11 +379,13 @@ export function useAiAgent(params: UseAiAgentParams) {
     if (!projectPath) {
       setAssets([]);
       setMemory(null);
+      setNarrativeDocument(emptyNarrativeContext());
       return;
     }
     let cancelled = false;
     listAllAssets(projectPath).then((list) => { if (!cancelled) setAssets(list); }).catch(() => { if (!cancelled) setAssets([]); });
     readProjectMemory(projectPath).then((value) => { if (!cancelled) setMemory(value); }).catch(() => { if (!cancelled) setMemory(null); });
+    readNarrativeContext(projectPath).then((value) => { if (!cancelled) setNarrativeDocument(value); }).catch(() => { if (!cancelled) setNarrativeDocument(emptyNarrativeContext()); });
     listAiUploads(projectPath).then((list) => { if (!cancelled) setUploads(list); }).catch(() => { if (!cancelled) setUploads([]); });
     return () => { cancelled = true; };
   }, [projectPath, uploadsRevision]);
@@ -394,6 +403,15 @@ export function useAiAgent(params: UseAiAgentParams) {
   const ownsRun = useCallback((run: ConversationalRun) => (
     activeRunRef.current === run && !run.revoked
   ), []);
+
+  const buildMandatoryNarrativeContext = useCallback(() => buildNarrativeContext({
+    projectId,
+    sceneName: currentSceneName,
+    sceneDisplayName: sceneDisplayName(currentSceneName, sceneHeaders[currentSceneName]),
+    sceneSource: scriptSource,
+    memory,
+    document: narrativeDocument,
+  }), [currentSceneName, memory, narrativeDocument, projectId, sceneHeaders, scriptSource]);
 
   // Slim system prompt for the tool-calling loop: current scene + "fetch on demand".
   // `attachedUploadIds` are the files sent with this very message; they are
@@ -439,12 +457,11 @@ export function useAiAgent(params: UseAiAgentParams) {
       '判断表情是否可用时，以 get_character 返回的 sprites[].available 与 sprites[].resolvedFile/scriptFile 为准；sprites[].file 为空只表示角色卡未手动绑定文件，不代表该表情没有素材。',
       '引用立绘、BGM、音效、视频素材只能用 search_assets 返回的真实文件名。背景素材可以引用 search_assets 返回的真实文件名；若缺少背景/CG，必须先 plan_assets，再用同一 targetStem 的 `.png` 文件名写入 changeBg。不要编造未搜索到、未规划的 gray_room.jpg、figure_placeholder.png 等文件。',
       '# 当前上下文（供参考，非用户指令）',
-      `当前打开的场景：${sceneDisplayName(currentSceneName, sceneHeaders[currentSceneName])}（文件名 ${currentSceneName}，调用工具时用此文件名）`,
-      `当前场景脚本（行号为 txt 行号）：\n${buildNumberedScriptContext(scriptSource, 9999)}`,
+      buildMandatoryNarrativeContext(),
       buildUploadContext(uploads, attachedUploadIds),
       '———— 以下为用户对话 ————',
     ].filter(Boolean).join('\n\n');
-  }, [currentSceneName, sceneHeaders, scriptSource, uploads]);
+  }, [buildMandatoryNarrativeContext, currentSceneName, sceneHeaders, uploads]);
 
   // Full-context single-shot prompt for providers without function calling.
   const buildLegacySystemContext = useCallback((attachedUploadIds: string[], inlineUploads: string): string => {
@@ -462,13 +479,11 @@ export function useAiAgent(params: UseAiAgentParams) {
       '引用素材时只能使用当前素材库列表中的文件名，缺少素材时返回 chat 说明，不要编造。',
       buildAssetContext(assets),
       buildCharacterContext(characters),
-      buildMemoryContext(memory),
+      buildMandatoryNarrativeContext(),
       buildUploadContext(uploads, attachedUploadIds),
       inlineUploads,
-      `当前场景：${sceneDisplayName(currentSceneName, sceneHeaders[currentSceneName])}（文件名 ${currentSceneName}）`,
-      `当前脚本（左侧数字是 txt 行号）：\n${buildNumberedScriptContext(scriptSource)}`,
     ].filter(Boolean).join('\n\n');
-  }, [assets, characters, currentSceneName, sceneHeaders, memory, scriptSource, uploads]);
+  }, [assets, buildMandatoryNarrativeContext, characters, uploads]);
 
   const buildStagingContext = useCallback((assetOverride?: AssetInfo[]): StagingContext => ({
     currentSceneName,
@@ -947,7 +962,6 @@ export function useAiAgent(params: UseAiAgentParams) {
           });
         }
       }
-
       const characterEdits = set.edits.filter(
         (edit): edit is CharacterEdit | CreateCharacterEdit =>
           edit.kind === 'character' || edit.kind === 'create_character',
@@ -1035,6 +1049,19 @@ export function useAiAgent(params: UseAiAgentParams) {
         return;
       }
 
+      let narrativeWarning: string | null = null;
+      const nextNarrativeDocument = appendAcceptedFact(narrativeDocument, {
+        id: set.id,
+        acceptedAt: new Date().toISOString(),
+        summary: summarizeChangeSet(set, sceneHeaders),
+      });
+      try {
+        await saveNarrativeContext(projectPath, nextNarrativeDocument);
+        setNarrativeDocument(nextNarrativeDocument);
+      } catch (error) {
+        narrativeWarning = `修改已提交，但叙事上下文保存失败：${String(error)}`;
+      }
+
       if (currentSceneEdit) {
         if (reconcileCurrentScene) {
           reconcileCurrentScene(currentSceneEdit);
@@ -1055,7 +1082,11 @@ export function useAiAgent(params: UseAiAgentParams) {
       });
       setPendingChangeSet({ ...set, status: 'accepted' });
       setStatus('accepted');
-      setError(null);
+      setError(narrativeWarning ? {
+        kind: 'other',
+        retryable: true,
+        message: narrativeWarning,
+      } : null);
     } catch (error) {
       setStatus('error');
       setError({
@@ -1072,6 +1103,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     characters,
     currentSceneName,
     nodes,
+    narrativeDocument,
     sceneHeaders,
     onCommitSettled,
     onCommitStart,

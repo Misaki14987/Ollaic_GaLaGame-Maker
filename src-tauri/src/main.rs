@@ -172,6 +172,8 @@ fn main() {
             webgal::project::export_project,
             webgal::project::read_project_memory,
             webgal::project::save_project_memory,
+            webgal::project::read_narrative_context,
+            webgal::project::save_narrative_context,
             webgal::project::read_project_metadata,
             webgal::project::save_project_metadata,
             webgal::project::create_project_snapshot,

@@ -20,7 +20,8 @@ use tauri::{AppHandle, Emitter};
 const MAX_LOG_LIMIT: usize = 500;
 const DEFAULT_LOG_LIMIT: usize = 100;
 const MAX_LOG_FIELD_CHARS: usize = 50_000;
-const MAX_TRACE_FIELD_CHARS: usize = 50_000;
+const MAX_TRACE_TOOLS: usize = 256;
+const MAX_DIAGNOSTIC_EXCERPT_CHARS: usize = 256;
 const HTTP_REQUEST_TIMEOUT_SECS: u64 = 180;
 
 /// A reqwest client with the standard request timeout applied. Using this
@@ -265,7 +266,7 @@ pub struct AiLogOutput {
 }
 
 #[tauri::command]
-pub fn get_ai_config() -> AiConfig {
+pub fn get_ai_config() -> Result<AiConfig, String> {
     config::load_config()
 }
 
@@ -277,11 +278,15 @@ pub fn set_ai_config(config: AiConfig) -> Result<(), String> {
 
 #[tauri::command]
 pub fn get_ai_provider_capability(config: Option<AiConfig>) -> Result<ProviderCapability, String> {
-    capability_for_config(&config.unwrap_or_else(config::load_config))
+    let config = match config {
+        Some(config) => config,
+        None => config::load_config()?,
+    };
+    capability_for_config(&config)
 }
 
 #[tauri::command]
-pub fn get_ai_image_config() -> AiProviderConfig {
+pub fn get_ai_image_config() -> Result<AiProviderConfig, String> {
     config::load_image_config()
 }
 
@@ -291,7 +296,7 @@ pub fn set_ai_image_config(config: AiProviderConfig) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn get_ai_tts_config() -> AiProviderConfig {
+pub fn get_ai_tts_config() -> Result<AiProviderConfig, String> {
     config::load_tts_config()
 }
 
@@ -301,7 +306,7 @@ pub fn set_ai_tts_config(config: AiProviderConfig) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn get_ai_music_config() -> AiProviderConfig {
+pub fn get_ai_music_config() -> Result<AiProviderConfig, String> {
     config::load_music_config()
 }
 
@@ -334,9 +339,107 @@ pub fn get_ai_agent_trace_path() -> Result<String, String> {
 
 #[tauri::command]
 pub fn append_ai_agent_trace(payload: serde_json::Value) -> Result<(), String> {
-    let sanitized = sanitize_trace_value(payload);
-    let line = serde_json::to_string(&sanitized).map_err(|e| e.to_string())?;
+    let record: AgentTraceRecord = serde_json::from_value(payload)
+        .map_err(|e| format!("Unsupported agent trace schema: {e}"))?;
+    record.validate()?;
+    let line = serde_json::to_string(&record).map_err(|e| e.to_string())?;
     config::append_agent_trace_line(&line)
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AgentTraceRecord {
+    version: u8,
+    classification: String,
+    trace_id: String,
+    created_at: String,
+    mode: String,
+    outcome: String,
+    input: AgentTraceInput,
+    output: AgentTraceOutput,
+    duration_ms: usize,
+    tools: Vec<AgentTraceTool>,
+    retention: AgentTraceRetention,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    diagnostic: Option<AgentTraceDiagnostic>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AgentTraceInput {
+    prompt_hash: String,
+    prompt_chars: usize,
+    prompt_bytes: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AgentTraceOutput {
+    response_hash: String,
+    response_chars: usize,
+    response_bytes: usize,
+    edit_count: usize,
+    asset_count: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AgentTraceTool {
+    turn: usize,
+    name: String,
+    ok: bool,
+    argument_bytes: usize,
+    result_bytes: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AgentTraceRetention {
+    max_records: usize,
+    diagnostic_retention_hours: usize,
+    max_diagnostic_excerpt_chars: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AgentTraceDiagnostic {
+    enabled: bool,
+    excerpt: String,
+    expires_at: String,
+}
+
+impl AgentTraceRecord {
+    fn validate(&self) -> Result<(), String> {
+        if self.version != 1 || self.classification != "operational" {
+            return Err("Unsupported agent trace version or classification".to_string());
+        }
+        if !matches!(self.mode.as_str(), "function_calling" | "legacy")
+            || !self.input.prompt_hash.starts_with("sha256:")
+            || !self.output.response_hash.starts_with("sha256:")
+            || self.tools.len() > MAX_TRACE_TOOLS
+            || self.trace_id.len() > 128
+            || self.created_at.len() > 64
+            || self.outcome.len() > 128
+            || self.tools.iter().any(|tool| tool.name.len() > 128)
+        {
+            return Err("Invalid agent trace operational metadata".to_string());
+        }
+        if self.retention.max_records != 200
+            || self.retention.diagnostic_retention_hours != 24
+            || self.retention.max_diagnostic_excerpt_chars != MAX_DIAGNOSTIC_EXCERPT_CHARS
+        {
+            return Err("Invalid agent trace retention declaration".to_string());
+        }
+        if let Some(diagnostic) = &self.diagnostic {
+            if !diagnostic.enabled
+                || diagnostic.excerpt.chars().count() > MAX_DIAGNOSTIC_EXCERPT_CHARS
+                || diagnostic.expires_at.len() > 64
+            {
+                return Err("Invalid agent trace diagnostic payload".to_string());
+            }
+        }
+        Ok(())
+    }
 }
 
 #[tauri::command]
@@ -355,7 +458,7 @@ pub(crate) async fn generate_image_media(
     model: String,
     reference_image_path: Option<String>,
 ) -> Result<GeneratedMedia, String> {
-    let cfg = config::load_image_config();
+    let cfg = config::load_image_config()?;
     validate_provider_config_basics(&cfg, "图片")?;
     let model = model.trim();
     if model.is_empty() {
@@ -409,7 +512,7 @@ pub(crate) async fn generate_tts_media(
     model: String,
     format: String,
 ) -> Result<GeneratedMedia, String> {
-    let cfg = config::load_tts_config();
+    let cfg = config::load_tts_config()?;
     validate_provider_config_basics(&cfg, "音频")?;
     let model = model.trim();
     if model.is_empty() {
@@ -456,7 +559,7 @@ pub(crate) async fn generate_music_media(
     model: String,
     format: String,
 ) -> Result<GeneratedMedia, String> {
-    let cfg = config::load_music_config();
+    let cfg = config::load_music_config()?;
     validate_provider_config_basics(&cfg, "音乐")?;
     let model = model.trim();
     if model.is_empty() {
@@ -708,7 +811,7 @@ pub async fn ai_chat_stream(
     messages: Vec<AiMessageInput>,
     character_context: Option<String>,
 ) -> Result<(), String> {
-    let cfg = config::load_config();
+    let cfg = config::load_config()?;
     validate_config_basics(&cfg)?;
     capability_for_config(&cfg)?;
 
@@ -827,7 +930,7 @@ pub async fn ai_chat_turn(
     tools: Vec<ToolDef>,
     character_context: Option<String>,
 ) -> Result<AiTurnResult, String> {
-    let cfg = config::load_config();
+    let cfg = config::load_config()?;
     validate_config_basics(&cfg)?;
     let capability = capability_for_config(&cfg)?;
     if !tools.is_empty() {
@@ -909,7 +1012,7 @@ pub(crate) async fn complete_agent_text(
     system_prompt: &str,
     user_prompt: &str,
 ) -> Result<Option<(String, String, Option<u32>, Option<u32>)>, String> {
-    let cfg = config::load_config();
+    let cfg = config::load_config()?;
     if validate_config_basics(&cfg).is_err() {
         return Ok(None);
     }
@@ -1041,7 +1144,9 @@ fn validate_config_basics(cfg: &AiConfig) -> Result<(), String> {
 }
 
 pub(crate) fn has_agent_chat_config() -> bool {
-    validate_config_basics(&config::load_config()).is_ok()
+    config::load_config()
+        .and_then(|config| validate_config_basics(&config))
+        .is_ok()
 }
 
 /// Default API endpoint for a chat provider. `None` means there is no built-in
@@ -2260,40 +2365,6 @@ fn parse_ai_log_line(line: &str) -> Option<AiLogOutput> {
     })
 }
 
-fn sanitize_trace_value(value: serde_json::Value) -> serde_json::Value {
-    match value {
-        serde_json::Value::String(s) => serde_json::Value::String(sanitize_trace_field(&s)),
-        serde_json::Value::Array(values) => {
-            serde_json::Value::Array(values.into_iter().map(sanitize_trace_value).collect())
-        }
-        serde_json::Value::Object(map) => {
-            let sanitized = map
-                .into_iter()
-                .map(|(key, value)| {
-                    let key_lower = key.to_ascii_lowercase();
-                    let value = if key_lower.contains("apikey")
-                        || key_lower.contains("api_key")
-                        || key_lower == "key"
-                        || key_lower.contains("token")
-                        || key_lower.contains("authorization")
-                    {
-                        serde_json::Value::String("[REDACTED]".to_string())
-                    } else {
-                        sanitize_trace_value(value)
-                    };
-                    (sanitize_log_field(&key), value)
-                })
-                .collect();
-            serde_json::Value::Object(sanitized)
-        }
-        other => other,
-    }
-}
-
-fn sanitize_trace_field(value: &str) -> String {
-    truncate_trace_field(&redact_common_secrets(value))
-}
-
 fn sanitize_log_field(value: &str) -> String {
     truncate_log_field(&redact_common_secrets(value))
 }
@@ -2364,19 +2435,6 @@ fn truncate_log_field(value: &str) -> String {
     }
 }
 
-fn truncate_trace_field(value: &str) -> String {
-    let mut chars = value.chars();
-    let truncated = chars
-        .by_ref()
-        .take(MAX_TRACE_FIELD_CHARS)
-        .collect::<String>();
-    if chars.next().is_some() {
-        format!("{truncated}…")
-    } else {
-        truncated
-    }
-}
-
 // ── Batch TTS ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
@@ -2409,7 +2467,7 @@ pub async fn generate_batch_tts(
     model: String,
     format: String,
 ) -> Result<Vec<BatchTtsProgress>, String> {
-    let cfg = config::load_tts_config();
+    let cfg = config::load_tts_config()?;
     validate_provider_config_basics(&cfg, "音频")?;
     let model = model.trim();
     if model.is_empty() {

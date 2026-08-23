@@ -115,10 +115,10 @@ impl AssetGenerator for ConfiguredAssetGenerator {
         }
         let (config, capability) = match task.kind {
             AssetKind::Background | AssetKind::Figure => {
-                (crate::ai::config::load_image_config(), "图片")
+                (crate::ai::config::load_image_config()?, "图片")
             }
-            AssetKind::Tts => (crate::ai::config::load_tts_config(), "音频"),
-            AssetKind::Bgm | AssetKind::Sfx => (crate::ai::config::load_music_config(), "音乐"),
+            AssetKind::Tts => (crate::ai::config::load_tts_config()?, "音频"),
+            AssetKind::Bgm | AssetKind::Sfx => (crate::ai::config::load_music_config()?, "音乐"),
         };
         crate::ai::commands::validate_provider_config_basics(&config, capability)?;
         configured_model(&config.model)?;
@@ -167,7 +167,7 @@ async fn generate_configured_asset(
 ) -> Result<GeneratedArtifact, String> {
     let media = match task.kind {
         AssetKind::Background | AssetKind::Figure => {
-            let config = crate::ai::config::load_image_config();
+            let config = crate::ai::config::load_image_config()?;
             crate::ai::commands::generate_image_media(
                 None,
                 task.prompt.clone(),
@@ -177,7 +177,7 @@ async fn generate_configured_asset(
             .await?
         }
         AssetKind::Tts => {
-            let config = crate::ai::config::load_tts_config();
+            let config = crate::ai::config::load_tts_config()?;
             crate::ai::commands::generate_tts_media(
                 task.text.clone().unwrap_or_default(),
                 task.prompt.clone(),
@@ -187,7 +187,7 @@ async fn generate_configured_asset(
             .await?
         }
         AssetKind::Bgm | AssetKind::Sfx => {
-            let config = crate::ai::config::load_music_config();
+            let config = crate::ai::config::load_music_config()?;
             crate::ai::commands::generate_music_media(
                 task.prompt.clone(),
                 configured_model(&config.model)?,
