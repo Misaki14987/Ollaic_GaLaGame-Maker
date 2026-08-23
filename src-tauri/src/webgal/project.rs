@@ -1,3 +1,4 @@
+use super::export_destination::ExportDestination;
 use super::project_paths::{ProjectPaths, SceneName};
 use super::references;
 use serde::{Deserialize, Serialize};
@@ -501,15 +502,12 @@ pub fn export_project(
     as_zip: bool,
     metadata: Option<ProjectMetadata>,
 ) -> Result<ExportResult, String> {
-    let game_dir = PathBuf::from(&project_path).join("game");
-    if !game_dir.is_dir() {
-        return Err(format!("Invalid project: {}/game/ not found", project_path));
-    }
-
-    let dest = PathBuf::from(&output_path);
+    let project = ProjectPaths::open(&project_path)?;
+    let game_dir = project.root().join("game");
+    let destination = ExportDestination::validate(&project, &output_path)?;
+    let dest = destination.as_path();
     let mut warnings: Vec<String> = Vec::new();
-    let mut issues =
-        validate_export_source(&PathBuf::from(&project_path), &game_dir, metadata.as_ref())?;
+    let mut issues = validate_export_source(project.root(), &game_dir, metadata.as_ref())?;
 
     // Validate referenced assets before copying
     let asset_warnings = validate_assets(&game_dir)?;
@@ -531,7 +529,7 @@ pub fn export_project(
     }
 
     if let Some(metadata) = metadata.as_ref() {
-        write_project_metadata(&project_path, metadata)?;
+        write_project_metadata(&project.root().to_string_lossy(), metadata)?;
     }
 
     let final_output = if as_zip {
@@ -558,7 +556,7 @@ pub fn export_project(
             fs::write(&metadata_path, text)
                 .map_err(|e| format!("Failed to write {}: {e}", metadata_path.display()))?;
         }
-        dest
+        dest.to_path_buf()
     };
 
     issues.extend(validate_export_output(
@@ -1402,7 +1400,36 @@ fn add_dir_to_zip<W: Write + std::io::Seek>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
     use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn snapshot_tree(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
+        fn visit(root: &Path, current: &Path, files: &mut BTreeMap<PathBuf, Vec<u8>>) {
+            for entry in fs::read_dir(current).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    visit(root, &path, files);
+                } else {
+                    files.insert(
+                        path.strip_prefix(root).unwrap().to_path_buf(),
+                        fs::read(path).unwrap(),
+                    );
+                }
+            }
+        }
+        let mut files = BTreeMap::new();
+        visit(root, root, &mut files);
+        files
+    }
+
+    fn unique_export_workspace(label: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("ollaic_export_project_{label}_{nonce}"))
+    }
 
     #[test]
     fn default_config_enables_appreciation_gallery() {
@@ -1429,6 +1456,61 @@ mod tests {
             Some("true")
         );
         assert!(!ensure_appreciation_enabled(&mut config));
+    }
+
+    #[test]
+    fn rejected_overlapping_exports_leave_source_and_destination_unchanged() {
+        let workspace = unique_export_workspace("overlap");
+        let project = workspace.join("project");
+        fs::create_dir_all(project.join("game/scene")).unwrap();
+        fs::write(project.join("game/config.txt"), "Game_name:Protected;").unwrap();
+        fs::write(project.join("game/scene/start.txt"), "Alice:Hello;").unwrap();
+        fs::write(project.join("project-metadata.json"), "original-metadata").unwrap();
+        fs::create_dir_all(workspace.join("game")).unwrap();
+        fs::write(workspace.join("game/keep.txt"), "keep").unwrap();
+        let before = snapshot_tree(&project);
+        let metadata = ProjectMetadata {
+            description: "must-not-be-written".into(),
+            ..ProjectMetadata::default()
+        };
+
+        for destination in [
+            project.clone(),
+            project.join("missing/nested"),
+            workspace.clone(),
+        ] {
+            assert!(export_project(
+                project.to_string_lossy().into_owned(),
+                destination.to_string_lossy().into_owned(),
+                false,
+                Some(metadata.clone()),
+            )
+            .is_err());
+            assert_eq!(snapshot_tree(&project), before);
+            assert_eq!(
+                fs::read_to_string(workspace.join("game/keep.txt")).unwrap(),
+                "keep"
+            );
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let alias = workspace.join("project-child-alias");
+            fs::create_dir_all(project.join("exports")).unwrap();
+            symlink(project.join("exports"), &alias).unwrap();
+            let before_alias_attempt = snapshot_tree(&project);
+            assert!(export_project(
+                project.to_string_lossy().into_owned(),
+                alias.to_string_lossy().into_owned(),
+                true,
+                Some(metadata),
+            )
+            .is_err());
+            assert_eq!(snapshot_tree(&project), before_alias_attempt);
+        }
+
+        fs::remove_dir_all(workspace).unwrap();
     }
 
     #[test]
@@ -1461,7 +1543,8 @@ mod tests {
         )
         .unwrap();
 
-        let out = tmp.join("exported");
+        let out = tmp.with_extension("exported");
+        let _ = fs::remove_dir_all(&out);
 
         // Call export_project
         let result = export_project(
@@ -1490,6 +1573,7 @@ mod tests {
 
         // Cleanup
         let _ = fs::remove_dir_all(&tmp);
+        let _ = fs::remove_dir_all(&out);
     }
 
     #[test]
@@ -1517,7 +1601,8 @@ mod tests {
         );
         fs::write(tmp.join("game").join("scene").join("start.txt"), scene).unwrap();
 
-        let out = tmp.join("exported");
+        let out = tmp.with_extension("exported");
+        let _ = fs::remove_dir_all(&out);
 
         let result = export_project(
             tmp.to_string_lossy().to_string(),
@@ -1557,6 +1642,7 @@ mod tests {
 
         // Cleanup
         let _ = fs::remove_dir_all(&tmp);
+        let _ = fs::remove_dir_all(&out);
     }
 
     #[test]
@@ -1566,7 +1652,8 @@ mod tests {
         fs::create_dir_all(tmp.join("game").join("scene")).unwrap();
         fs::write(tmp.join("game").join("config.txt"), "Game_name:ZipTest;").unwrap();
         fs::write(tmp.join("game").join("scene").join("start.txt"), ":Hello;").unwrap();
-        let out = tmp.join("exported");
+        let out = tmp.with_extension("exported");
+        let _ = fs::remove_dir_all(&out);
         let metadata = ProjectMetadata {
             description: "Export description".to_string(),
             cover_path: "game/background/cover.webp".to_string(),
@@ -1603,6 +1690,7 @@ mod tests {
         metadata_file.read_to_string(&mut metadata_text).unwrap();
         assert!(metadata_text.contains("Export description"));
         let _ = fs::remove_dir_all(&tmp);
+        let _ = fs::remove_dir_all(&out);
     }
 
     #[test]
@@ -1610,7 +1698,8 @@ mod tests {
         let tmp = std::env::temp_dir().join("webgal_test_export_validation_blocks");
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(tmp.join("game").join("scene")).unwrap();
-        let out = tmp.join("exported");
+        let out = tmp.with_extension("exported");
+        let _ = fs::remove_dir_all(&out);
 
         let result = export_project(
             tmp.to_string_lossy().to_string(),
@@ -1633,6 +1722,7 @@ mod tests {
             .any(|issue| issue.level == ExportValidationLevel::Error
                 && issue.code == "missing_scene"));
         let _ = fs::remove_dir_all(&tmp);
+        let _ = fs::remove_dir_all(&out);
     }
 
     #[test]
@@ -1648,7 +1738,8 @@ mod tests {
             "cover",
         )
         .unwrap();
-        let out = tmp.join("exported");
+        let out = tmp.with_extension("exported");
+        let _ = fs::remove_dir_all(&out);
         let metadata = ProjectMetadata {
             cover_path: "game/background/cover.webp".to_string(),
             version: "2.0.0".to_string(),
@@ -1672,6 +1763,7 @@ mod tests {
             .iter()
             .any(|issue| issue.code.starts_with("export_missing")));
         let _ = fs::remove_dir_all(&tmp);
+        let _ = fs::remove_dir_all(&out);
     }
 
     #[test]
