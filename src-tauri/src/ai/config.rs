@@ -17,6 +17,19 @@ pub struct AiConfig {
     pub model: String,
     pub api_key: String,
     pub base_url: String,
+    pub capabilities: Option<ProviderCapabilityDeclaration>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ProviderCapabilityDeclaration {
+    pub chat_tools: bool,
+    pub json_mode: bool,
+    pub streaming_cancellation: bool,
+    pub media_url_output: bool,
+    pub chat_deadline_ms: Option<u64>,
+    pub flow_step_deadline_ms: Option<u64>,
+    pub media_fetch_deadline_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,6 +48,7 @@ impl Default for AiConfig {
             model: "gpt-4o-mini".into(),
             api_key: String::new(),
             base_url: String::new(),
+            capabilities: None,
         }
     }
 }

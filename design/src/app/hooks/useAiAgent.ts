@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { aiChatTurn, appendAiAgentTrace, getAiConfig, type AiChatMessage } from '../lib/ai-ipc';
+import { aiChatTurn, appendAiAgentTrace, getAiConfig, getAiProviderCapability, type AiChatMessage } from '../lib/ai-ipc';
 import {
   buildInlineUploadContext,
   buildUploadContext,
@@ -85,9 +85,13 @@ export interface AiErrorState {
   retryable: boolean;
 }
 
-/** Providers with reliable native function-calling support. Others fall back. */
-const FC_PROVIDERS = new Set(['openai', 'anthropic', 'gemini', 'deepseek', 'groq', 'xai', 'cohere']);
 const MAX_TURNS = 6;
+
+export async function conversationModeForConfig(
+  config: Awaited<ReturnType<typeof getAiConfig>>,
+): Promise<'function_calling' | 'legacy'> {
+  return (await getAiProviderCapability(config)).chatTools ? 'function_calling' : 'legacy';
+}
 
 interface AiAgentTraceTool {
   id: string;
@@ -859,7 +863,7 @@ export function useAiAgent(params: UseAiAgentParams) {
 
     try {
       const cfg = await getAiConfig();
-      const useFc = FC_PROVIDERS.has(cfg.provider);
+      const useFc = (await conversationModeForConfig(cfg)) === 'function_calling';
       if (useFc) await runAgentLoop(text, assistantId, sentIds);
       else await runLegacyTurn(text, assistantId, sentIds);
       setRetryCount(0);

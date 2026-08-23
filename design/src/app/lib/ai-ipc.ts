@@ -17,6 +17,27 @@ export interface AiConfig {
   model: string;
   api_key: string;
   base_url: string;
+  capabilities?: ProviderCapabilityDeclaration | null;
+}
+
+export interface ProviderCapabilityDeclaration {
+  chat_tools: boolean;
+  json_mode: boolean;
+  streaming_cancellation: boolean;
+  media_url_output: boolean;
+  chat_deadline_ms?: number | null;
+  flow_step_deadline_ms?: number | null;
+  media_fetch_deadline_ms?: number | null;
+}
+
+export interface ProviderCapability {
+  chatTools: boolean;
+  jsonMode: boolean;
+  streamingCancellation: boolean;
+  mediaUrlOutput: boolean;
+  chatDeadlineMs: number;
+  flowStepDeadlineMs: number;
+  mediaFetchDeadlineMs: number;
 }
 
 export type AiProviderConfig = AiConfig;
@@ -94,6 +115,10 @@ export async function getAiConfig(): Promise<AiConfig> {
 
 export async function setAiConfig(config: AiConfig): Promise<void> {
   return invoke<void>('set_ai_config', { config });
+}
+
+export async function getAiProviderCapability(config?: AiConfig): Promise<ProviderCapability> {
+  return invoke<ProviderCapability>('get_ai_provider_capability', { config: config ?? null });
 }
 
 export async function getAiImageConfig(): Promise<AiProviderConfig> {

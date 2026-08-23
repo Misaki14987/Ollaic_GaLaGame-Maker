@@ -18,6 +18,7 @@ import {
   type AiConfig,
   type AiProviderConfig,
   type AiValidationResult,
+  type ProviderCapabilityDeclaration,
   getAiConfig,
   setAiConfig,
   getAiImageConfig,
@@ -86,6 +87,7 @@ function configFromPreset(preset: ProviderPreset): AiProviderConfig {
     model: preset.defaultModel,
     api_key: '',
     base_url: preset.needsBaseUrl ? preset.defaultBaseUrl : '',
+    capabilities: null,
   };
 }
 
@@ -185,6 +187,9 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
       provider: value,
       model: preset.defaultModel,
       base_url: preset.needsBaseUrl ? (current.base_url || preset.defaultBaseUrl) : '',
+      capabilities: value === 'custom'
+        ? (current.capabilities ?? defaultCustomCapabilities())
+        : null,
     });
     setValidation(null);
     setVerifiedSaved(false);
@@ -203,7 +208,8 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
         && currentConfig.provider === testedConfig.provider
         && currentConfig.model === testedConfig.model
         && currentConfig.api_key === testedConfig.api_key
-        && currentConfig.base_url === testedConfig.base_url;
+        && currentConfig.base_url === testedConfig.base_url
+        && JSON.stringify(currentConfig.capabilities ?? null) === JSON.stringify(testedConfig.capabilities ?? null);
       if (!unchanged) return;
       setValidation(result);
       // A successful trial connection is an unambiguous "use this config".
@@ -326,6 +332,12 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
                           : '留空使用供应商默认地址'
                       }
                     />
+                    {config.provider === 'custom' && (
+                      <CustomCapabilityFields
+                        value={config.capabilities ?? defaultCustomCapabilities()}
+                        onChange={(capabilities) => updateChat({ capabilities })}
+                      />
+                    )}
                   </fieldset>
 
                   <ConnectionPanel
@@ -407,6 +419,51 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
         </div>
       </div>
     </div>
+  );
+}
+
+function defaultCustomCapabilities(): ProviderCapabilityDeclaration {
+  return {
+    chat_tools: false,
+    json_mode: false,
+    streaming_cancellation: false,
+    media_url_output: false,
+    chat_deadline_ms: 120_000,
+    flow_step_deadline_ms: 180_000,
+    media_fetch_deadline_ms: 30_000,
+  };
+}
+
+function CustomCapabilityFields({
+  value,
+  onChange,
+}: {
+  value: ProviderCapabilityDeclaration;
+  onChange: (value: ProviderCapabilityDeclaration) => void;
+}) {
+  const toggle = (key: keyof ProviderCapabilityDeclaration) =>
+    onChange({ ...value, [key]: !value[key] });
+  return (
+    <fieldset className="mt-4 space-y-3 border-t border-border pt-4">
+      <legend className="text-sm font-medium">接口能力声明</legend>
+      {([
+        ['chat_tools', '工具调用'],
+        ['json_mode', 'JSON 模式'],
+        ['streaming_cancellation', '可取消流式请求'],
+        ['media_url_output', '返回媒体下载 URL'],
+      ] as const).map(([key, label]) => (
+        <label key={key} className="flex items-center justify-between gap-4 text-sm">
+          <span>{label}</span>
+          <input
+            type="checkbox"
+            checked={Boolean(value[key])}
+            onChange={() => toggle(key)}
+            aria-label={label}
+            className="h-4 w-4"
+          />
+        </label>
+      ))}
+    </fieldset>
   );
 }
 

@@ -7,6 +7,7 @@ vi.mock('../lib/ai-ipc', () => ({
   aiChatTurn: vi.fn(),
   appendAiAgentTrace: vi.fn(async () => {}),
   getAiConfig: vi.fn(async () => ({ provider: 'openai', model: 'gpt-4o-mini', apiKey: '', baseUrl: '' })),
+  getAiProviderCapability: vi.fn(async () => ({ chatTools: true })),
 }));
 
 vi.mock('../lib/ai-tools', () => ({

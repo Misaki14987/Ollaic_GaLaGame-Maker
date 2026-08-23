@@ -188,6 +188,7 @@ fn main() {
             // AI
             ai::commands::get_ai_config,
             ai::commands::set_ai_config,
+            ai::commands::get_ai_provider_capability,
             ai::commands::get_ai_image_config,
             ai::commands::set_ai_image_config,
             ai::commands::get_ai_tts_config,

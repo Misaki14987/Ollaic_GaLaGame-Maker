@@ -1,4 +1,7 @@
 use super::config::{self, AiConfig, AiProviderConfig};
+use super::provider_capability::{
+    capability_for_config, ProviderCapability, RequiredCapability,
+};
 use base64::Engine;
 use futures::{SinkExt, StreamExt};
 use genai::adapter::AdapterKind;
@@ -268,7 +271,13 @@ pub fn get_ai_config() -> AiConfig {
 
 #[tauri::command]
 pub fn set_ai_config(config: AiConfig) -> Result<(), String> {
+    capability_for_config(&config)?;
     config::save_config(&config)
+}
+
+#[tauri::command]
+pub fn get_ai_provider_capability(config: Option<AiConfig>) -> Result<ProviderCapability, String> {
+    capability_for_config(&config.unwrap_or_else(config::load_config))
 }
 
 #[tauri::command]
@@ -701,6 +710,7 @@ pub async fn ai_chat_stream(
 ) -> Result<(), String> {
     let cfg = config::load_config();
     validate_config_basics(&cfg)?;
+    capability_for_config(&cfg)?;
 
     let mut chat_messages: Vec<ChatMessage> = Vec::new();
     let mut sys_text = config::default_system_prompt();
@@ -819,6 +829,10 @@ pub async fn ai_chat_turn(
 ) -> Result<AiTurnResult, String> {
     let cfg = config::load_config();
     validate_config_basics(&cfg)?;
+    let capability = capability_for_config(&cfg)?;
+    if !tools.is_empty() {
+        capability.require(RequiredCapability::ChatTools)?;
+    }
 
     let mut chat_messages: Vec<ChatMessage> = Vec::new();
     if let Some(ctx) = character_context {
@@ -879,12 +893,13 @@ pub(crate) async fn complete_agent_text(
     if validate_config_basics(&cfg).is_err() {
         return Ok(None);
     }
+    let capability = capability_for_config(&cfg)?;
     let request = ChatRequest::new(vec![
         ChatMessage::system(system_prompt),
         ChatMessage::user(user_prompt),
     ]);
     let endpoint = effective_endpoint(&cfg);
-    let options = if matches!(cfg.provider.as_str(), "openai" | "deepseek") {
+    let options = if capability.json_mode {
         chat_debug_options().with_response_format(ChatResponseFormat::JsonMode)
     } else {
         chat_debug_options()
@@ -2210,6 +2225,7 @@ fn log_provider_event(
         model: model.to_string(),
         api_key: cfg.api_key.clone(),
         base_url: cfg.base_url.clone(),
+        capabilities: None,
     };
     log_ai_event(action, &chat_cfg, endpoint, success, message);
 }
