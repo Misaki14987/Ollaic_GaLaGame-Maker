@@ -70,6 +70,7 @@ const RUN_STATUS: Record<RunStatus, string> = {
   completed: '已完成',
   failed: '失败',
   cancelled: '已停止',
+  timeout: '已超时',
 };
 
 export interface FlowBoardProps {
