@@ -82,6 +82,19 @@ describe('detectConflicts', () => {
     await expect(detectConflicts(set, ctx)).resolves.toEqual(['other.txt']);
   });
 
+  it('aborts when a non-current scene cannot be read, even with an empty baseline', async () => {
+    const set = {
+      edits: [makeSceneEdit('other.txt', '', 'B:new;')],
+    } as unknown as PendingChangeSet;
+    const ctx = makeCtx({
+      readSceneContent: async () => {
+        throw new Error('permission denied');
+      },
+    });
+
+    await expect(detectConflicts(set, ctx)).rejects.toThrow('permission denied');
+  });
+
   it('detects the current scene edited during preview', async () => {
     const set = {
       edits: [makeSceneEdit('start.txt', 'A:start;', 'A:start; B:new;')],

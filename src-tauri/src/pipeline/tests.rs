@@ -6,15 +6,17 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Barrier, Mutex as StdMutex};
 
-use tokio::sync::{Mutex as AsyncMutex, Notify};
+use tokio::sync::{oneshot, Mutex as AsyncMutex, Notify};
 use tokio::time::{sleep, timeout, Duration};
 
 use crate::agents::{Agent, AgentContext, AgentError, AgentOutput, AgentRegistry};
 use crate::pipeline::dsl::{default_recipe, FlowRecipe, RecipeError, StepDef, StepKind};
 use crate::pipeline::events::{PipelineEvent, RecordingSink};
-use crate::pipeline::scheduler::{cleanup_rollback_snapshots, project_has_story_content, Pipeline};
+use crate::pipeline::scheduler::{
+    cleanup_rollback_snapshots, project_has_story_content, Pipeline, DEFAULT_STEP_TIMEOUT,
+};
 use crate::pipeline::state::{Clock, RunStatus, StepRunHistory, StepStatus, SystemClock};
 use crate::story_plan::types::ChapterPlan;
 
@@ -82,6 +84,25 @@ impl Agent for HangingAgent {
         &'a self,
         _ctx: &'a AgentContext<'a>,
     ) -> Pin<Box<dyn Future<Output = Result<AgentOutput, AgentError>> + Send + 'a>> {
+        Box::pin(std::future::pending())
+    }
+}
+
+/// Blocks synchronously inside `Agent::run`, after StepStarted but before the
+/// scheduler can finish constructing its cancellation wait branch.
+struct RegistrationRaceAgent {
+    entered: StdMutex<Option<oneshot::Sender<()>>>,
+    release: Arc<Barrier>,
+}
+impl Agent for RegistrationRaceAgent {
+    fn run<'a>(
+        &'a self,
+        _ctx: &'a AgentContext<'a>,
+    ) -> Pin<Box<dyn Future<Output = Result<AgentOutput, AgentError>> + Send + 'a>> {
+        if let Some(sender) = self.entered.lock().unwrap().take() {
+            let _ = sender.send(());
+        }
+        self.release.wait();
         Box::pin(std::future::pending())
     }
 }
@@ -702,6 +723,47 @@ async fn step_timeout_terminates_run_as_timeout() {
         .as_deref()
         .unwrap()
         .contains("timed out"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn production_constructor_times_out_a_hanging_agent() {
+    let project = fresh_project("production_timeout");
+    let sink = Arc::new(RecordingSink::new());
+    let clock = StepClock::new();
+    let mut agents = AgentRegistry::with_defaults();
+    agents.register(StepKind::Plan, Box::new(HangingAgent));
+    let pipeline = Arc::new(Pipeline::with_agents_and_matting(
+        agents,
+        Err("model unavailable in test".to_string()),
+    ));
+    let recipe = FlowRecipe::new().step(StepDef::new("plan", StepKind::Plan));
+    let handle = pipeline
+        .create_run(
+            &project,
+            "run_production_timeout",
+            "brief",
+            &recipe,
+            &clock,
+            sink.as_ref(),
+        )
+        .unwrap();
+    let task = {
+        let pipeline = pipeline.clone();
+        let project = project.clone();
+        let handle = handle.clone();
+        let sink = sink.clone();
+        tokio::spawn(async move {
+            pipeline
+                .execute(&project, handle, sink.as_ref(), &SystemClock)
+                .await;
+        })
+    };
+
+    tokio::task::yield_now().await;
+    tokio::time::advance(DEFAULT_STEP_TIMEOUT).await;
+    task.await.unwrap();
+
+    assert_eq!(handle.state().lock().await.status, RunStatus::Timeout);
 }
 
 // ---------- scheduler: crash-resume ----------
@@ -1508,6 +1570,59 @@ async fn stop_truly_aborts_the_in_flight_agent() {
         .unwrap()
         .synopsis
         .is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn stop_between_step_started_and_cancel_wait_registration_is_not_lost() {
+    let project = fresh_project("stop_registration_race");
+    let sink = Arc::new(RecordingSink::new());
+    let clock = StepClock::new();
+    let release = Arc::new(Barrier::new(2));
+    let (entered_tx, entered_rx) = oneshot::channel();
+    let mut agents = AgentRegistry::with_defaults();
+    agents.register(
+        StepKind::Plan,
+        Box::new(RegistrationRaceAgent {
+            entered: StdMutex::new(Some(entered_tx)),
+            release: release.clone(),
+        }),
+    );
+    let pipeline = Arc::new(Pipeline::new(agents));
+    let recipe = FlowRecipe::new().step(StepDef::new("plan", StepKind::Plan));
+    let handle = pipeline
+        .create_run(
+            &project,
+            "run_stop_registration_race",
+            "brief",
+            &recipe,
+            &clock,
+            sink.as_ref(),
+        )
+        .unwrap();
+    let task = {
+        let pipeline = pipeline.clone();
+        let project = project.clone();
+        let handle = handle.clone();
+        let sink = sink.clone();
+        tokio::spawn(async move {
+            pipeline
+                .execute(&project, handle, sink.as_ref(), &SystemClock)
+                .await;
+        })
+    };
+
+    timeout(Duration::from_secs(1), entered_rx)
+        .await
+        .expect("agent did not reach the pre-registration gate")
+        .unwrap();
+    handle.stop(&project, sink.as_ref(), &clock).await.unwrap();
+    release.wait();
+
+    timeout(Duration::from_secs(1), task)
+        .await
+        .expect("stop notification was lost before cancellation wait registration")
+        .unwrap();
+    assert_eq!(handle.state().lock().await.status, RunStatus::Cancelled);
 }
 
 #[tokio::test]

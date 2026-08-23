@@ -20,7 +20,7 @@ pub fn serialize_scene(nodes: Vec<WebGalNode>) -> Result<String, String> {
 #[tauri::command]
 pub fn load_scene(path: String) -> Result<Vec<WebGalNode>, String> {
     let path = PathBuf::from(&path);
-    let source = fs::read_to_string(&path)
+    let source = crate::json_store::read_to_string_recovering(&path)
         .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
     Ok(parser::parse_script(&source))
 }
@@ -45,7 +45,8 @@ pub fn save_scene(path: String, nodes: Vec<WebGalNode>) -> Result<(), String> {
 #[tauri::command]
 pub fn read_file_text(path: String) -> Result<String, String> {
     let path = PathBuf::from(&path);
-    fs::read_to_string(&path).map_err(|e| format!("Failed to read {}: {}", path.display(), e))
+    crate::json_store::read_to_string_recovering(&path)
+        .map_err(|e| format!("Failed to read {}: {}", path.display(), e))
 }
 
 /// Write raw text content to a file (used to persist scene header comment edits).
@@ -142,6 +143,23 @@ mod tests {
         residue.sort();
         assert_eq!(residue, vec!["start.txt".to_string()]);
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn scene_read_restores_a_missing_primary_from_backup() {
+        let dir =
+            std::env::temp_dir().join(format!("ollaic_scene_backup_read_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("start.txt");
+        std::fs::write(crate::json_store::backup_path(&path), "A:old;").unwrap();
+
+        assert_eq!(
+            read_file_text(path.to_string_lossy().into_owned()).unwrap(),
+            "A:old;"
+        );
+        assert!(path.exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

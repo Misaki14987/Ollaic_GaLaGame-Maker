@@ -256,11 +256,11 @@ pub fn read_project_memory(project_path: String) -> Result<Option<ProjectMemory>
     let path = PathBuf::from(&project_path)
         .join("game")
         .join("ai-memory.json");
-    if !path.exists() {
+    if !path.exists() && !crate::json_store::backup_path(&path).exists() {
         return Ok(None);
     }
-    let text =
-        fs::read_to_string(&path).map_err(|e| format!("Failed to read ai-memory.json: {}", e))?;
+    let text = crate::json_store::read_to_string_recovering(&path)
+        .map_err(|e| format!("Failed to read ai-memory.json: {}", e))?;
     let memory = serde_json::from_str::<ProjectMemory>(&text)
         .map_err(|e| format!("Failed to parse ai-memory.json: {}", e))?;
     Ok(Some(memory))
@@ -1417,6 +1417,27 @@ fn add_dir_to_zip<W: Write + std::io::Seek>(
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn project_memory_read_restores_a_missing_primary_from_backup() {
+        let tmp =
+            std::env::temp_dir().join(format!("ollaic_memory_backup_read_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(tmp.join("game")).unwrap();
+        let path = tmp.join("game/ai-memory.json");
+        fs::write(
+            crate::json_store::backup_path(&path),
+            r#"{"worldSetting":"old","writingStyle":"style","userPreferences":"prefs","updatedAt":"then"}"#,
+        )
+        .unwrap();
+
+        let memory = read_project_memory(tmp.to_string_lossy().into_owned())
+            .unwrap()
+            .unwrap();
+        assert_eq!(memory.world_setting, "old");
+        assert!(path.exists());
+        let _ = fs::remove_dir_all(&tmp);
+    }
 
     #[test]
     fn default_config_enables_appreciation_gallery() {

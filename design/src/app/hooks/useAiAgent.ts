@@ -517,7 +517,10 @@ export function useAiAgent(params: UseAiAgentParams) {
           const edit = stageCreateCharacterEdit(staged, stagingCtx);
           createCharEdits.set(edit.draft.name, edit);
         } else if (staged.tool === 'plan_character_sprites') {
-          const base = characters.find((c) =>
+          const draftCharacters = stagingCtx.draft
+            ? Array.from(stagingCtx.draft.characters.values())
+            : [];
+          const base = [...characters, ...draftCharacters].find((c) =>
             c.id === staged.character
             || c.name === staged.character
             || (c.aliases ?? []).includes(staged.character),
@@ -671,6 +674,34 @@ export function useAiAgent(params: UseAiAgentParams) {
         finalText = turnText
           || `已达到最大工具调用轮数（${MAX_TURNS}）仍未生成可确认的修改。工具调用轨迹：${recent || '无'}。`;
       }
+    }
+
+    // A resource created in this turn has no durable identity/path yet. Fold
+    // all dependent edits into the create request so acceptance never tries to
+    // update a temporary character id or save a scene before it exists.
+    for (const [file, createEdit] of createSceneEdits) {
+      const sceneEdit = sceneEdits.get(file);
+      if (!sceneEdit) continue;
+      createSceneEdits.set(file, {
+        ...createEdit,
+        initialContent: sceneEdit.afterContent,
+        initialNodes: sceneEdit.afterNodes,
+      });
+      sceneEdits.delete(file);
+    }
+    for (const [name, createEdit] of createCharEdits) {
+      const characterEdit = charEdits.get(createEdit.draft.id);
+      if (!characterEdit) continue;
+      createCharEdits.set(name, {
+        ...createEdit,
+        draft: characterEdit.after,
+        changedFields: Array.from(new Set([
+          ...createEdit.changedFields,
+          ...characterEdit.changedFields,
+        ])),
+      });
+      charEdits.delete(createEdit.draft.id);
+      stagingCtx.draft?.characters.set(createEdit.draft.id, characterEdit.after);
     }
 
     const edits: ChangeEdit[] = [
@@ -918,16 +949,16 @@ export function useAiAgent(params: UseAiAgentParams) {
           assetMetadataBefore.set(edit, before);
           if (after !== before) await saveAssetMetadata(projectPath, after);
         } else {
-          // create_scene: make the file, then set its header if provided.
-          createdScenePaths.push(await createScene(projectPath, edit.file));
-          if (edit.chapter || edit.outline) {
-            const path = await getScenePath(projectPath, edit.file);
-            await updateSceneHeader(path, { chapter: edit.chapter, outline: edit.outline });
-          }
+          // create_scene owns its same-turn content. Record the returned path
+          // before any follow-up write so every failure can remove the file.
+          const path = await createScene(projectPath, edit.file);
+          createdScenePaths.push(path);
           if (edit.initialNodes) {
-            const path = await getScenePath(projectPath, edit.file);
             await saveScene(path, edit.initialNodes);
             await syncSceneBackgroundCard(edit.file, edit.initialNodes);
+          }
+          if (edit.chapter || edit.outline) {
+            await updateSceneHeader(path, { chapter: edit.chapter, outline: edit.outline });
           }
           createdScene = true;
         }
@@ -1000,16 +1031,27 @@ export function useAiAgent(params: UseAiAgentParams) {
     if (!pendingChangeSet || pendingChangeSet.status !== 'pending' || !projectPath) return;
     // Confirm no edited resource changed since staging: the open scene's live
     // buffer, other scenes' on-disk content, characters, and memory.
-    const conflicts = await detectConflicts(pendingChangeSet, {
-      currentSceneName,
-      currentScriptSource: scriptSource,
-      readSceneContent: async (file) => {
-        const path = await getScenePath(projectPath, file);
-        return readFileText(path);
-      },
-      getCharacter: (id) => characters.find((c) => c.id === id),
-      memory: memory ?? emptyProjectMemory(),
-    });
+    let conflicts: string[];
+    try {
+      conflicts = await detectConflicts(pendingChangeSet, {
+        currentSceneName,
+        currentScriptSource: scriptSource,
+        readSceneContent: async (file) => {
+          const path = await getScenePath(projectPath, file);
+          return readFileText(path);
+        },
+        getCharacter: (id) => characters.find((c) => c.id === id),
+        memory: memory ?? emptyProjectMemory(),
+      });
+    } catch (e) {
+      setStatus('error');
+      setError({
+        kind: 'other',
+        retryable: true,
+        message: `无法读取场景以确认修改是否冲突，项目尚未写入。请检查文件后重试：${String(e)}`,
+      });
+      return;
+    }
     if (conflicts.length > 0) {
       setStatus('conflict');
       return;

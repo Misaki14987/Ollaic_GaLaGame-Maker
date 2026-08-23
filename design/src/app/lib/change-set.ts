@@ -886,7 +886,7 @@ export async function detectConflicts(
         const live = ctx.currentScriptSource;
         if (live !== edit.afterContent && live !== edit.beforeContent) conflicts.push(edit.file);
       } else {
-        const current = await ctx.readSceneContent(edit.file).catch(() => '');
+        const current = await ctx.readSceneContent(edit.file);
         if (current !== edit.beforeContent) conflicts.push(edit.file);
       }
     } else if (edit.kind === 'character') {
