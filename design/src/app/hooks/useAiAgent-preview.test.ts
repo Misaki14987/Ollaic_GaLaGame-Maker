@@ -28,6 +28,7 @@ vi.mock('../lib/character-ipc', () => ({
   createCharacter: vi.fn(async () => ({ id: 'c-new' })),
   updateCharacter: vi.fn(async () => {}),
   deleteCharacter: vi.fn(async () => {}),
+  listCharacters: vi.fn(async () => []),
 }));
 
 vi.mock('../lib/webgal-ipc', () => ({
