@@ -70,6 +70,7 @@ const RUN_STATUS: Record<RunStatus, string> = {
   completed: '已完成',
   failed: '失败',
   cancelled: '已停止',
+  timeout: '已超时',
 };
 
 export interface FlowBoardProps {
@@ -265,7 +266,7 @@ export function FlowBoard({ projectPath, onOpenArtifact }: FlowBoardProps) {
   }, [refreshAssetQueue, refreshPlan]);
 
   const refresh = useCallback(async (runId: string) => {
-    const snapshot = await pipelineGetState(runId);
+    const snapshot = await pipelineGetState(runId, projectPath);
     if (!snapshot) return;
     dispatch({ type: 'stateHydrated', state: snapshot });
     setEvents((current) => current.length ? current : recordsFromSnapshot(snapshot));
@@ -295,7 +296,7 @@ export function FlowBoard({ projectPath, onOpenArtifact }: FlowBoardProps) {
       let live = false;
       if (latest.status === 'running' || latest.status === 'paused') {
         try {
-          const current = await pipelineGetState(latest.runId);
+          const current = await pipelineGetState(latest.runId, projectPath);
           if (request !== loadRequestRef.current) return;
           if (current) {
             snapshot = current;
@@ -451,7 +452,7 @@ export function FlowBoard({ projectPath, onOpenArtifact }: FlowBoardProps) {
     const runId = runIdRef.current;
     if (!runId) return;
     await runCommand(async () => {
-      await pipelinePause(runId);
+      await pipelinePause(runId, projectPath);
       await refresh(runId);
     });
   }, [refresh, runCommand]);
@@ -464,7 +465,7 @@ export function FlowBoard({ projectPath, onOpenArtifact }: FlowBoardProps) {
         await pipelineResumeRun(projectPath, runId);
         setDetached(false);
       } else {
-        await pipelineResume(runId);
+        await pipelineResume(runId, projectPath);
       }
       await subscribe(runId);
       await refresh(runId);
@@ -486,7 +487,7 @@ export function FlowBoard({ projectPath, onOpenArtifact }: FlowBoardProps) {
     const runId = runIdRef.current;
     if (!runId) return;
     await runCommand(async () => {
-      await pipelineStop(runId);
+      await pipelineStop(runId, projectPath);
       await refresh(runId);
     });
   }, [refresh, runCommand]);
@@ -550,7 +551,7 @@ export function FlowBoard({ projectPath, onOpenArtifact }: FlowBoardProps) {
     const runId = runIdRef.current;
     if (!runId) return;
     await runCommand(async () => {
-      await pipelineSkipStep(runId, stepId);
+      await pipelineSkipStep(runId, stepId, projectPath);
       await refresh(runId);
     });
   }, [refresh, runCommand]);
@@ -559,7 +560,7 @@ export function FlowBoard({ projectPath, onOpenArtifact }: FlowBoardProps) {
     const runId = runIdRef.current;
     if (!runId) return;
     await runCommand(async () => {
-      await pipelineUpdateDependencies(runId, stepId, dependsOn);
+      await pipelineUpdateDependencies(runId, stepId, dependsOn, projectPath);
       await refresh(runId);
     });
   }, [refresh, runCommand]);
@@ -604,8 +605,9 @@ export function FlowBoard({ projectPath, onOpenArtifact }: FlowBoardProps) {
     source: dependency,
     target: step.id,
     animated: step.status === 'running',
+    deletable: state.runStatus === 'paused' && !detached,
     style: { strokeWidth: 1.5 },
-  }))), [state.steps]);
+  }))), [detached, state.runStatus, state.steps]);
 
   const selectedStep = state.steps.find((step) => step.id === selectedStepId) ?? null;
   const running = state.runStatus === 'running';
@@ -784,8 +786,7 @@ export function FlowBoard({ projectPath, onOpenArtifact }: FlowBoardProps) {
                 onConnect={connect}
                 onEdgesDelete={deleteEdges}
                 nodesConnectable={paused && !detached}
-                edgesReconnectable={false}
-                edgesDeletable={paused && !detached}
+                edgesUpdatable={false}
                 minZoom={0.35}
                 maxZoom={1.75}
                 onlyRenderVisibleElements

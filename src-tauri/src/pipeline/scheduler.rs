@@ -36,6 +36,10 @@ pub struct RunHandle {
     pause_after_step: AtomicBool,
     cancelled: Arc<AtomicBool>,
     asset_binding_gate: Arc<Mutex<()>>,
+    /// Per-run deadline snapshot, taken at run-creation time from the
+    /// Provider capability that was live then. Once a Run is in flight,
+    /// subsequent config edits must not change its deadline mid-flight.
+    pub step_timeout: Option<Duration>,
 }
 
 impl RunHandle {
@@ -101,6 +105,11 @@ pub struct Pipeline {
     agents: AgentRegistry,
     figure_matting_model: Result<std::path::PathBuf, String>,
     step_timeout: Option<Duration>,
+    #[cfg(test)]
+    hanging_asset_queue_started: Option<Arc<tokio::sync::Semaphore>>,
+    #[cfg(test)]
+    cancel_wait_registration_hook:
+        Option<(Arc<tokio::sync::Semaphore>, Arc<tokio::sync::Semaphore>)>,
 }
 
 struct ConfiguredAssetGenerator {
@@ -372,6 +381,10 @@ impl Pipeline {
             agents,
             figure_matting_model,
             step_timeout: Some(DEFAULT_STEP_TIMEOUT),
+            #[cfg(test)]
+            hanging_asset_queue_started: None,
+            #[cfg(test)]
+            cancel_wait_registration_hook: None,
         }
     }
 
@@ -379,6 +392,25 @@ impl Pipeline {
     /// the run terminates as `RunStatus::Timeout` instead of hanging forever.
     pub fn with_step_timeout(mut self, timeout: Duration) -> Self {
         self.step_timeout = Some(timeout);
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_hanging_asset_queue_for_test(
+        mut self,
+        started: Arc<tokio::sync::Semaphore>,
+    ) -> Self {
+        self.hanging_asset_queue_started = Some(started);
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_cancel_wait_registration_hook_for_test(
+        mut self,
+        entered: Arc<tokio::sync::Semaphore>,
+        release: Arc<tokio::sync::Semaphore>,
+    ) -> Self {
+        self.cancel_wait_registration_hook = Some((entered, release));
         self
     }
 
@@ -442,6 +474,7 @@ impl Pipeline {
             pause_after_step: AtomicBool::new(false),
             cancelled: Arc::new(AtomicBool::new(false)),
             asset_binding_gate: Arc::new(Mutex::new(())),
+            step_timeout,
         }))
     }
 
@@ -867,21 +900,56 @@ impl Pipeline {
         };
         let result = if agent_key.as_deref() == Some("assetQueue") {
             let run_id = handle.state.lock().await.run_id.clone();
-            let generator = Arc::new(ConfiguredAssetGenerator {
+            let generator: Arc<dyn AssetGenerator> = Arc::new(ConfiguredAssetGenerator {
                 local_fallback: allow_local_fallback,
                 cancelled: handle.cancelled.clone(),
                 figure_matting_model: self.figure_matting_model.clone(),
             });
-            match crate::asset_queue::run_queue_cancellable(
-                project_path,
-                &run_id,
-                &plan,
-                generator,
-                handle.cancelled.clone(),
-                handle.asset_binding_gate.clone(),
-            )
-            .await
-            {
+            let cancel_wait = handle.cancel_notify.notified();
+            tokio::pin!(cancel_wait);
+            cancel_wait.as_mut().enable();
+            if handle.cancelled.load(Ordering::SeqCst) {
+                return;
+            }
+            let queue_run = async {
+                #[cfg(test)]
+                if let Some(started) = &self.hanging_asset_queue_started {
+                    started.add_permits(1);
+                    return std::future::pending().await;
+                }
+                crate::asset_queue::run_queue_cancellable(
+                    project_path,
+                    &run_id,
+                    &plan,
+                    generator,
+                    handle.cancelled.clone(),
+                    handle.asset_binding_gate.clone(),
+                )
+                .await
+            };
+            tokio::pin!(queue_run);
+            if handle.cancelled.load(Ordering::SeqCst) {
+                return;
+            }
+            let timeout_sleep = async {
+                match self.step_timeout {
+                    Some(timeout) => tokio::time::sleep(timeout).await,
+                    None => std::future::pending::<()>().await,
+                }
+            };
+            let queue_result = tokio::select! {
+                biased;
+                _ = &mut cancel_wait => return,
+                result = &mut queue_run => result,
+                _ = timeout_sleep => {
+                    if let Some(timeout) = self.step_timeout {
+                        self.fail_step_timeout(project_path, handle, sink, clock, id, timeout)
+                            .await;
+                    }
+                    return;
+                }
+            };
+            match queue_result {
                 Ok(queue) => {
                     let failed = queue
                         .tasks
@@ -932,6 +1000,15 @@ impl Pipeline {
         } else {
             match self.agents.get(kind, agent_key.as_deref()) {
                 Some(agent) => {
+                    #[cfg(test)]
+                    if let Some((entered, release)) = &self.cancel_wait_registration_hook {
+                        entered.add_permits(1);
+                        release
+                            .acquire()
+                            .await
+                            .expect("cancel registration test hook closed")
+                            .forget();
+                    }
                     let cancel_wait = handle.cancel_notify.notified();
                     tokio::pin!(cancel_wait);
                     // notify_waiters() stores no permit. Register this waiter
@@ -1142,8 +1219,16 @@ impl Pipeline {
         step_id: String,
         error: String,
     ) {
-        self.fail_step_with_status(project_path, handle, sink, clock, step_id, error, RunStatus::Failed)
-            .await;
+        self.fail_step_with_status(
+            project_path,
+            handle,
+            sink,
+            clock,
+            step_id,
+            error,
+            RunStatus::Failed,
+        )
+        .await;
     }
 
     async fn fail_step_timeout(
@@ -1156,8 +1241,16 @@ impl Pipeline {
         timeout: Duration,
     ) {
         let error = format!("step timed out after {:?}", timeout);
-        self.fail_step_with_status(project_path, handle, sink, clock, step_id, error, RunStatus::Timeout)
-            .await;
+        self.fail_step_with_status(
+            project_path,
+            handle,
+            sink,
+            clock,
+            step_id,
+            error,
+            RunStatus::Timeout,
+        )
+        .await;
     }
 
     async fn fail_step_with_status(

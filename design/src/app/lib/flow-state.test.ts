@@ -88,6 +88,7 @@ describe('flow-state reducer', () => {
       startedAt: 10,
       updatedAt: 20,
       pinned: true,
+      allowLocalFallback: false,
       steps: [
         {
           def: { id: 'brief', kind: 'plan', dependsOn: [], agent: null, prompt: '' },

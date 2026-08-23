@@ -252,7 +252,10 @@ describe('FlowBoard', () => {
     await user.click(screen.getByRole('button', { name: '创建流程' }));
     await user.click(await screen.findByRole('button', { name: '运行' }));
 
-    expect(mockedInvoke).toHaveBeenCalledWith('pipeline_resume', { runId: 'run_1' });
+    expect(mockedInvoke).toHaveBeenCalledWith('pipeline_resume', {
+      runId: 'run_1',
+      projectPath: '/tmp/proj',
+    });
   });
 
   it('switches to pause/resume controls while running and paused', async () => {
@@ -304,7 +307,10 @@ describe('FlowBoard', () => {
       projectPath: '/tmp/proj',
       runId: 'run_1',
     });
-    expect(mockedInvoke).not.toHaveBeenCalledWith('pipeline_resume', { runId: 'run_1' });
+    expect(mockedInvoke).not.toHaveBeenCalledWith('pipeline_resume', {
+      runId: 'run_1',
+      projectPath: '/tmp/proj',
+    });
   });
 
   it('recognizes a run that is still live in the current process', async () => {
@@ -318,7 +324,10 @@ describe('FlowBoard', () => {
 
     await user.click(await screen.findByRole('button', { name: '运行' }));
 
-    expect(mockedInvoke).toHaveBeenCalledWith('pipeline_resume', { runId: 'run_1' });
+    expect(mockedInvoke).toHaveBeenCalledWith('pipeline_resume', {
+      runId: 'run_1',
+      projectPath: '/tmp/proj',
+    });
     expect(mockedInvoke).not.toHaveBeenCalledWith('pipeline_resume_run', expect.anything());
   });
 
@@ -373,6 +382,7 @@ describe('FlowBoard', () => {
       runId: 'run_1',
       stepId: 'outline',
       dependsOn: [],
+      projectPath: '/tmp/proj',
     });
   });
 
@@ -396,6 +406,7 @@ describe('FlowBoard', () => {
       runId: 'run_1',
       stepId: 'outline',
       dependsOn: ['plan'],
+      projectPath: '/tmp/proj',
     });
   });
 
@@ -419,7 +430,10 @@ describe('FlowBoard', () => {
 
     emit({ type: 'runResumed', runId: 'run_1' });
     await user.click(screen.getByRole('button', { name: '停止' }));
-    expect(mockedInvoke).toHaveBeenCalledWith('pipeline_stop', { runId: 'run_1' });
+    expect(mockedInvoke).toHaveBeenCalledWith('pipeline_stop', {
+      runId: 'run_1',
+      projectPath: '/tmp/proj',
+    });
   });
 
   it('edits a step prompt and reruns it from the inspector', async () => {
@@ -513,9 +527,10 @@ describe('FlowBoard', () => {
     current.runId = 'run_current';
     current.projectPath = '/tmp/current';
     current.prompt = 'current brief';
-    mockedInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+    mockedInvoke.mockImplementation((cmd, args) => {
       if (cmd === 'pipeline_list_runs') {
-        return (args?.projectPath === '/tmp/old' ? oldRuns : Promise.resolve([current])) as Promise<never>;
+        const projectPath = (args as { projectPath?: string } | undefined)?.projectPath;
+        return (projectPath === '/tmp/old' ? oldRuns : Promise.resolve([current])) as Promise<never>;
       }
       if (cmd === 'pipeline_get_plan') return Promise.resolve(null as never);
       return Promise.resolve(undefined);
