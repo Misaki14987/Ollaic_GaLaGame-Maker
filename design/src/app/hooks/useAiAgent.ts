@@ -11,16 +11,17 @@ import {
   type AiUpload,
   type AiUploadContent,
 } from '../lib/ai-uploads-ipc';
-import { listAllAssets, type AssetInfo } from '../lib/assets-ipc';
+import { listAllAssets, loadProjectAssetMetadata, type AssetInfo, type AssetMetadata } from '../lib/assets-ipc';
 import {
   extractSceneBackgroundAssets,
-  loadAssetMetadata,
-  saveAssetMetadata,
-  type AssetMetadata,
   syncSceneCardsFromBackgrounds,
 } from '../lib/asset-metadata';
-import { createCharacter, deleteCharacter, updateCharacter } from '../lib/character-ipc';
 import type { Character } from '../lib/character-types';
+import {
+  applyChangeSet,
+  type ApplyChangeSetRequest,
+  type ChangeSetAdapter,
+} from '../lib/change-set-ipc';
 import {
   describeEdit,
   stageCharacterEdit,
@@ -64,7 +65,7 @@ import {
   truncateContextMessages,
   type MissingAssetIssue,
 } from '../lib/story-agent';
-import { createScene, deleteScene, getScenePath, listScenes, parseScene, readFileText, saveScene, sceneDisplayName, updateSceneHeader, type SceneHeader } from '../lib/webgal-ipc';
+import { getScenePath, listScenes, parseScene, readFileText, sceneDisplayName, serializeSceneHeader, type SceneHeader } from '../lib/webgal-ipc';
 import type { WebGalNode } from '../lib/webgal-types';
 import { useChatSession, type AssistantStep, type ChatAttachment, type ChatMessage, type StepToolCall } from './useChatSession';
 
@@ -149,6 +150,16 @@ interface UseAiAgentParams {
   onScenesChanged?: () => void;
   /** Called after accepting a change set that creates or updates characters. */
   onCharactersChanged?: () => void;
+  /** Typed T01 adapter; injectable so hook tests exercise the real commit seam. */
+  changeSetAdapter?: ChangeSetAdapter;
+  /** Freeze editor-owned scene saves before a commit request is prepared. */
+  onCommitStart?: (sceneFiles: string[]) => void | Promise<void>;
+  /** Release editor-owned scene saves after any commit outcome. */
+  onCommitSettled?: () => void;
+  /** Return an unsaved non-current editor draft for conflict detection. */
+  readSceneDraft?: (file: string) => Promise<string | undefined>;
+  /** Reconcile the current Scene synchronously before autosave is released. */
+  reconcileCurrentScene?: (edit: SceneEdit) => void;
 }
 
 function buildCharacterContext(chars: Character[]): string {
@@ -239,6 +250,23 @@ function applyAssetPlanEdit(metadata: AssetMetadata, edit: AssetPlanEdit): Asset
   return changed ? { ...metadata, sceneCards, cgCards } : metadata;
 }
 
+function persistentCharacterId(): string {
+  const randomId = globalThis.crypto?.randomUUID?.()
+    ?? `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+  return `char_${randomId.replace(/-/g, '')}`;
+}
+
+function remapCharacterIds(character: Character, ids: Map<string, string>): Character {
+  return {
+    ...character,
+    id: ids.get(character.id) ?? character.id,
+    relations: character.relations.map((relation) => ({
+      ...relation,
+      targetId: ids.get(relation.targetId) ?? relation.targetId,
+    })),
+  };
+}
+
 async function writeAgentTrace(trace: AiAgentTrace): Promise<void> {
   try {
     await appendAiAgentTrace(trace);
@@ -269,6 +297,11 @@ export function useAiAgent(params: UseAiAgentParams) {
     pushHistory,
     onScenesChanged,
     onCharactersChanged,
+    changeSetAdapter = applyChangeSet,
+    onCommitStart,
+    onCommitSettled,
+    readSceneDraft,
+    reconcileCurrentScene,
   } = params;
 
   const {
@@ -860,140 +893,173 @@ export function useAiAgent(params: UseAiAgentParams) {
     void sendPrompt(lastRequest.prompt, lastRequest.attachmentIds);
   }, [busy, cooldown, lastRequest, retryCount, sendPrompt]);
 
-  const syncSceneBackgroundCard = useCallback(async (sceneFile: string, sceneNodes: WebGalNode[]) => {
-    if (!projectPath) return;
-    try {
-      const backgroundAssets = (await listAllAssets(projectPath)).filter((asset) => asset.category === 'background');
-      const availableBackgrounds = new Set(backgroundAssets.map((asset) => asset.name));
-      const backgroundFilenames = extractSceneBackgroundAssets(sceneNodes);
-      if (backgroundFilenames.length === 0) return;
-      const metadata = await loadAssetMetadata(projectPath, projectId);
-      const next = syncSceneCardsFromBackgrounds(
-        metadata,
-        sceneFile,
-        backgroundFilenames,
-        availableBackgrounds,
-      );
-      if (next !== metadata) await saveAssetMetadata(projectPath, next);
-    } catch (e) {
-      console.warn('[asset] sync scene background card failed:', e);
-    }
-  }, [projectId, projectPath]);
-
-  // Persist all edits atomically (all-or-rollback). No conflict guard — callers
-  // decide whether the current scene's live buffer is allowed to differ.
+  // Convert every staged edit to one T01 request. Reads used to assemble JSON
+  // baselines are allowed here; the adapter is the only persistence boundary.
   const persistChangeSet = useCallback(async (set: PendingChangeSet) => {
     if (!projectPath) return;
     const currentSceneEdit = set.edits.find((e): e is SceneEdit => e.kind === 'scene' && e.file === currentSceneName);
-    // Create scenes last so a failure in earlier edits rarely leaves an orphan
-    // file; any scene file created before the failure is still removed during
-    // rollback (see createdScenePaths below). New characters can be deleted
-    // during rollback, so they do not need special ordering.
-    const ordered = [...set.edits].sort((a, b) => (a.kind === 'create_scene' ? 1 : 0) - (b.kind === 'create_scene' ? 1 : 0));
-    let createdScene = false;
-    let changedCharacters = false;
-    const applied: ChangeEdit[] = [];
-    const createdCharacterIds = new Map<CreateCharacterEdit, string>();
-    const assetMetadataBefore = new Map<AssetPlanEdit, AssetMetadata>();
-    const createdScenePaths: string[] = [];
+    const affectedSceneFiles = set.edits.flatMap((edit) =>
+      edit.kind === 'scene' || edit.kind === 'create_scene' ? [edit.file] : [],
+    );
     try {
-      for (const edit of ordered) {
+      await onCommitStart?.(affectedSceneFiles);
+      const request: ApplyChangeSetRequest = { projectPath, operations: [] };
+      for (const edit of set.edits) {
         if (edit.kind === 'scene') {
-          const path = await getScenePath(projectPath, edit.file);
-          await saveScene(path, edit.afterNodes);
-          await syncSceneBackgroundCard(edit.file, edit.afterNodes);
-        } else if (edit.kind === 'create_character') {
-          const saved = await createCharacter(projectPath, edit.draft);
-          createdCharacterIds.set(edit, saved.id);
-          changedCharacters = true;
-        } else if (edit.kind === 'character') {
-          await updateCharacter(projectPath, edit.after);
-          changedCharacters = true;
-        } else if (edit.kind === 'memory') {
-          await saveProjectMemory(projectPath, edit.after);
-          setMemory(edit.after);
-        } else if (edit.kind === 'asset_plan') {
-          const before = await loadAssetMetadata(projectPath, projectId);
-          const after = applyAssetPlanEdit(before, edit);
-          assetMetadataBefore.set(edit, before);
-          if (after !== before) await saveAssetMetadata(projectPath, after);
-        } else {
-          // create_scene: make the file, then set its header if provided.
-          createdScenePaths.push(await createScene(projectPath, edit.file));
-          if (edit.chapter || edit.outline) {
-            const path = await getScenePath(projectPath, edit.file);
-            await updateSceneHeader(path, { chapter: edit.chapter, outline: edit.outline });
-          }
-          if (edit.initialNodes) {
-            const path = await getScenePath(projectPath, edit.file);
-            await saveScene(path, edit.initialNodes);
-            await syncSceneBackgroundCard(edit.file, edit.initialNodes);
-          }
-          createdScene = true;
+          request.operations.push({
+            kind: 'scene',
+            file: edit.file,
+            baseline: edit.beforeContent,
+            content: edit.afterContent,
+          });
+        } else if (edit.kind === 'create_scene') {
+          request.operations.push({
+            kind: 'create_scene',
+            file: edit.file,
+            content: serializeSceneHeader({ chapter: edit.chapter, outline: edit.outline })
+              + (edit.initialContent ?? ''),
+          });
         }
-        applied.push(edit);
       }
-    } catch (e) {
-      // Roll back everything already written, in reverse order.
-      for (const edit of applied.reverse()) {
-        try {
-          if (edit.kind === 'scene') {
-            const path = await getScenePath(projectPath, edit.file);
-            await saveScene(path, edit.beforeNodes);
-          } else if (edit.kind === 'create_character') {
-            const savedId = createdCharacterIds.get(edit);
-            if (savedId) await deleteCharacter(projectPath, savedId);
-          } else if (edit.kind === 'character') {
-            await updateCharacter(projectPath, edit.before);
-          } else if (edit.kind === 'memory') {
-            await saveProjectMemory(projectPath, edit.before);
-            setMemory(edit.before);
-          } else if (edit.kind === 'asset_plan') {
-            const before = assetMetadataBefore.get(edit);
-            if (before) await saveAssetMetadata(projectPath, before);
-          }
-        } catch { /* best-effort rollback */ }
-      }
-      // create_scene has no beforeContent to restore, so its rollback is to
-      // remove the scene file it created before the failure.
-      for (const createdPath of createdScenePaths) {
-        try { await deleteScene(createdPath); } catch { /* best-effort rollback */ }
-      }
-      setStatus('error');
-      setError({ kind: 'other', retryable: false, message: `落盘失败，已回滚全部修改：${String(e)}` });
-      setPendingChangeSet({ ...set, status: 'failed' });
-      return;
-    }
 
-    if (currentSceneEdit) {
-      pushHistory(currentSceneEdit.beforeNodes);
-      setNodes(currentSceneEdit.afterNodes);
-      setScriptSource(currentSceneEdit.afterContent);
-      setSelectedNode(null);
-      setDirty(false);
-      setSaveStatus('saved');
+      const characterEdits = set.edits.filter(
+        (edit): edit is CharacterEdit | CreateCharacterEdit =>
+          edit.kind === 'character' || edit.kind === 'create_character',
+      );
+      if (characterEdits.length > 0) {
+        const baseline = { version: 1, characters };
+        const nextCharacters = [...characters];
+        const createdCharacterIds = new Map(
+          characterEdits.flatMap((edit) => edit.kind === 'create_character'
+            ? [[edit.draft.id, persistentCharacterId()] as const]
+            : []),
+        );
+        for (const edit of characterEdits) {
+          if (edit.kind === 'create_character') {
+            nextCharacters.push(remapCharacterIds(edit.draft, createdCharacterIds));
+          } else {
+            const after = remapCharacterIds(edit.after, createdCharacterIds);
+            const remappedId = createdCharacterIds.get(edit.id) ?? edit.id;
+            const index = nextCharacters.findIndex((character) => character.id === remappedId);
+            if (index >= 0) nextCharacters[index] = after;
+          }
+        }
+        request.operations.push({
+          kind: 'characters',
+          baseline,
+          document: { version: 1, characters: nextCharacters },
+        });
+      }
+
+      const memoryEdit = set.edits.find((edit): edit is MemoryEdit => edit.kind === 'memory');
+      if (memoryEdit) {
+        request.operations.push({
+          kind: 'project_memory',
+          baseline: memoryEdit.before,
+          memory: memoryEdit.after,
+        });
+      }
+
+      const scenesWithBackgrounds = set.edits.flatMap((edit) => {
+        if (edit.kind === 'scene') return [{ file: edit.file, nodes: edit.afterNodes }];
+        if (edit.kind === 'create_scene' && edit.initialNodes) return [{ file: edit.file, nodes: edit.initialNodes }];
+        return [];
+      }).filter(({ nodes: sceneNodes }) => extractSceneBackgroundAssets(sceneNodes).length > 0);
+      const assetPlanEdits = set.edits.filter((edit): edit is AssetPlanEdit => edit.kind === 'asset_plan');
+      if (assetPlanEdits.length > 0 || scenesWithBackgrounds.length > 0) {
+        const baseline = await loadProjectAssetMetadata(projectPath);
+        let metadata: AssetMetadata = baseline;
+        for (const edit of assetPlanEdits) metadata = applyAssetPlanEdit(metadata, edit);
+        const availableBackgrounds = new Set(
+          assets.filter((asset) => asset.category === 'background').map((asset) => asset.name),
+        );
+        for (const scene of scenesWithBackgrounds) {
+          metadata = syncSceneCardsFromBackgrounds(
+            metadata,
+            scene.file,
+            extractSceneBackgroundAssets(scene.nodes),
+            availableBackgrounds,
+          );
+        }
+        request.operations.push({ kind: 'asset_metadata', baseline, metadata });
+      }
+
+      const result = await changeSetAdapter(request);
+      if (result.status === 'conflict') {
+        setStatus('conflict');
+        setError(null);
+        return;
+      }
+      if (result.status === 'failed-and-rolled-back') {
+        setStatus('error');
+        setError({
+          kind: 'other',
+          retryable: true,
+          message: `提交失败，后端已回滚全部修改：${result.message}`,
+        });
+        return;
+      }
+      if (result.status === 'rollback-failed') {
+        setStatus('error');
+        setError({
+          kind: 'other',
+          retryable: false,
+          message: `提交和回滚均失败，部分资源可能已写入：${result.message}`,
+        });
+        return;
+      }
+
+      if (currentSceneEdit) {
+        if (reconcileCurrentScene) {
+          reconcileCurrentScene(currentSceneEdit);
+        } else {
+          pushHistory(nodes);
+          setNodes(currentSceneEdit.afterNodes);
+          setScriptSource(currentSceneEdit.afterContent);
+          setSelectedNode(null);
+          setDirty(false);
+          setSaveStatus('saved');
+        }
+      }
+      if (set.edits.some((edit) => edit.kind === 'memory')) setMemory(memoryEdit!.after);
+      if (set.edits.some((edit) => edit.kind === 'create_scene')) onScenesChanged?.();
+      if (characterEdits.length > 0) onCharactersChanged?.();
+      replaceAssistantMessage(set.sourceMessageId, `已同意修改：${summarizeChangeSet(set, sceneHeaders)}`, {
+        diff: currentSceneEdit?.diff,
+      });
+      setPendingChangeSet({ ...set, status: 'accepted' });
+      setStatus('accepted');
+      setError(null);
+    } catch (error) {
+      setStatus('error');
+      setError({
+        kind: 'other',
+        retryable: true,
+        message: `提交请求失败，修改仍保留在待审区：${String(error)}`,
+      });
+    } finally {
+      onCommitSettled?.();
     }
-    if (createdScene) onScenesChanged?.();
-    if (changedCharacters) onCharactersChanged?.();
-    replaceAssistantMessage(set.sourceMessageId, `已同意修改：${summarizeChangeSet(set, sceneHeaders)}`, {
-      diff: currentSceneEdit?.diff,
-    });
-    setPendingChangeSet({ ...set, status: 'accepted' });
-    setStatus('accepted');
   }, [
+    assets,
+    changeSetAdapter,
+    characters,
     currentSceneName,
+    nodes,
     sceneHeaders,
+    onCommitSettled,
+    onCommitStart,
     onScenesChanged,
     onCharactersChanged,
     projectPath,
     pushHistory,
+    reconcileCurrentScene,
     replaceAssistantMessage,
     setDirty,
     setNodes,
     setSaveStatus,
     setScriptSource,
     setSelectedNode,
-    syncSceneBackgroundCard,
   ]);
 
   const acceptChange = useCallback(async () => {
@@ -1004,6 +1070,8 @@ export function useAiAgent(params: UseAiAgentParams) {
       currentSceneName,
       currentScriptSource: scriptSource,
       readSceneContent: async (file) => {
+        const draft = await readSceneDraft?.(file);
+        if (draft !== undefined) return draft;
         const path = await getScenePath(projectPath, file);
         return readFileText(path);
       },
@@ -1015,7 +1083,7 @@ export function useAiAgent(params: UseAiAgentParams) {
       return;
     }
     await persistChangeSet(pendingChangeSet);
-  }, [characters, currentSceneName, memory, pendingChangeSet, persistChangeSet, projectPath, scriptSource]);
+  }, [characters, currentSceneName, memory, pendingChangeSet, persistChangeSet, projectPath, readSceneDraft, scriptSource]);
 
   const revertChange = useCallback(() => {
     if (!pendingChangeSet) return;
@@ -1028,15 +1096,10 @@ export function useAiAgent(params: UseAiAgentParams) {
 
   const forceApplyChange = useCallback(async () => {
     if (!pendingChangeSet) return;
-    // User chose to overwrite their manual edits with the AI preview.
-    const currentSceneEdit = pendingChangeSet.edits.find((e): e is SceneEdit => e.kind === 'scene' && e.file === currentSceneName);
-    if (currentSceneEdit) {
-      pushHistory(nodes);
-      setNodes(currentSceneEdit.afterNodes);
-      setScriptSource(currentSceneEdit.afterContent);
-    }
+    // Force skips the frontend draft check, but still crosses the same atomic
+    // backend seam. The live buffer changes only after `committed`.
     await persistChangeSet(pendingChangeSet);
-  }, [currentSceneName, nodes, pendingChangeSet, persistChangeSet, pushHistory, setNodes, setScriptSource]);
+  }, [pendingChangeSet, persistChangeSet]);
 
   const regenerateAfterConflict = useCallback(() => {
     if (!pendingChangeSet) return;
