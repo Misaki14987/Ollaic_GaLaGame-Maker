@@ -18,14 +18,5 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.10.1"
-  },
-  "pnpm": {
-    "overrides": {
-      "vite": "6.3.5"
-    },
-    "onlyBuiltDependencies": [
-      "@tailwindcss/oxide",
-      "esbuild"
-    ]
   }
 }
