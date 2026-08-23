@@ -22,6 +22,7 @@ const DEFAULT_LOG_LIMIT: usize = 100;
 const MAX_LOG_FIELD_CHARS: usize = 50_000;
 const MAX_TRACE_FIELD_CHARS: usize = 50_000;
 const HTTP_REQUEST_TIMEOUT_SECS: u64 = 180;
+const MEDIA_DNS_TIMEOUT_SECS: u64 = 10;
 const MAX_MEDIA_REDIRECTS: usize = 10;
 
 /// A reqwest client with the standard request timeout applied. Using this
@@ -2123,7 +2124,17 @@ where
         let bare_host = host.trim_start_matches('[').trim_end_matches(']');
         let resolved = match bare_host.parse::<IpAddr>() {
             Ok(ip) => vec![SocketAddr::new(ip, port)],
-            Err(_) => resolver.resolve(host, port).await?,
+            Err(_) => tokio::time::timeout(
+                Duration::from_secs(MEDIA_DNS_TIMEOUT_SECS),
+                resolver.resolve(host, port),
+            )
+            .await
+            .map_err(|_| {
+                format!(
+                    "媒体下载 DNS 解析 {host} 超时（{} 秒）。请检查网络后重试。",
+                    MEDIA_DNS_TIMEOUT_SECS
+                )
+            })??,
         };
         let mut public_addresses = resolved
             .into_iter()
