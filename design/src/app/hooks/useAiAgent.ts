@@ -19,7 +19,7 @@ import {
   type AssetMetadata,
   syncSceneCardsFromBackgrounds,
 } from '../lib/asset-metadata';
-import { createCharacter, deleteCharacter, updateCharacter } from '../lib/character-ipc';
+import { createCharacter, deleteCharacter, listCharacters, updateCharacter } from '../lib/character-ipc';
 import type { Character } from '../lib/character-types';
 import {
   describeEdit,
@@ -1029,8 +1029,8 @@ export function useAiAgent(params: UseAiAgentParams) {
 
   const acceptChange = useCallback(async () => {
     if (!pendingChangeSet || pendingChangeSet.status !== 'pending' || !projectPath) return;
-    // Confirm no edited resource changed since staging: the open scene's live
-    // buffer, other scenes' on-disk content, characters, and memory.
+    // Confirm no edited resource changed and no staged create now collides
+    // with a live scene, character, or asset card.
     let conflicts: string[];
     try {
       conflicts = await detectConflicts(pendingChangeSet, {
@@ -1040,7 +1040,9 @@ export function useAiAgent(params: UseAiAgentParams) {
           const path = await getScenePath(projectPath, file);
           return readFileText(path);
         },
-        getCharacter: (id) => characters.find((c) => c.id === id),
+        listSceneFiles: () => listScenes(`${projectPath}/game/scene`),
+        listCharacters: () => listCharacters(projectPath),
+        loadAssetMetadata: () => loadAssetMetadata(projectPath, projectId),
         memory: memory ?? emptyProjectMemory(),
       });
     } catch (e) {
@@ -1048,7 +1050,7 @@ export function useAiAgent(params: UseAiAgentParams) {
       setError({
         kind: 'other',
         retryable: true,
-        message: `无法读取场景以确认修改是否冲突，项目尚未写入。请检查文件后重试：${String(e)}`,
+        message: `无法读取项目资源以确认修改是否冲突，项目尚未写入。请检查文件后重试：${String(e)}`,
       });
       return;
     }

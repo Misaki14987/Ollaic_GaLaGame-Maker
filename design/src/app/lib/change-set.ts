@@ -8,8 +8,7 @@
  * On accept the whole set is applied atomically (all-or-rollback).
  */
 
-import type { AssetInfo } from './assets-ipc';
-import type { SceneAssetCard } from './assets-ipc';
+import type { AssetInfo, AssetMetadata, SceneAssetCard } from './assets-ipc';
 import type { Character } from './character-types';
 import { applyEditorPatches } from './editor-executor';
 import {
@@ -861,8 +860,12 @@ export interface ConflictCheckContext {
   currentScriptSource: string;
   /** Re-read a non-current scene's current on-disk content. */
   readSceneContent: (file: string) => Promise<string>;
-  /** Current character by id (after any user edits). */
-  getCharacter: (id: string) => Character | undefined;
+  /** Re-list scene files so a same-name create cannot race confirmation. */
+  listSceneFiles: () => Promise<string[]>;
+  /** Re-read canonical characters so creates/deletes cannot race confirmation. */
+  listCharacters: () => Promise<Character[]>;
+  /** Re-read asset cards so planned IDs/targets cannot overwrite live cards. */
+  loadAssetMetadata: () => Promise<AssetMetadata>;
   /** Current project memory (after any user edits). */
   memory: ProjectMemory;
 }
@@ -872,8 +875,8 @@ export interface ConflictCheckContext {
  * since the change set was staged. Scene edits compare the live buffer (current
  * scene) or re-read on-disk content (other scenes) against the staged
  * `beforeContent`; character and memory edits compare against their staged
- * `before`. create_scene/create_character/asset_plan are new resources and are
- * never considered conflicted here.
+ * `before`. New scenes, characters, and asset plans are checked against live
+ * project indexes so confirmation cannot overwrite or duplicate resources.
  */
 export async function detectConflicts(
   set: PendingChangeSet,
@@ -889,9 +892,35 @@ export async function detectConflicts(
         const current = await ctx.readSceneContent(edit.file);
         if (current !== edit.beforeContent) conflicts.push(edit.file);
       }
+    } else if (edit.kind === 'create_scene') {
+      const files = await ctx.listSceneFiles();
+      if (files.some((file) => file.toLowerCase() === edit.file.toLowerCase())) {
+        conflicts.push(edit.file);
+      }
+    } else if (edit.kind === 'create_character') {
+      const expectedName = edit.draft.name.trim().toLocaleLowerCase();
+      const characters = await ctx.listCharacters();
+      if (characters.some((character) => character.name.trim().toLocaleLowerCase() === expectedName)) {
+        conflicts.push(`character:${edit.draft.name}`);
+      }
     } else if (edit.kind === 'character') {
-      const current = ctx.getCharacter(edit.id);
-      if (current && JSON.stringify(current) !== JSON.stringify(edit.before)) conflicts.push(edit.id);
+      const characters = await ctx.listCharacters();
+      const current = characters.find((character) => character.id === edit.id);
+      if (!current || JSON.stringify(current) !== JSON.stringify(edit.before)) conflicts.push(edit.id);
+    } else if (edit.kind === 'asset_plan') {
+      const metadata = await ctx.loadAssetMetadata();
+      for (const card of edit.cards) {
+        const liveCards = Object.values(
+          card.category === 'cg' ? metadata.cgCards ?? {} : metadata.sceneCards ?? {},
+        );
+        const id = card.id.toLowerCase();
+        const targetStem = card.targetStem.toLowerCase();
+        if (liveCards.some((live) => (
+          live.id.toLowerCase() === id || live.targetStem.toLowerCase() === targetStem
+        ))) {
+          conflicts.push(`asset:${card.id}`);
+        }
+      }
     } else if (edit.kind === 'memory') {
       if (JSON.stringify(ctx.memory) !== JSON.stringify(edit.before)) conflicts.push('memory');
     }

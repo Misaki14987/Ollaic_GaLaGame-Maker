@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { detectConflicts, type PendingChangeSet } from './change-set';
 import { emptyProjectMemory } from './project-memory';
+import { emptyAssetMetadata } from './asset-metadata';
 import type { Character } from './character-types';
 
 function makeSceneEdit(file: string, beforeContent: string, afterContent: string) {
@@ -43,7 +44,9 @@ function makeCtx(overrides: Record<string, unknown> = {}) {
     currentSceneName: 'start.txt',
     currentScriptSource: 'A:start;',
     readSceneContent: async () => 'A:start;',
-    getCharacter: () => undefined,
+    listSceneFiles: async () => [],
+    listCharacters: async () => [],
+    loadAssetMetadata: async () => emptyAssetMetadata(),
     memory: emptyProjectMemory(),
     ...overrides,
   };
@@ -82,6 +85,15 @@ describe('detectConflicts', () => {
     await expect(detectConflicts(set, ctx)).resolves.toEqual(['other.txt']);
   });
 
+  it('detects a scene created by someone else after staging', async () => {
+    const set = {
+      edits: [{ kind: 'create_scene', file: 'chapter_02.txt' }],
+    } as unknown as PendingChangeSet;
+    const ctx = makeCtx({ listSceneFiles: async () => ['start.txt', 'CHAPTER_02.TXT'] });
+
+    await expect(detectConflicts(set, ctx)).resolves.toEqual(['chapter_02.txt']);
+  });
+
   it('aborts when a non-current scene cannot be read, even with an empty baseline', async () => {
     const set = {
       edits: [makeSceneEdit('other.txt', '', 'B:new;')],
@@ -118,16 +130,39 @@ describe('detectConflicts', () => {
       edits: [makeCharacterEdit('c1', BASE_CHARACTER)],
     } as unknown as PendingChangeSet;
     const changed = { ...BASE_CHARACTER, description: 'user edited' };
-    const ctx = makeCtx({ getCharacter: (id: string) => (id === 'c1' ? changed : undefined) });
+    const ctx = makeCtx({ listCharacters: async () => [changed] });
     await expect(detectConflicts(set, ctx)).resolves.toEqual(['c1']);
+  });
+
+  it('detects a same-name character created after staging', async () => {
+    const draft = { ...BASE_CHARACTER, id: 'tmp_ai_1', name: '小明' };
+    const set = {
+      edits: [{ kind: 'create_character', draft, changedFields: ['name'] }],
+    } as unknown as PendingChangeSet;
+    const ctx = makeCtx({
+      listCharacters: async () => [{ ...BASE_CHARACTER, id: 'char_concurrent', name: ' 小明 ' }],
+    });
+
+    await expect(detectConflicts(set, ctx)).resolves.toEqual(['character:小明']);
   });
 
   it('does not flag an unchanged character', async () => {
     const set = {
       edits: [makeCharacterEdit('c1', BASE_CHARACTER)],
     } as unknown as PendingChangeSet;
-    const ctx = makeCtx({ getCharacter: (id: string) => (id === 'c1' ? BASE_CHARACTER : undefined) });
+    const ctx = makeCtx({ listCharacters: async () => [BASE_CHARACTER] });
     await expect(detectConflicts(set, ctx)).resolves.toEqual([]);
+  });
+
+  it('detects a character deleted after staging', async () => {
+    const set = {
+      edits: [makeCharacterEdit('c1', BASE_CHARACTER)],
+    } as unknown as PendingChangeSet;
+    const ctx = makeCtx({
+      listCharacters: async () => [],
+    });
+
+    await expect(detectConflicts(set, ctx)).resolves.toEqual(['c1']);
   });
 
   it('detects project memory changed since staging', async () => {
@@ -137,5 +172,36 @@ describe('detectConflicts', () => {
     } as unknown as PendingChangeSet;
     const ctx = makeCtx({ memory: { ...before, worldSetting: 'user edited' } });
     await expect(detectConflicts(set, ctx)).resolves.toEqual(['memory']);
+  });
+
+  it('detects asset plans whose id or target stem appeared after staging', async () => {
+    const card = (id: string, targetStem: string) => ({
+      id,
+      category: 'background' as const,
+      title: id,
+      sceneFile: 'start.txt',
+      imageAsset: null,
+      targetStem,
+      prompt: 'prompt',
+      style: '',
+      negativePrompt: '',
+    });
+    const set = {
+      edits: [{
+        kind: 'asset_plan',
+        cards: [card('bg:duplicate.png', 'fresh'), card('bg:fresh.png', 'shared')],
+      }],
+    } as unknown as PendingChangeSet;
+    const metadata = emptyAssetMetadata();
+    metadata.sceneCards = {
+      'bg:duplicate.png': card('bg:duplicate.png', 'existing'),
+      existing: card('existing', 'shared'),
+    };
+    const ctx = makeCtx({ loadAssetMetadata: async () => metadata });
+
+    await expect(detectConflicts(set, ctx)).resolves.toEqual([
+      'asset:bg:duplicate.png',
+      'asset:bg:fresh.png',
+    ]);
   });
 });
