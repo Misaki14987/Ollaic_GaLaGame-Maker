@@ -18,6 +18,7 @@ import {
   syncSceneCardsFromBackgrounds,
 } from '../lib/asset-metadata';
 import type { Character } from '../lib/character-types';
+import { listCharacters } from '../lib/character-ipc';
 import {
   applyChangeSet,
   type ApplyChangeSetRequest,
@@ -52,6 +53,7 @@ import {
 } from '../lib/change-set';
 import { extractEditorResponse } from '../lib/editor-patch';
 import { getTool, toolDefs, type StagedWrite } from '../lib/ai-tools';
+import { createStagingProjectView, type StagingProjectView } from '../lib/staging-project-view';
 import {
   emptyProjectMemory,
   readProjectMemory,
@@ -136,6 +138,7 @@ interface AiAgentTrace {
 interface ConversationalRun {
   id: string;
   revoked: boolean;
+  projectView?: StagingProjectView;
 }
 
 export const INITIAL_AI_MESSAGE: ChatMessage = {
@@ -549,6 +552,14 @@ export function useAiAgent(params: UseAiAgentParams) {
     trace.assetCount = freshAssets.length;
     const plannedAssetKeys = new Set<string>();
     const draft: StagingDraft = { sceneFiles: new Map(), characters: new Map() };
+    const projectView = createStagingProjectView(draft, {
+      listSceneFiles: () => projectPath ? listScenes(projectPath) : Promise.resolve([]),
+      readSceneContent: (file) => projectPath
+        ? readFileText(projectPath, file)
+        : Promise.reject(new Error('当前没有打开的项目，无法读取场景。')),
+      listCharacters: () => projectPath ? listCharacters(projectPath) : Promise.resolve([]),
+    });
+    run.projectView = projectView;
     const stagingCtx = { ...buildStagingContext(freshAssets), plannedAssetKeys, draft };
     const sceneEdits = new Map<string, SceneEdit>();
     const charEdits = new Map<string, CharacterEdit>();
@@ -557,24 +568,36 @@ export function useAiAgent(params: UseAiAgentParams) {
     const assetPlanEdits: ReturnType<typeof stageAssetPlanEdit>[] = [];
     let memEdit: MemoryEdit | undefined;
 
+    const recordSceneEdit = (edit: SceneEdit) => {
+      sceneEdits.set(edit.file, edit);
+      const created = createSceneEdits.get(edit.file);
+      if (created) {
+        createSceneEdits.set(edit.file, {
+          ...created,
+          initialContent: edit.afterContent,
+          initialNodes: edit.afterNodes,
+        });
+      }
+    };
+
     const stage = async (staged: StagedWrite): Promise<{ content: string; ok: boolean; error?: string }> => {
       if (!ownsRun(run)) throw new Error('chat run cancelled');
       try {
         if (staged.tool === 'edit_scene') {
-          sceneEdits.set(staged.file, await stageSceneEdit(sceneEdits.get(staged.file), staged, stagingCtx));
+          recordSceneEdit(await stageSceneEdit(sceneEdits.get(staged.file), staged, stagingCtx));
         } else if (staged.tool === 'set_scene_header') {
-          sceneEdits.set(staged.file, await stageSceneHeaderEdit(sceneEdits.get(staged.file), staged, stagingCtx));
+          recordSceneEdit(await stageSceneHeaderEdit(sceneEdits.get(staged.file), staged, stagingCtx));
         } else if (staged.tool === 'insert_dialogue_block') {
-          sceneEdits.set(staged.file, await stageDialogueBlockInsert(sceneEdits.get(staged.file), staged, stagingCtx));
+          recordSceneEdit(await stageDialogueBlockInsert(sceneEdits.get(staged.file), staged, stagingCtx));
         } else if (staged.tool === 'create_branch') {
           const result = await stageBranchEdit(sceneEdits.get(staged.file), staged, stagingCtx);
-          sceneEdits.set(staged.file, result.sourceEdit);
+          recordSceneEdit(result.sourceEdit);
           for (const edit of result.createSceneEdits) {
             createSceneEdits.set(edit.file, edit);
             stagingCtx.draft?.sceneFiles.set(edit.file, edit.initialContent ?? '');
           }
         } else if (staged.tool === 'insert_figure') {
-          sceneEdits.set(staged.file, await stageFigureInsert(sceneEdits.get(staged.file), staged, stagingCtx));
+          recordSceneEdit(await stageFigureInsert(sceneEdits.get(staged.file), staged, stagingCtx));
         } else if (staged.tool === 'create_character') {
           const edit = stageCreateCharacterEdit(staged, stagingCtx);
           createCharEdits.set(edit.draft.name, edit);
@@ -688,7 +711,12 @@ export function useAiAgent(params: UseAiAgentParams) {
           errMsg = '未知工具';
         } else if (tool.kind === 'write') {
           try {
-            const staged = (await tool.run(call.arguments, { projectPath, currentSceneName, attachedUploadIds })) as StagedWrite;
+            const staged = (await tool.run(call.arguments, {
+              projectPath,
+              currentSceneName,
+              attachedUploadIds,
+              projectView,
+            })) as StagedWrite;
             if (!ownsRun(run)) return;
             const result = await stage(staged);
             if (!ownsRun(run)) return;
@@ -706,7 +734,12 @@ export function useAiAgent(params: UseAiAgentParams) {
           }
         } else {
           try {
-            resultPayload = await tool.run(call.arguments, { projectPath, currentSceneName, attachedUploadIds });
+            resultPayload = await tool.run(call.arguments, {
+              projectPath,
+              currentSceneName,
+              attachedUploadIds,
+              projectView,
+            });
             if (!ownsRun(run)) return;
             content = JSON.stringify(resultPayload);
           } catch (e) {
@@ -741,7 +774,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     }
 
     const edits: ChangeEdit[] = [
-      ...sceneEdits.values(),
+      ...[...sceneEdits.values()].filter((edit) => !createSceneEdits.has(edit.file)),
       ...createCharEdits.values(),
       ...charEdits.values(),
       ...assetPlanEdits,
@@ -914,6 +947,8 @@ export function useAiAgent(params: UseAiAgentParams) {
         replaceAssistantMessage(assistantId, `（错误：${classified.message}）`);
       }
     } finally {
+      run.projectView?.dispose();
+      run.projectView = undefined;
       // A newer request may have superseded us while we were awaiting. Only the
       // current owner of the token resets the shared UI state.
       if (activeRunRef.current === run) {
@@ -1287,6 +1322,8 @@ export function useAiAgent(params: UseAiAgentParams) {
     const stoppedRun = activeRunRef.current;
     if (!stoppedRun) return;
     stoppedRun.revoked = true;
+    stoppedRun.projectView?.dispose();
+    stoppedRun.projectView = undefined;
     activeRunRef.current = null;
     void aiChatCancel(stoppedRun.id).catch(() => false);
     const stoppedId = streamingIdRef.current;
