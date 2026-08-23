@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../lib/ai-ipc', () => ({
   aiChatTurn: vi.fn(),
+  aiChatCancel: vi.fn(),
   appendAiAgentTrace: vi.fn(),
   getAiConfig: vi.fn(),
   getAiProviderCapability: vi.fn(),

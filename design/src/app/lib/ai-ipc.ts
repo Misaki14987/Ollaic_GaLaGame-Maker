@@ -308,6 +308,7 @@ export async function aiChatStream(
  * multi-step agent loop; pure-chat streaming still goes through aiChatStream.
  */
 export async function aiChatTurn(
+  runId: string,
   messages: AiChatMessage[],
   tools: ToolDef[],
   characterContext?: string,
@@ -318,9 +319,14 @@ export async function aiChatTurn(
     tool_calls: m.toolCalls?.map((c) => ({ id: c.id, name: c.name, arguments: c.arguments })) ?? null,
     tool_call_id: m.toolCallId ?? null,
   }));
-  return invoke<AiTurnResult>('ai_chat_turn', {
+  return invoke<AiTurnResult>('ai_chat_turn_owned', {
+    runId,
     messages: wireMessages,
     tools,
     characterContext,
   });
+}
+
+export async function aiChatCancel(runId: string): Promise<boolean> {
+  return invoke<boolean>('ai_chat_cancel', { runId });
 }

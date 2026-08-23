@@ -145,6 +145,7 @@ fn main() {
                 }
             });
             app.manage(Orchestrator::new(app.handle()));
+            app.manage(ai::chat_runs::ChatRunRegistry::new());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -201,6 +202,8 @@ fn main() {
             ai::commands::generate_music,
             ai::commands::ai_chat_stream,
             ai::commands::ai_chat_turn,
+            ai::commands::ai_chat_turn_owned,
+            ai::commands::ai_chat_cancel,
             ai::commands::list_ai_logs,
             ai::commands::clear_ai_logs,
             ai::commands::get_ai_log_path,

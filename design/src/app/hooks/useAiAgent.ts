@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { aiChatTurn, appendAiAgentTrace, getAiConfig, getAiProviderCapability, type AiChatMessage } from '../lib/ai-ipc';
+import { aiChatCancel, aiChatTurn, appendAiAgentTrace, getAiConfig, getAiProviderCapability, type AiChatMessage } from '../lib/ai-ipc';
 import {
   buildInlineUploadContext,
   buildUploadContext,
@@ -124,6 +124,11 @@ interface AiAgentTrace {
   edits?: string[];
   error?: string;
   assetCount?: number;
+}
+
+interface ConversationalRun {
+  id: string;
+  revoked: boolean;
 }
 
 export const INITIAL_AI_MESSAGE: ChatMessage = {
@@ -338,9 +343,8 @@ export function useAiAgent(params: UseAiAgentParams) {
   const [lastRequest, setLastRequest] = useState<{ prompt: string; attachmentIds: string[] } | null>(null);
   const [retryCount, setRetryCount] = useState(0);
   const [cooldown, setCooldown] = useState(0);
-  const cancelledRef = useRef(false);
+  const activeRunRef = useRef<ConversationalRun | null>(null);
   const streamingIdRef = useRef<string | null>(null);
-  const inFlightRef = useRef(false);
   // Monotonic token identifying the in-flight request. A new prompt bumps this;
   // an old request's finally only touches shared UI state when its token still
   // matches, so a stale request can't clobber a newer one.
@@ -386,6 +390,10 @@ export function useAiAgent(params: UseAiAgentParams) {
   const replaceAssistantMessage = useCallback((messageId: string, content: string, extra?: Partial<ChatMessage>) => {
     setMessages(prev => prev.map(message => (message.id === messageId ? { ...message, content, ...extra } : message)));
   }, [setMessages]);
+
+  const ownsRun = useCallback((run: ConversationalRun) => (
+    activeRunRef.current === run && !run.revoked
+  ), []);
 
   // Slim system prompt for the tool-calling loop: current scene + "fetch on demand".
   // `attachedUploadIds` are the files sent with this very message; they are
@@ -481,7 +489,8 @@ export function useAiAgent(params: UseAiAgentParams) {
   }), [assets, characters, currentSceneName, memory, nodes, projectPath, scriptSource]);
 
   // Turn a finished set of staged edits into a pending change set + live preview.
-  const finalizeChangeSet = useCallback((edits: ChangeEdit[], sourceMessageId: string) => {
+  const finalizeChangeSet = useCallback((run: ConversationalRun, edits: ChangeEdit[], sourceMessageId: string) => {
+    if (!ownsRun(run)) return false;
     if (edits.length === 0) return false;
     const changeSet: PendingChangeSet = {
       id: `cs-${Date.now()}`,
@@ -505,10 +514,10 @@ export function useAiAgent(params: UseAiAgentParams) {
     setStatus('pending');
     setError(null);
     return true;
-  }, [sceneHeaders, replaceAssistantMessage, setSelectedNode, setShowScript]);
+  }, [ownsRun, sceneHeaders, replaceAssistantMessage, setSelectedNode, setShowScript]);
 
   // --- Function-calling agent loop ----------------------------------------
-  const runAgentLoop = useCallback(async (text: string, assistantId: string, attachedUploadIds: string[]) => {
+  const runAgentLoop = useCallback(async (run: ConversationalRun, text: string, assistantId: string, attachedUploadIds: string[]) => {
     const trace: AiAgentTrace = {
       traceId: `trace-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       createdAt: new Date().toISOString(),
@@ -520,6 +529,7 @@ export function useAiAgent(params: UseAiAgentParams) {
       turns: [],
     };
     const freshAssets = projectPath ? await listAllAssets(projectPath).catch(() => assets) : assets;
+    if (!ownsRun(run)) return;
     if (freshAssets !== assets) setAssets(freshAssets);
     trace.assetCount = freshAssets.length;
     const plannedAssetKeys = new Set<string>();
@@ -533,6 +543,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     let memEdit: MemoryEdit | undefined;
 
     const stage = async (staged: StagedWrite): Promise<{ content: string; ok: boolean; error?: string }> => {
+      if (!ownsRun(run)) throw new Error('chat run cancelled');
       try {
         if (staged.tool === 'edit_scene') {
           sceneEdits.set(staged.file, await stageSceneEdit(sceneEdits.get(staged.file), staged, stagingCtx));
@@ -606,6 +617,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     // Append a finished turn (its text + tool calls) as a step on the assistant
     // message so text is never discarded and tool activity is shown inline.
     const pushStep = (step: AssistantStep) => {
+      if (!ownsRun(run)) return;
       setMessages((prev) => prev.map((m) => {
         if (m.id !== assistantId) return m;
         const steps = [...(m.steps ?? []), step];
@@ -617,16 +629,16 @@ export function useAiAgent(params: UseAiAgentParams) {
     let finalText = '';
     const traceSummary: string[] = [];
     for (let turn = 0; turn < MAX_TURNS; turn += 1) {
-      if (cancelledRef.current) return;
+      if (!ownsRun(run)) return;
       setStatus(turn === 0 ? 'generating' : 'tooling');
       setStepLabel(turn === 0 ? '思考中…' : '继续分析…');
-      const res = await aiChatTurn(convo, toolDefs()).catch((e) => {
+      const res = await aiChatTurn(run.id, convo, toolDefs()).catch((e) => {
         trace.outcome = 'error';
         trace.error = String(e);
         void writeAgentTrace(trace);
         throw e;
       });
-      if (cancelledRef.current) return;
+      if (!ownsRun(run)) return;
       const turnText = res.text ?? '';
       const turnTrace: AiAgentTraceTurn = {
         turn,
@@ -646,6 +658,7 @@ export function useAiAgent(params: UseAiAgentParams) {
       convo.push({ role: 'assistant', content: turnText, toolCalls: res.toolCalls });
       const stepCalls: StepToolCall[] = [];
       for (const call of res.toolCalls) {
+        if (!ownsRun(run)) return;
         const label = stepLabelForTool(call.name, call.arguments, sceneHeaders);
         setStepLabel(label);
         const tool = getTool(call.name);
@@ -661,7 +674,9 @@ export function useAiAgent(params: UseAiAgentParams) {
         } else if (tool.kind === 'write') {
           try {
             const staged = (await tool.run(call.arguments, { projectPath, currentSceneName, attachedUploadIds })) as StagedWrite;
+            if (!ownsRun(run)) return;
             const result = await stage(staged);
+            if (!ownsRun(run)) return;
             resultPayload = JSON.parse(result.content) as unknown;
             content = result.content;
             ok = result.ok;
@@ -677,6 +692,7 @@ export function useAiAgent(params: UseAiAgentParams) {
         } else {
           try {
             resultPayload = await tool.run(call.arguments, { projectPath, currentSceneName, attachedUploadIds });
+            if (!ownsRun(run)) return;
             content = JSON.stringify(resultPayload);
           } catch (e) {
             resultPayload = { error: String(e) };
@@ -717,10 +733,11 @@ export function useAiAgent(params: UseAiAgentParams) {
       ...(memEdit ? [memEdit] : []),
       ...createSceneEdits.values(),
     ];
+    if (!ownsRun(run)) return;
     setStepLabel('');
     trace.finalText = finalText;
     trace.edits = edits.map((edit) => describeEdit(edit, sceneHeaders));
-    if (!finalizeChangeSet(edits, assistantId)) {
+    if (!finalizeChangeSet(run, edits, assistantId)) {
       // No change set: ensure a closing text is visible. If the loop produced
       // no terminal text at all, fall back to a short note (steps still shown).
       // Read the latest messages via the functional updater — the assistant
@@ -741,10 +758,10 @@ export function useAiAgent(params: UseAiAgentParams) {
       trace.outcome = 'pending_preview';
     }
     void writeAgentTrace(trace);
-  }, [assets, buildAgentSystemContext, buildStagingContext, currentSceneName, projectId, sceneHeaders, finalizeChangeSet, messages, projectPath, setMessages]);
+  }, [assets, buildAgentSystemContext, buildStagingContext, currentSceneName, projectId, sceneHeaders, finalizeChangeSet, messages, ownsRun, projectPath, setMessages]);
 
   // --- Legacy single-shot for providers without function calling ----------
-  const runLegacyTurn = useCallback(async (text: string, assistantId: string, attachedUploadIds: string[]) => {
+  const runLegacyTurn = useCallback(async (run: ConversationalRun, text: string, assistantId: string, attachedUploadIds: string[]) => {
     const trace: AiAgentTrace = {
       traceId: `trace-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       createdAt: new Date().toISOString(),
@@ -762,18 +779,19 @@ export function useAiAgent(params: UseAiAgentParams) {
     const inlineUploads = projectPath && attachedUploadIds.length > 0
       ? await buildInlineUploadContext(projectPath, uploads, attachedUploadIds).catch(() => '')
       : '';
+    if (!ownsRun(run)) return;
     const convo: AiChatMessage[] = [
       { role: 'system', content: buildLegacySystemContext(attachedUploadIds, inlineUploads) },
       ...truncateContextMessages(messages, 8),
       { role: 'user', content: text },
     ];
-    const res = await aiChatTurn(convo, []).catch((e) => {
+    const res = await aiChatTurn(run.id, convo, []).catch((e) => {
       trace.outcome = 'error';
       trace.error = String(e);
       void writeAgentTrace(trace);
       throw e;
     });
-    if (cancelledRef.current) return;
+    if (!ownsRun(run)) return;
     setStepLabel('');
     trace.turns.push({ turn: 0, modelText: res.text ?? '', toolCalls: [] });
     const parsed = res.text ? extractEditorResponse(res.text) : null;
@@ -796,6 +814,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     }
     try {
       const freshAssets = projectPath ? await listAllAssets(projectPath).catch(() => assets) : assets;
+      if (!ownsRun(run)) return;
       if (freshAssets !== assets) setAssets(freshAssets);
       trace.assetCount = freshAssets.length;
       const edit = await stageSceneEdit(
@@ -803,8 +822,9 @@ export function useAiAgent(params: UseAiAgentParams) {
         { tool: 'edit_scene', file: currentSceneName, patches: parsed.patches },
         buildStagingContext(freshAssets),
       );
+      if (!ownsRun(run)) return;
       trace.edits = [describeEdit(edit, sceneHeaders)];
-      if (!finalizeChangeSet([edit], assistantId)) {
+      if (!finalizeChangeSet(run, [edit], assistantId)) {
         trace.outcome = 'no_executable_changes';
         void writeAgentTrace(trace);
         replaceAssistantMessage(assistantId, '（patch 应用后没有变化）');
@@ -821,19 +841,19 @@ export function useAiAgent(params: UseAiAgentParams) {
       setStatus('error');
       setError({ kind: 'other', retryable: true, message: msg });
     }
-  }, [assets, buildLegacySystemContext, buildStagingContext, currentSceneName, projectId, projectPath, sceneHeaders, finalizeChangeSet, messages, replaceAssistantMessage]);
+  }, [assets, buildLegacySystemContext, buildStagingContext, currentSceneName, projectId, projectPath, sceneHeaders, finalizeChangeSet, messages, ownsRun, replaceAssistantMessage]);
 
   const sendPrompt = useCallback(async (prompt: string, retryAttachmentIds?: string[]) => {
     const text = prompt.trim();
-    if (!text || busy || inFlightRef.current) return;
+    if (!text || activeRunRef.current) return;
     if (pendingChangeSet?.status === 'pending') {
       setError({ kind: 'other', retryable: false, message: '当前还有 AI 修改方案待确认。请先同意或拒绝后再继续对话。' });
       return;
     }
-    inFlightRef.current = true;
-    cancelledRef.current = false;
     const myToken = requestTokenRef.current + 1;
     requestTokenRef.current = myToken;
+    const run: ConversationalRun = { id: `chat-${Date.now()}-${myToken}`, revoked: false };
+    activeRunRef.current = run;
     setError(null);
     setPendingChangeSet(null);
     setStatus('generating');
@@ -863,12 +883,15 @@ export function useAiAgent(params: UseAiAgentParams) {
 
     try {
       const cfg = await getAiConfig();
+      if (!ownsRun(run)) return;
       const useFc = (await conversationModeForConfig(cfg)) === 'function_calling';
-      if (useFc) await runAgentLoop(text, assistantId, sentIds);
-      else await runLegacyTurn(text, assistantId, sentIds);
+      if (!ownsRun(run)) return;
+      if (useFc) await runAgentLoop(run, text, assistantId, sentIds);
+      else await runLegacyTurn(run, text, assistantId, sentIds);
+      if (!ownsRun(run)) return;
       setRetryCount(0);
     } catch (e) {
-      if (!cancelledRef.current) {
+      if (ownsRun(run)) {
         setStatus('error');
         const classified = classifyAiError(String(e));
         setError(classified);
@@ -878,14 +901,14 @@ export function useAiAgent(params: UseAiAgentParams) {
     } finally {
       // A newer request may have superseded us while we were awaiting. Only the
       // current owner of the token resets the shared UI state.
-      if (requestTokenRef.current === myToken) {
-        inFlightRef.current = false;
+      if (activeRunRef.current === run) {
+        activeRunRef.current = null;
         streamingIdRef.current = null;
         setBusy(false);
         setStepLabel('');
       }
     }
-  }, [attachedIds, busy, ensureTitleFromFirstMessage, messages, pendingChangeSet, replaceAssistantMessage, runAgentLoop, runLegacyTurn, setMessages, uploads]);
+  }, [attachedIds, busy, ensureTitleFromFirstMessage, messages, ownsRun, pendingChangeSet, replaceAssistantMessage, runAgentLoop, runLegacyTurn, setMessages, uploads]);
 
   const retry = useCallback(() => {
     if (!lastRequest || busy || cooldown > 0) return;
@@ -1229,10 +1252,13 @@ export function useAiAgent(params: UseAiAgentParams) {
   }, [projectPath]);
 
   const stop = useCallback(() => {
-    cancelledRef.current = true;
+    const stoppedRun = activeRunRef.current;
+    if (!stoppedRun) return;
+    stoppedRun.revoked = true;
+    activeRunRef.current = null;
+    void aiChatCancel(stoppedRun.id).catch(() => false);
     const stoppedId = streamingIdRef.current;
     streamingIdRef.current = null;
-    inFlightRef.current = false;
     if (stoppedId) {
       setMessages(prev => prev.map(message => (message.id === stoppedId ? { ...message, stopped: true } : message)));
     }

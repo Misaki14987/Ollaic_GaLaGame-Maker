@@ -1,4 +1,5 @@
 use super::config::{self, AiConfig, AiProviderConfig};
+use super::chat_runs::ChatRunRegistry;
 use super::provider_capability::{
     capability_for_config, ProviderCapability, RequiredCapability,
 };
@@ -880,6 +881,29 @@ pub async fn ai_chat_turn(
             Err(message)
         }
     }
+}
+
+#[tauri::command]
+pub async fn ai_chat_turn_owned(
+    runs: tauri::State<'_, ChatRunRegistry>,
+    run_id: String,
+    messages: Vec<AiMessageInput>,
+    tools: Vec<ToolDef>,
+    character_context: Option<String>,
+) -> Result<AiTurnResult, String> {
+    runs.run_cancellable(
+        &run_id,
+        ai_chat_turn(messages, tools, character_context),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn ai_chat_cancel(
+    runs: tauri::State<'_, ChatRunRegistry>,
+    run_id: String,
+) -> Result<bool, String> {
+    Ok(runs.cancel(&run_id).await)
 }
 
 /// Pipeline Agent entry point. `None` means no usable chat model is configured,
