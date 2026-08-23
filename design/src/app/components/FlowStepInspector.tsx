@@ -256,7 +256,7 @@ export function FlowStepInspector({
                     <ol className="divide-y divide-border border border-border" aria-label="资产任务列表">
                       {assetQueue.tasks.map((task) => {
                         const status = ASSET_STATUS[task.status];
-                        const error = task.error ?? task.attempts.at(-1)?.error;
+                        const error = task.error ?? task.attempts[task.attempts.length - 1]?.error;
                         return (
                           <li key={task.id} className="space-y-2 bg-surface-container-lowest p-3 text-xs">
                             <div className="flex min-w-0 items-center gap-2">

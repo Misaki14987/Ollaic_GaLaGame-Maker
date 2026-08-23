@@ -1,6 +1,6 @@
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useState, type ReactNode } from 'react';
 import {
-  Loader2, MessageCircle, MessageSquarePlus, MoreHorizontal, Pencil, Send, Trash2, Wand2, X,
+  ArrowUp, Loader2, MessageCircle, MessageSquarePlus, MoreHorizontal, Pencil, Square, Trash2, Wand2, X,
 } from 'lucide-react';
 import type { SceneHeader } from '../../lib/webgal-ipc';
 import { useAiAgent } from '../../hooks/useAiAgent';
@@ -8,6 +8,7 @@ import { AiMemoryPanel } from '../AiMemoryPanel';
 import { AiMessageBubble } from '../AiMessageBubble';
 import { ChangeSetCard } from '../AiPendingCard';
 import { ConflictCard, ErrorCard } from '../AiStatusCard';
+import { AiAttachmentTray, AiUploadsButton } from '../AiUploadsPanel';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
   DropdownMenuSeparator, DropdownMenuTrigger,
@@ -31,11 +32,15 @@ interface AiInputBoxProps {
   pending: boolean;
   onSubmit: (text: string) => void;
   onStop: () => void;
+  /** Rendered at the bottom-right corner inside the textarea. */
+  attachSlot?: ReactNode;
+  /** Rendered above the textarea for files queued with the next message. */
+  traySlot?: ReactNode;
 }
 
 // Keeps the draft in local state so typing only re-renders this small box,
 // not the whole StoryEditor tree (script list, worldline, timeline, ...).
-const AiInputBox = memo(function AiInputBox({ value, busy, pending, onSubmit, onStop }: AiInputBoxProps) {
+const AiInputBox = memo(function AiInputBox({ value, busy, pending, onSubmit, onStop, attachSlot, traySlot }: AiInputBoxProps) {
   const [draft, setDraft] = useState(value);
   // Sync when the agent changes input externally (regenerate prefills, send clears).
   useEffect(() => { setDraft(value); }, [value]);
@@ -50,29 +55,34 @@ const AiInputBox = memo(function AiInputBox({ value, busy, pending, onSubmit, on
 
   return (
     <>
-      <textarea
-        value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' && !event.shiftKey) {
-            event.preventDefault();
-            submit();
-          }
-        }}
-        disabled={busy || pending}
-        className="mt-3 h-20 w-full resize-none rounded-sm border border-border bg-surface-container-lowest p-2 text-sm focus:border-secondary focus:outline-none focus:ring-2 focus:ring-secondary-container/30 disabled:opacity-60"
-        placeholder={busy ? '生成中...' : pending ? '请先同意或拒绝当前 AI 修改...' : '输入你的创作想法...'}
-        aria-label="AI 创作输入"
-      />
-      <button
-        type="button"
-        onClick={submit}
-        disabled={!busy && (!draft.trim() || pending)}
-        className="mt-2 flex w-full items-center justify-center gap-2 rounded-sm bg-secondary-container/60 py-2 text-sm font-semibold text-black transition-colors hover:bg-secondary-container disabled:opacity-50"
-      >
-        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-        {busy ? '停止' : '发送'}
-      </button>
+      {traySlot}
+      <div className="relative mt-2">
+        <textarea
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+              event.preventDefault();
+              submit();
+            }
+          }}
+          disabled={busy || pending}
+          className="h-24 w-full resize-none rounded-lg border border-border bg-surface-container-lowest p-2.5 pb-10 text-sm focus:border-secondary focus:outline-none focus:ring-2 focus:ring-secondary-container/30 disabled:opacity-60"
+          placeholder={busy ? '生成中...' : pending ? '请先同意或拒绝当前 AI 修改...' : '输入你的创作想法...'}
+          aria-label="AI 创作输入"
+        />
+        {attachSlot && <div className="absolute bottom-3 left-2.5">{attachSlot}</div>}
+        <button
+          type="button"
+          onClick={submit}
+          disabled={!busy && (!draft.trim() || pending)}
+          className="absolute bottom-3 right-2.5 flex h-6 w-6 items-center justify-center rounded-full bg-secondary-container text-black transition-colors hover:bg-secondary-container/80 disabled:opacity-40"
+          aria-label={busy ? '停止生成' : '发送（Enter）'}
+          title={busy ? '停止生成' : '发送（Enter）'}
+        >
+          {busy ? <Square className="h-3 w-3 fill-current" /> : <ArrowUp className="h-3.5 w-3.5" />}
+        </button>
+      </div>
     </>
   );
 });
@@ -204,6 +214,7 @@ export function AiAssistantPanel({
               isStreaming={aiAgent.streamingIdRef.current === message.id && aiAgent.busy}
               stopped={message.stopped}
               diff={message.diff}
+              attachments={message.attachments}
             />
           </div>
         ))}
@@ -252,6 +263,28 @@ export function AiAssistantPanel({
           pending={aiAgent.pendingChangeSet?.status === 'pending'}
           onSubmit={onSend}
           onStop={aiAgent.stop}
+          attachSlot={(
+            <AiUploadsButton
+              uploads={aiAgent.uploads}
+              attachedIds={aiAgent.attachedIds}
+              busy={aiAgent.uploadBusy}
+              error={aiAgent.uploadError}
+              disabled={!projectPath}
+              onAdd={aiAgent.addUploads}
+              onAttach={aiAgent.attachUpload}
+              onDetach={aiAgent.detachUpload}
+              onRemove={aiAgent.removeUpload}
+              onPreview={aiAgent.previewUpload}
+              onDismissError={aiAgent.clearUploadError}
+            />
+          )}
+          traySlot={(
+            <AiAttachmentTray
+              uploads={aiAgent.uploads}
+              attachedIds={aiAgent.attachedIds}
+              onDetach={aiAgent.detachUpload}
+            />
+          )}
         />
       </div>
 
