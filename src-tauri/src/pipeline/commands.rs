@@ -44,10 +44,18 @@ pub struct Orchestrator {
 
 impl Orchestrator {
     pub fn new(app: &tauri::AppHandle) -> Self {
+        let flow_step_timeout = crate::ai::provider_capability::capability_for_config(
+            &crate::ai::config::load_config(),
+        )
+        .map(|capability| std::time::Duration::from_millis(capability.flow_step_deadline_ms))
+        .unwrap_or_else(|_| std::time::Duration::from_secs(180));
         Orchestrator {
-            pipeline: Arc::new(Pipeline::with_default_agents_and_matting(
-                crate::matting::commands::resolve_model_path(app),
-            )),
+            pipeline: Arc::new(
+                Pipeline::with_default_agents_and_matting(
+                    crate::matting::commands::resolve_model_path(app),
+                )
+                .with_step_timeout(flow_step_timeout),
+            ),
             runs: RunRegistry::new(),
         }
     }

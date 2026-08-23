@@ -96,8 +96,10 @@ enum Action {
 pub struct Pipeline {
     agents: AgentRegistry,
     figure_matting_model: Result<std::path::PathBuf, String>,
-    step_timeout: Option<Duration>,
+    step_timeout: Duration,
 }
+
+const DEFAULT_PROVIDER_STEP_TIMEOUT: Duration = Duration::from_secs(180);
 
 struct ConfiguredAssetGenerator {
     local_fallback: bool,
@@ -347,7 +349,7 @@ impl Pipeline {
         Pipeline {
             agents,
             figure_matting_model: Err("figure matting model is not configured".to_string()),
-            step_timeout: None,
+            step_timeout: DEFAULT_PROVIDER_STEP_TIMEOUT,
         }
     }
 
@@ -361,15 +363,20 @@ impl Pipeline {
         Self {
             agents: AgentRegistry::with_defaults(),
             figure_matting_model,
-            step_timeout: None,
+            step_timeout: DEFAULT_PROVIDER_STEP_TIMEOUT,
         }
     }
 
     /// Cap each step's agent run with a timeout; on expiry the step fails and
     /// the run terminates as `RunStatus::Timeout` instead of hanging forever.
     pub fn with_step_timeout(mut self, timeout: Duration) -> Self {
-        self.step_timeout = Some(timeout);
+        self.step_timeout = timeout;
         self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn step_timeout(&self) -> Duration {
+        self.step_timeout
     }
 
     /// Create + persist a run, emit `RunStarted`, return a handle set to
@@ -922,19 +929,12 @@ impl Pipeline {
         } else {
             match self.agents.get(kind, agent_key.as_deref()) {
                 Some(agent) => {
-                    let timeout_sleep = async {
-                        match self.step_timeout {
-                            Some(timeout) => tokio::time::sleep(timeout).await,
-                            None => std::future::pending::<()>().await,
-                        }
-                    };
+                    let timeout_sleep = tokio::time::sleep(self.step_timeout);
                     tokio::select! {
                         result = agent.run(&ctx) => result,
                         _ = timeout_sleep => {
-                            if let Some(timeout) = self.step_timeout {
-                                self.fail_step_timeout(project_path, handle, sink, clock, id, timeout)
-                                    .await;
-                            }
+                            self.fail_step_timeout(project_path, handle, sink, clock, id, self.step_timeout)
+                                .await;
                             return;
                         }
                         _ = handle.cancel_notify.notified() => {

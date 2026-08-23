@@ -2081,6 +2081,7 @@ async fn download_generated_media(
 /// Reject SSRF-prone media download URLs: non-http(s) schemes and loopback/
 /// private/link-local/reserved hosts. A provider-returned media URL must point
 /// at a public endpoint, never the local machine or an internal network.
+#[cfg(test)]
 fn validate_media_download_url(url: &str) -> Result<(), String> {
     safe_media_fetch::validate_media_download_url(url).map(|_| ())
 }

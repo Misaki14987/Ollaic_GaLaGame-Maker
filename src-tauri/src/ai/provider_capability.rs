@@ -21,8 +21,6 @@ pub struct ProviderCapability {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequiredCapability {
     ChatTools,
-    JsonMode,
-    StreamingCancellation,
     MediaUrlOutput,
 }
 
@@ -30,10 +28,6 @@ impl ProviderCapability {
     pub fn require(self, required: RequiredCapability) -> Result<(), String> {
         let (supported, label) = match required {
             RequiredCapability::ChatTools => (self.chat_tools, "工具调用"),
-            RequiredCapability::JsonMode => (self.json_mode, "JSON 模式"),
-            RequiredCapability::StreamingCancellation => {
-                (self.streaming_cancellation, "流式取消")
-            }
             RequiredCapability::MediaUrlOutput => (self.media_url_output, "媒体 URL 输出"),
         };
         supported

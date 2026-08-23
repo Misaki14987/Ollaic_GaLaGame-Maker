@@ -86,6 +86,26 @@ impl Agent for HangingAgent {
     }
 }
 
+struct TimeoutOnceAgent {
+    calls: Arc<AtomicU32>,
+    output: AgentOutput,
+}
+impl Agent for TimeoutOnceAgent {
+    fn run<'a>(
+        &'a self,
+        _ctx: &'a AgentContext<'a>,
+    ) -> Pin<Box<dyn Future<Output = Result<AgentOutput, AgentError>> + Send + 'a>> {
+        let attempt = self.calls.fetch_add(1, Ordering::SeqCst);
+        let output = self.output.clone();
+        Box::pin(async move {
+            if attempt == 0 {
+                std::future::pending::<()>().await;
+            }
+            Ok(output)
+        })
+    }
+}
+
 /// An agent that fails the first N calls, then succeeds. For retry tests.
 struct OnceFailingAgent {
     fails_left: Arc<AsyncMutex<u32>>,
@@ -659,6 +679,32 @@ async fn pause_then_resume_completes_run() {
 
 // ---------- scheduler: timeout ----------
 
+#[test]
+fn production_pipeline_constructor_has_a_bounded_default_step_timeout() {
+    assert_eq!(
+        Pipeline::with_default_agents().step_timeout(),
+        Duration::from_secs(180)
+    );
+}
+
+#[test]
+fn provider_capability_can_override_the_production_step_timeout() {
+    let config = crate::ai::config::AiConfig {
+        provider: "custom".to_string(),
+        model: "long-running".to_string(),
+        api_key: String::new(),
+        base_url: "https://example.test/v1".to_string(),
+        capabilities: Some(crate::ai::config::ProviderCapabilityDeclaration {
+            flow_step_deadline_ms: Some(420_000),
+            ..Default::default()
+        }),
+    };
+    let capability = crate::ai::provider_capability::capability_for_config(&config).unwrap();
+    let pipeline = Pipeline::with_default_agents()
+        .with_step_timeout(Duration::from_millis(capability.flow_step_deadline_ms));
+    assert_eq!(pipeline.step_timeout(), Duration::from_secs(420));
+}
+
 #[tokio::test]
 async fn step_timeout_terminates_run_as_timeout() {
     let project = fresh_project("timeout");
@@ -702,6 +748,49 @@ async fn step_timeout_terminates_run_as_timeout() {
         .as_deref()
         .unwrap()
         .contains("timed out"));
+}
+
+#[tokio::test]
+async fn retry_after_step_timeout_can_complete() {
+    let project = fresh_project("timeout_retry");
+    let sink = Arc::new(RecordingSink::new());
+    let clock = StepClock::new();
+    let calls = Arc::new(AtomicU32::new(0));
+    let mut agents = AgentRegistry::with_defaults();
+    agents.register(
+        StepKind::Plan,
+        Box::new(TimeoutOnceAgent {
+            calls: calls.clone(),
+            output: synopsis_output("retry completed"),
+        }),
+    );
+    let pipeline = Arc::new(Pipeline::new(agents).with_step_timeout(Duration::from_millis(30)));
+    let recipe = FlowRecipe::new().step(StepDef::new("plan", StepKind::Plan));
+    let handle = pipeline
+        .create_run(
+            &project,
+            "run_timeout_retry",
+            "brief",
+            &recipe,
+            &clock,
+            sink.as_ref(),
+        )
+        .unwrap();
+
+    pipeline
+        .execute(&project, handle.clone(), sink.as_ref(), &clock)
+        .await;
+    assert_eq!(handle.state().lock().await.status, RunStatus::Timeout);
+
+    handle
+        .retry_step(&project, "plan", sink.as_ref(), &clock)
+        .await
+        .unwrap();
+    pipeline
+        .execute(&project, handle.clone(), sink.as_ref(), &clock)
+        .await;
+    assert_eq!(handle.state().lock().await.status, RunStatus::Completed);
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
 }
 
 // ---------- scheduler: crash-resume ----------
