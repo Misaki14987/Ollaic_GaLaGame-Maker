@@ -1,3 +1,4 @@
+use super::batch_tts_transaction::{publish_batch, PreparedVoiceAsset};
 use super::chat_runs::ChatRunRegistry;
 use super::config::{self, AiConfig, AiProviderConfig};
 use super::provider_capability::{capability_for_config, ProviderCapability, RequiredCapability};
@@ -2457,6 +2458,16 @@ pub struct BatchTtsProgress {
     pub asset_name: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BatchTtsFailure {
+    code: &'static str,
+    failed_index: usize,
+    voice_card_id: String,
+    generated_count: usize,
+    message: String,
+}
+
 /// Generate TTS audio for multiple voice cards in sequence, emitting progress
 /// events via `batch-tts-progress` so the UI can show per-item status.
 #[tauri::command]
@@ -2475,7 +2486,7 @@ pub async fn generate_batch_tts(
     }
 
     let total = items.len();
-    let mut results: Vec<BatchTtsProgress> = Vec::with_capacity(total);
+    let mut prepared = Vec::with_capacity(total);
     let response_format = normalize_audio_format(&format);
 
     // Resolve a friendly filename stem for each card from its `target_stem`
@@ -2533,89 +2544,68 @@ pub async fn generate_batch_tts(
             )),
         };
 
-        match gen_result {
-            Ok(media) => {
-                // Save the audio file to disk, preferring the card's friendly
-                // target stem and falling back to the id-based name. Use the
-                // extension reported by the provider (e.g. Qwen-TTS returns wav
-                // regardless of the requested response_format) so the file's
-                // contents and extension always match.
-                let stem = stem_map
-                    .get(&item.voice_card_id)
-                    .cloned()
-                    .unwrap_or_else(|| format!("vo_batch_{}", item.voice_card_id));
-                let filename = format!("{}.{}", stem, media.extension);
-                let save = crate::assets::commands::save_generated_asset(
-                    project_path.clone(),
-                    "vocal".to_string(),
-                    filename.clone(),
-                    media.base64_data.clone(),
-                );
-                let asset_name = match save {
-                    Ok(info) => info.name,
-                    Err(e) => {
-                        let err_progress = BatchTtsProgress {
-                            voice_card_id: item.voice_card_id.clone(),
-                            index,
-                            total,
-                            status: "error".to_string(),
-                            message: format!("保存音频文件失败: {e}"),
-                            asset_name: None,
-                        };
-                        let _ = app_handle.emit("batch-tts-progress", &err_progress);
-                        results.push(err_progress);
-                        continue;
-                    }
-                };
-
-                // Update VoiceAssetCard
-                if let Ok(mut asset_meta) =
-                    crate::assets::commands::read_asset_metadata(&project_path)
-                {
-                    if let Some(card) = asset_meta.voice_cards.get_mut(&item.voice_card_id) {
-                        card.voice_asset = Some(asset_name.clone());
-                        // Update tags
-                        let tag_key = format!("vocal/{}", card.target_stem);
-                        let mut tags: Vec<String> =
-                            asset_meta.tags.get(&tag_key).cloned().unwrap_or_default();
-                        tags.retain(|t| !t.starts_with("status:"));
-                        tags.push("status:done".to_string());
-                        tags.retain(|t| !t.starts_with("source:"));
-                        tags.push("source:ai".to_string());
-                        asset_meta.tags.insert(tag_key, tags);
-                        let _ = crate::assets::commands::write_asset_metadata(
-                            &project_path,
-                            &asset_meta,
-                        );
-                    }
-                }
-
-                let progress_done = BatchTtsProgress {
-                    voice_card_id: item.voice_card_id.clone(),
-                    index,
-                    total,
-                    status: "done".to_string(),
-                    message: format!("完成 {}/{}: {}", index + 1, total, asset_name),
-                    asset_name: Some(asset_name),
-                };
-                let _ = app_handle.emit("batch-tts-progress", &progress_done);
-                results.push(progress_done);
-            }
-            Err(err) => {
-                let progress_err = BatchTtsProgress {
+        let media = match gen_result {
+            Ok(media) => media,
+            Err(message) => {
+                let progress = BatchTtsProgress {
                     voice_card_id: item.voice_card_id.clone(),
                     index,
                     total,
                     status: "error".to_string(),
-                    message: format!("生成失败: {err}"),
+                    message: format!("生成失败: {message}"),
                     asset_name: None,
                 };
-                let _ = app_handle.emit("batch-tts-progress", &progress_err);
-                results.push(progress_err);
+                let _ = app_handle.emit("batch-tts-progress", &progress);
+                let failure = BatchTtsFailure {
+                    code: "batch_tts_generation_failed",
+                    failed_index: index,
+                    voice_card_id: item.voice_card_id.clone(),
+                    generated_count: prepared.len(),
+                    message,
+                };
+                return Err(
+                    serde_json::to_string(&failure).unwrap_or_else(|error| error.to_string())
+                );
             }
-        }
+        };
+        let stem = stem_map
+            .get(&item.voice_card_id)
+            .cloned()
+            .unwrap_or_else(|| format!("vo_batch_{}", item.voice_card_id));
+        let filename = format!("{}.{}", stem, media.extension);
+        let encoded = media
+            .base64_data
+            .split_once(',')
+            .map(|(_, payload)| payload)
+            .unwrap_or(media.base64_data.as_str());
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded.trim())
+            .map_err(|error| format!("解析批量语音结果失败: {error}"))?;
+        prepared.push(PreparedVoiceAsset::new(
+            item.voice_card_id.clone(),
+            filename,
+            bytes,
+        ));
     }
 
+    let published = publish_batch(std::path::Path::new(&project_path), prepared).await?;
+    let results = items
+        .iter()
+        .zip(published)
+        .enumerate()
+        .map(|(index, (item, asset_name))| {
+            let progress = BatchTtsProgress {
+                voice_card_id: item.voice_card_id.clone(),
+                index,
+                total,
+                status: "done".to_string(),
+                message: format!("完成 {}/{}: {}", index + 1, total, asset_name),
+                asset_name: Some(asset_name),
+            };
+            let _ = app_handle.emit("batch-tts-progress", &progress);
+            progress
+        })
+        .collect();
     Ok(results)
 }
 
