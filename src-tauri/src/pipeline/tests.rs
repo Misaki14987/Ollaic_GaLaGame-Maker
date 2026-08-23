@@ -6,9 +6,9 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Barrier, Mutex as StdMutex};
+use std::sync::Arc;
 
-use tokio::sync::{oneshot, Mutex as AsyncMutex, Notify};
+use tokio::sync::{Mutex as AsyncMutex, Notify, Semaphore};
 use tokio::time::{sleep, timeout, Duration};
 
 use crate::agents::{Agent, AgentContext, AgentError, AgentOutput, AgentRegistry};
@@ -84,25 +84,6 @@ impl Agent for HangingAgent {
         &'a self,
         _ctx: &'a AgentContext<'a>,
     ) -> Pin<Box<dyn Future<Output = Result<AgentOutput, AgentError>> + Send + 'a>> {
-        Box::pin(std::future::pending())
-    }
-}
-
-/// Blocks synchronously inside `Agent::run`, after StepStarted but before the
-/// scheduler can finish constructing its cancellation wait branch.
-struct RegistrationRaceAgent {
-    entered: StdMutex<Option<oneshot::Sender<()>>>,
-    release: Arc<Barrier>,
-}
-impl Agent for RegistrationRaceAgent {
-    fn run<'a>(
-        &'a self,
-        _ctx: &'a AgentContext<'a>,
-    ) -> Pin<Box<dyn Future<Output = Result<AgentOutput, AgentError>> + Send + 'a>> {
-        if let Some(sender) = self.entered.lock().unwrap().take() {
-            let _ = sender.send(());
-        }
-        self.release.wait();
         Box::pin(std::future::pending())
     }
 }
@@ -718,11 +699,107 @@ async fn step_timeout_terminates_run_as_timeout() {
     assert_eq!(run_state.status, RunStatus::Timeout);
     let plan = run_state.find_step("plan").unwrap();
     assert_eq!(plan.status, StepStatus::Failed);
-    assert!(plan
+    assert!(plan.error.as_deref().unwrap().contains("timed out"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn asset_queue_timeout_is_persisted_as_timeout_not_cancellation() {
+    let project = fresh_project("asset_queue_timeout");
+    let sink = Arc::new(RecordingSink::new());
+    let clock = StepClock::new();
+    let started = Arc::new(Semaphore::new(0));
+
+    let pipeline = Arc::new(
+        Pipeline::with_default_agents()
+            .with_hanging_asset_queue_for_test(started.clone())
+            .with_step_timeout(Duration::from_secs(30)),
+    );
+    let recipe =
+        FlowRecipe::new().step(StepDef::new("assetQueue", StepKind::Asset).agent("assetQueue"));
+    let handle = pipeline
+        .create_run(
+            &project,
+            "run_asset_queue_timeout",
+            "brief",
+            &recipe,
+            &clock,
+            sink.as_ref(),
+        )
+        .unwrap();
+    let task = {
+        let pipeline = pipeline.clone();
+        let project = project.clone();
+        let handle = handle.clone();
+        let sink = sink.clone();
+        tokio::spawn(async move {
+            pipeline
+                .execute(&project, handle, sink.as_ref(), &SystemClock)
+                .await;
+        })
+    };
+
+    started.acquire().await.unwrap().forget();
+    tokio::time::advance(Duration::from_secs(30)).await;
+    task.await.unwrap();
+
+    let persisted = crate::pipeline::load_run_state(&project, "run_asset_queue_timeout")
+        .unwrap()
+        .unwrap();
+    assert_eq!(persisted.status, RunStatus::Timeout);
+    assert_ne!(persisted.status, RunStatus::Cancelled);
+    assert!(persisted
+        .find_step("assetQueue")
+        .unwrap()
         .error
         .as_deref()
         .unwrap()
         .contains("timed out"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn asset_queue_user_stop_is_cancelled_not_timeout() {
+    let project = fresh_project("asset_queue_cancelled");
+    let sink = Arc::new(RecordingSink::new());
+    let clock = StepClock::new();
+    let started = Arc::new(Semaphore::new(0));
+    let pipeline = Arc::new(
+        Pipeline::with_default_agents()
+            .with_hanging_asset_queue_for_test(started.clone())
+            .with_step_timeout(Duration::from_secs(30)),
+    );
+    let recipe =
+        FlowRecipe::new().step(StepDef::new("assetQueue", StepKind::Asset).agent("assetQueue"));
+    let handle = pipeline
+        .create_run(
+            &project,
+            "run_asset_queue_cancelled",
+            "brief",
+            &recipe,
+            &clock,
+            sink.as_ref(),
+        )
+        .unwrap();
+    let task = {
+        let pipeline = pipeline.clone();
+        let project = project.clone();
+        let handle = handle.clone();
+        let sink = sink.clone();
+        tokio::spawn(async move {
+            pipeline
+                .execute(&project, handle, sink.as_ref(), &SystemClock)
+                .await;
+        })
+    };
+
+    started.acquire().await.unwrap().forget();
+    handle.stop(&project, sink.as_ref(), &clock).await.unwrap();
+    task.await.unwrap();
+
+    let persisted = crate::pipeline::load_run_state(&project, "run_asset_queue_cancelled")
+        .unwrap()
+        .unwrap();
+    assert_eq!(persisted.status, RunStatus::Cancelled);
+    assert_ne!(persisted.status, RunStatus::Timeout);
 }
 
 #[tokio::test(start_paused = true)]
@@ -1577,17 +1654,16 @@ async fn stop_between_step_started_and_cancel_wait_registration_is_not_lost() {
     let project = fresh_project("stop_registration_race");
     let sink = Arc::new(RecordingSink::new());
     let clock = StepClock::new();
-    let release = Arc::new(Barrier::new(2));
-    let (entered_tx, entered_rx) = oneshot::channel();
+    let before_registration = Arc::new(Semaphore::new(0));
+    let release_registration = Arc::new(Semaphore::new(0));
     let mut agents = AgentRegistry::with_defaults();
-    agents.register(
-        StepKind::Plan,
-        Box::new(RegistrationRaceAgent {
-            entered: StdMutex::new(Some(entered_tx)),
-            release: release.clone(),
-        }),
+    agents.register(StepKind::Plan, Box::new(HangingAgent));
+    let pipeline = Arc::new(
+        Pipeline::new(agents).with_cancel_wait_registration_hook_for_test(
+            before_registration.clone(),
+            release_registration.clone(),
+        ),
     );
-    let pipeline = Arc::new(Pipeline::new(agents));
     let recipe = FlowRecipe::new().step(StepDef::new("plan", StepKind::Plan));
     let handle = pipeline
         .create_run(
@@ -1611,12 +1687,9 @@ async fn stop_between_step_started_and_cancel_wait_registration_is_not_lost() {
         })
     };
 
-    timeout(Duration::from_secs(1), entered_rx)
-        .await
-        .expect("agent did not reach the pre-registration gate")
-        .unwrap();
+    before_registration.acquire().await.unwrap().forget();
     handle.stop(&project, sink.as_ref(), &clock).await.unwrap();
-    release.wait();
+    release_registration.add_permits(1);
 
     timeout(Duration::from_secs(1), task)
         .await

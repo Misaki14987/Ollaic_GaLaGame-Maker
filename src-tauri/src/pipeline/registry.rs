@@ -38,10 +38,6 @@ impl RunRegistry {
         self.runs.lock().await.contains_key(run_id)
     }
 
-    pub async fn get(&self, run_id: &str) -> Option<ManagedRun> {
-        self.runs.lock().await.get(run_id).cloned()
-    }
-
     /// Resolve a live run, rejecting cross-project access.
     pub async fn resolve(&self, run_id: &str, caller_project: &Path) -> Result<ManagedRun, String> {
         let guard = self.runs.lock().await;
@@ -57,6 +53,28 @@ impl RunRegistry {
             ));
         }
         Ok(entry.clone())
+    }
+
+    /// Resolve a live run when present, while preserving the caller's ability
+    /// to fall back to project-owned persisted state when no live run exists.
+    pub async fn resolve_if_present(
+        &self,
+        run_id: &str,
+        caller_project: &Path,
+    ) -> Result<Option<ManagedRun>, String> {
+        let guard = self.runs.lock().await;
+        let Some(entry) = guard.get(run_id) else {
+            return Ok(None);
+        };
+        if entry.project_path != caller_project {
+            return Err(format!(
+                "run {} belongs to project {}, not {}",
+                run_id,
+                entry.project_path.display(),
+                caller_project.display()
+            ));
+        }
+        Ok(Some(entry.clone()))
     }
 
     /// Insert a run if absent; reject if a run with this id already exists
@@ -161,6 +179,29 @@ mod tests {
         assert!(registry.resolve("run_a", &path_a).await.is_ok());
         let err = registry.resolve("run_a", &path_b).await.err().unwrap();
         assert!(err.contains("belongs to project"));
+    }
+
+    #[tokio::test]
+    async fn optional_live_resolution_rejects_cross_project_access_without_hiding_missing_runs() {
+        let root = TestRoot::new("optional_resolve");
+        let registry = RunRegistry::new();
+        let path_a = root.project("a");
+        let path_b = root.project("b");
+        registry
+            .insert("run_a".to_string(), make_run(&path_a, "run_a"))
+            .await;
+
+        assert!(registry
+            .resolve_if_present("missing", &path_b)
+            .await
+            .unwrap()
+            .is_none());
+        let error = registry
+            .resolve_if_present("run_a", &path_b)
+            .await
+            .err()
+            .unwrap();
+        assert!(error.contains("belongs to project"));
     }
 
     #[tokio::test]

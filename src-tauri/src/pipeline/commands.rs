@@ -142,18 +142,6 @@ pub async fn pipeline_start(
     Ok(run_id)
 }
 
-async fn with_run<F, R>(orchestrator: &Orchestrator, run_id: &str, f: F) -> Result<R, String>
-where
-    F: FnOnce(&ManagedRun) -> Result<R, String>,
-{
-    let entry = orchestrator
-        .runs
-        .get(run_id)
-        .await
-        .ok_or_else(|| format!("run not found: {}", run_id))?;
-    f(&entry)
-}
-
 async fn attach_run_if_needed(
     orchestrator: &Orchestrator,
     project_path: &PathBuf,
@@ -180,11 +168,11 @@ pub async fn pipeline_pause(
     orchestrator: tauri::State<'_, Orchestrator>,
     app: tauri::AppHandle,
     run_id: String,
+    project_path: String,
 ) -> Result<(), String> {
-    let (handle, project_path) = with_run(&orchestrator, &run_id, |e| {
-        Ok((e.handle.clone(), e.project_path.clone()))
-    })
-    .await?;
+    let requested_path = PathBuf::from(project_path);
+    let entry = orchestrator.runs.resolve(&run_id, &requested_path).await?;
+    let (handle, project_path) = (entry.handle.clone(), entry.project_path.clone());
     handle
         .pause(&project_path, &make_sink(&app), &SystemClock)
         .await
@@ -199,11 +187,15 @@ pub async fn pipeline_resume(
     orchestrator: tauri::State<'_, Orchestrator>,
     app: tauri::AppHandle,
     run_id: String,
+    project_path: String,
 ) -> Result<(), String> {
-    let (handle, project_path, driving) = with_run(&orchestrator, &run_id, |e| {
-        Ok((e.handle.clone(), e.project_path.clone(), e.driving.clone()))
-    })
-    .await?;
+    let requested_path = PathBuf::from(project_path);
+    let entry = orchestrator.runs.resolve(&run_id, &requested_path).await?;
+    let (handle, project_path, driving) = (
+        entry.handle.clone(),
+        entry.project_path.clone(),
+        entry.driving.clone(),
+    );
     handle
         .resume(&project_path, &make_sink(&app), &SystemClock)
         .await
@@ -228,11 +220,11 @@ pub async fn pipeline_stop(
     orchestrator: tauri::State<'_, Orchestrator>,
     app: tauri::AppHandle,
     run_id: String,
+    project_path: String,
 ) -> Result<(), String> {
-    let (handle, project_path) = with_run(&orchestrator, &run_id, |entry| {
-        Ok((entry.handle.clone(), entry.project_path.clone()))
-    })
-    .await?;
+    let requested_path = PathBuf::from(project_path);
+    let entry = orchestrator.runs.resolve(&run_id, &requested_path).await?;
+    let (handle, project_path) = (entry.handle.clone(), entry.project_path.clone());
     handle
         .stop(&project_path, &make_sink(&app), &SystemClock)
         .await
@@ -252,14 +244,12 @@ pub async fn pipeline_step_once(
 ) -> Result<(), String> {
     let requested_path = PathBuf::from(project_path);
     attach_run_if_needed(&orchestrator, &requested_path, &run_id).await?;
-    let (handle, project_path, driving) = with_run(&orchestrator, &run_id, |entry| {
-        Ok((
-            entry.handle.clone(),
-            entry.project_path.clone(),
-            entry.driving.clone(),
-        ))
-    })
-    .await?;
+    let entry = orchestrator.runs.resolve(&run_id, &requested_path).await?;
+    let (handle, project_path, driving) = (
+        entry.handle.clone(),
+        entry.project_path.clone(),
+        entry.driving.clone(),
+    );
     handle
         .step_once(&project_path, &make_sink(&app), &SystemClock)
         .await
@@ -289,18 +279,12 @@ pub async fn pipeline_retry_step(
 ) -> Result<(), String> {
     let requested_path = PathBuf::from(project_path);
     attach_run_if_needed(&orchestrator, &requested_path, &run_id).await?;
-    let (handle, project_path, driving) = {
-        let entry = orchestrator
-            .runs
-            .get(&run_id)
-            .await
-            .ok_or_else(|| format!("run not found: {}", run_id))?;
-        (
-            entry.handle.clone(),
-            entry.project_path.clone(),
-            entry.driving.clone(),
-        )
-    };
+    let entry = orchestrator.runs.resolve(&run_id, &requested_path).await?;
+    let (handle, project_path, driving) = (
+        entry.handle.clone(),
+        entry.project_path.clone(),
+        entry.driving.clone(),
+    );
     handle
         .retry_step(&project_path, &step_id, &make_sink(&app), &SystemClock)
         .await
@@ -329,19 +313,15 @@ pub async fn pipeline_skip_step(
     app: tauri::AppHandle,
     run_id: String,
     step_id: String,
+    project_path: String,
 ) -> Result<(), String> {
-    let (handle, project_path, driving) = {
-        let entry = orchestrator
-            .runs
-            .get(&run_id)
-            .await
-            .ok_or_else(|| format!("run not found: {}", run_id))?;
-        (
-            entry.handle.clone(),
-            entry.project_path.clone(),
-            entry.driving.clone(),
-        )
-    };
+    let requested_path = PathBuf::from(project_path);
+    let entry = orchestrator.runs.resolve(&run_id, &requested_path).await?;
+    let (handle, project_path, driving) = (
+        entry.handle.clone(),
+        entry.project_path.clone(),
+        entry.driving.clone(),
+    );
     handle
         .skip_step(&project_path, &step_id, &make_sink(&app), &SystemClock)
         .await
@@ -367,11 +347,11 @@ pub async fn pipeline_update_dependencies(
     run_id: String,
     step_id: String,
     depends_on: Vec<String>,
+    project_path: String,
 ) -> Result<(), String> {
-    let (handle, project_path) = with_run(&orchestrator, &run_id, |entry| {
-        Ok((entry.handle.clone(), entry.project_path.clone()))
-    })
-    .await?;
+    let requested_path = PathBuf::from(project_path);
+    let entry = orchestrator.runs.resolve(&run_id, &requested_path).await?;
+    let (handle, project_path) = (entry.handle.clone(), entry.project_path.clone());
     handle
         .update_dependencies(&project_path, &step_id, depends_on, &SystemClock)
         .await
@@ -388,10 +368,8 @@ pub async fn pipeline_update_step_prompt(
 ) -> Result<(), String> {
     let requested_path = PathBuf::from(project_path);
     attach_run_if_needed(&orchestrator, &requested_path, &run_id).await?;
-    let (handle, project_path) = with_run(&orchestrator, &run_id, |entry| {
-        Ok((entry.handle.clone(), entry.project_path.clone()))
-    })
-    .await?;
+    let entry = orchestrator.runs.resolve(&run_id, &requested_path).await?;
+    let (handle, project_path) = (entry.handle.clone(), entry.project_path.clone());
     handle
         .update_step_prompt(&project_path, &step_id, prompt, &SystemClock)
         .await
@@ -406,14 +384,14 @@ pub async fn pipeline_set_run_pinned(
     project_path: String,
 ) -> Result<(), String> {
     let requested_path = PathBuf::from(project_path);
-    if let Some((handle, project_path)) = orchestrator
+    if let Some(entry) = orchestrator
         .runs
-        .get(&run_id)
-        .await
-        .map(|entry| (entry.handle.clone(), entry.project_path.clone()))
+        .resolve_if_present(&run_id, &requested_path)
+        .await?
     {
-        return handle
-            .set_pinned(&project_path, pinned, &SystemClock)
+        return entry
+            .handle
+            .set_pinned(&entry.project_path, pinned, &SystemClock)
             .await
             .map_err(|error| error.to_string());
     }
@@ -432,14 +410,14 @@ pub async fn pipeline_clear_run_history(
     project_path: String,
 ) -> Result<(), String> {
     let requested_path = PathBuf::from(project_path);
-    if let Some((handle, project_path)) = orchestrator
+    if let Some(entry) = orchestrator
         .runs
-        .get(&run_id)
-        .await
-        .map(|entry| (entry.handle.clone(), entry.project_path.clone()))
+        .resolve_if_present(&run_id, &requested_path)
+        .await?
     {
-        return handle
-            .clear_history(&project_path, &SystemClock)
+        return entry
+            .handle
+            .clear_history(&entry.project_path, &SystemClock)
             .await
             .map_err(|error| error.to_string());
     }
@@ -471,8 +449,12 @@ pub async fn pipeline_export_run_history(
     project_path: String,
 ) -> Result<String, String> {
     let requested_path = PathBuf::from(project_path);
-    if let Some(handle) = orchestrator.runs.get(&run_id).await.map(|entry| entry.handle.clone()) {
-        let state = handle.state().lock().await;
+    if let Some(entry) = orchestrator
+        .runs
+        .resolve_if_present(&run_id, &requested_path)
+        .await?
+    {
+        let state = entry.handle.state().lock().await;
         return serde_json::to_string_pretty(&*state).map_err(|error| error.to_string());
     }
     let state = store::load_run_state(&requested_path, &run_id)
@@ -485,9 +467,11 @@ pub async fn pipeline_export_run_history(
 pub async fn pipeline_get_state(
     orchestrator: tauri::State<'_, Orchestrator>,
     run_id: String,
+    project_path: String,
 ) -> Result<Option<RunState>, String> {
-    let handle = with_run(&orchestrator, &run_id, |e| Ok(e.handle.clone())).await?;
-    let state = handle.state().lock().await.clone();
+    let requested_path = PathBuf::from(project_path);
+    let entry = orchestrator.runs.resolve(&run_id, &requested_path).await?;
+    let state = entry.handle.state().lock().await.clone();
     Ok(Some(state))
 }
 
