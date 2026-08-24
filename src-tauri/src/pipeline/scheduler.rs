@@ -434,6 +434,33 @@ impl Pipeline {
         clock: &dyn Clock,
         sink: &dyn EventSink,
     ) -> Result<Arc<RunHandle>, PipelineError> {
+        self.create_run_with_timeout(
+            project_path,
+            run_id,
+            prompt,
+            recipe,
+            allow_local_fallback,
+            self.step_timeout,
+            clock,
+            sink,
+        )
+    }
+
+    /// Like [`Pipeline::create_run_with_options`] but lets the caller pass an
+    /// explicit per-run deadline. Used by [`Orchestrator::start`] so each new
+    /// Flow snapshots the Provider capability that was live at run creation
+    /// time and does not see later config edits.
+    pub fn create_run_with_timeout(
+        &self,
+        project_path: &Path,
+        run_id: &str,
+        prompt: &str,
+        recipe: &FlowRecipe,
+        allow_local_fallback: bool,
+        step_timeout: Option<Duration>,
+        clock: &dyn Clock,
+        sink: &dyn EventSink,
+    ) -> Result<Arc<RunHandle>, PipelineError> {
         recipe.validate().map_err(PipelineError::RecipeInvalid)?;
         // Validate or create the IR before writing any run state. An invalid
         // plan must not leave an orphan run that later bypasses validation.
@@ -528,6 +555,7 @@ impl Pipeline {
             pause_after_step: AtomicBool::new(false),
             cancelled: Arc::new(AtomicBool::new(false)),
             asset_binding_gate: Arc::new(Mutex::new(())),
+            step_timeout: self.step_timeout,
         }))
     }
 
@@ -582,6 +610,7 @@ impl Pipeline {
             pause_after_step: AtomicBool::new(false),
             cancelled: Arc::new(AtomicBool::new(false)),
             asset_binding_gate: Arc::new(Mutex::new(())),
+            step_timeout: self.step_timeout,
         }))
     }
 
@@ -927,7 +956,7 @@ impl Pipeline {
                 return;
             }
             let timeout_sleep = async {
-                match self.step_timeout {
+                match handle.step_timeout {
                     Some(timeout) => tokio::time::sleep(timeout).await,
                     None => std::future::pending::<()>().await,
                 }
@@ -937,7 +966,7 @@ impl Pipeline {
                 _ = &mut cancel_wait => return,
                 result = &mut queue_run => result,
                 _ = timeout_sleep => {
-                    if let Some(timeout) = self.step_timeout {
+                    if let Some(timeout) = handle.step_timeout {
                         self.fail_step_timeout(project_path, handle, sink, clock, id, timeout)
                             .await;
                     }
@@ -1018,7 +1047,7 @@ impl Pipeline {
                         return;
                     }
                     let timeout_sleep = async {
-                        match self.step_timeout {
+                        match handle.step_timeout {
                             Some(timeout) => tokio::time::sleep(timeout).await,
                             None => std::future::pending::<()>().await,
                         }
@@ -1032,7 +1061,7 @@ impl Pipeline {
                         }
                         result = agent_run => result,
                         _ = timeout_sleep => {
-                            if let Some(timeout) = self.step_timeout {
+                            if let Some(timeout) = handle.step_timeout {
                                 self.fail_step_timeout(project_path, handle, sink, clock, id, timeout)
                                     .await;
                             }

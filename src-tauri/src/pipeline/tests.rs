@@ -843,6 +843,136 @@ async fn production_constructor_times_out_a_hanging_agent() {
     assert_eq!(handle.state().lock().await.status, RunStatus::Timeout);
 }
 
+/// A run created with `create_run_with_timeout` keeps its custom deadline
+/// even when the underlying Pipeline was configured with a much longer
+/// default. This is the regression for the requirement: a new Flow must
+/// snapshot the Provider capability that was live at run-creation time and
+/// not inherit whatever the singleton Pipeline happened to have.
+#[tokio::test(start_paused = true)]
+async fn create_run_with_timeout_overrides_pipeline_default() {
+    let project = fresh_project("custom_deadline");
+    let sink = Arc::new(RecordingSink::new());
+    let clock = StepClock::new();
+    let mut agents = AgentRegistry::with_defaults();
+    agents.register(StepKind::Plan, Box::new(HangingAgent));
+    let pipeline = Pipeline::new(agents).with_step_timeout(Duration::from_secs(3600));
+
+    let recipe = FlowRecipe::new().step(StepDef::new("plan", StepKind::Plan));
+    let handle = pipeline
+        .create_run_with_timeout(
+            &project,
+            "run_custom_deadline",
+            "brief",
+            &recipe,
+            false,
+            Some(Duration::from_millis(50)),
+            &clock,
+            sink.as_ref(),
+        )
+        .unwrap();
+    assert_eq!(handle.step_timeout, Some(Duration::from_millis(50)));
+
+    let pipeline = Arc::new(pipeline);
+    let task = {
+        let pipeline = pipeline.clone();
+        let project = project.clone();
+        let handle = handle.clone();
+        let sink = sink.clone();
+        tokio::spawn(async move {
+            pipeline
+                .execute(&project, handle, sink.as_ref(), &SystemClock)
+                .await;
+        })
+    };
+
+    tokio::time::advance(Duration::from_millis(50)).await;
+    task.await.unwrap();
+    assert_eq!(handle.state().lock().await.status, RunStatus::Timeout);
+}
+
+/// Regression for "asset timeout 后 retry": a prior `RunStatus::Timeout` on
+/// the assetQueue step must allow a clean retry without deleting the run
+/// state. The retry surfaces the same deterministic failure again, proving
+/// the timeout recovery path runs rather than a cached skip.
+#[tokio::test(start_paused = true)]
+async fn asset_queue_retry_after_timeout_runs_again() {
+    let project = fresh_project("asset_queue_retry");
+    let sink = Arc::new(RecordingSink::new());
+    let clock = StepClock::new();
+    let started = Arc::new(Semaphore::new(0));
+    let pipeline = Arc::new(
+        Pipeline::with_default_agents()
+            .with_hanging_asset_queue_for_test(started.clone())
+            .with_step_timeout(Duration::from_secs(30)),
+    );
+    let recipe =
+        FlowRecipe::new().step(StepDef::new("assetQueue", StepKind::Asset).agent("assetQueue"));
+    let handle = pipeline
+        .create_run_with_timeout(
+            &project,
+            "run_retry",
+            "brief",
+            &recipe,
+            false,
+            Some(Duration::from_secs(30)),
+            &clock,
+            sink.as_ref(),
+        )
+        .unwrap();
+    let first = {
+        let pipeline = pipeline.clone();
+        let project = project.clone();
+        let handle = handle.clone();
+        let sink = sink.clone();
+        tokio::spawn(async move {
+            pipeline
+                .execute(&project, handle, sink.as_ref(), &SystemClock)
+                .await;
+        })
+    };
+    started.acquire().await.unwrap().forget();
+    tokio::time::advance(Duration::from_secs(30)).await;
+    first.await.unwrap();
+    assert_eq!(handle.state().lock().await.status, RunStatus::Timeout);
+
+    // Simulate a user retry: clear the assetQueue step and rerun. A clean
+    // Timeout must not silently disable retry; the step has to enter the
+    // select! again with a fresh hanging future.
+    let mut state = crate::pipeline::load_run_state(&project, "run_retry")
+        .unwrap()
+        .unwrap();
+    state.status = RunStatus::Running;
+    if let Some(step) = state.find_step_mut("assetQueue") {
+        step.status = StepStatus::Pending;
+        step.error = None;
+        step.started_at = None;
+        step.finished_at = None;
+    }
+    crate::pipeline::store::save_run_state(&project, &state).unwrap();
+    // The handle's in-memory state still records `Timeout` from the first
+    // run; reload it from disk so the second `execute` enters the normal
+    // loop instead of bailing out at the terminal-status guard.
+    {
+        let mut memory = handle.state.lock().await;
+        *memory = state;
+    }
+    let second = {
+        let pipeline = pipeline.clone();
+        let project = project.clone();
+        let handle = handle.clone();
+        let sink = sink.clone();
+        tokio::spawn(async move {
+            pipeline
+                .execute(&project, handle, sink.as_ref(), &SystemClock)
+                .await;
+        })
+    };
+    started.acquire().await.unwrap().forget();
+    tokio::time::advance(Duration::from_secs(31)).await;
+    second.await.unwrap();
+    assert_eq!(handle.state().lock().await.status, RunStatus::Timeout);
+}
+
 // ---------- scheduler: crash-resume ----------
 
 #[tokio::test]
