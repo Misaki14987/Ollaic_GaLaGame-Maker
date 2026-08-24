@@ -51,6 +51,19 @@ impl Orchestrator {
             runs: RunRegistry::new(),
         }
     }
+
+    /// Compute the deadline the next new Flow should use, by reading the
+    /// live Provider capability from disk. Capability is NOT cached at app
+    /// startup, so changing provider/model/custom `flow_step_deadline_ms`
+    /// after one Flow is in flight still affects the next new Flow, while
+    /// the in-flight Run keeps its creation-time snapshot.
+    pub fn flow_step_timeout_for_new_run(&self) -> Option<std::time::Duration> {
+        let capability = crate::ai::provider_capability::capability_for_config(
+            &crate::ai::config::load_config(),
+        )
+        .ok()?;
+        Some(capability.flow_step_timeout())
+    }
 }
 
 static RUN_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -111,14 +124,20 @@ pub async fn pipeline_start(
     let run_id = new_run_id();
     let recipe = default_recipe();
     let sink = make_sink(&app);
+    // Read the live Provider capability on every new Flow so a settings edit
+    // (provider/model/custom `flow_step_deadline_ms`) takes effect immediately
+    // for the next run. The in-flight run keeps its own creation-time snapshot
+    // so mid-flight changes cannot shift semantics on a live step.
+    let step_timeout = orchestrator.flow_step_timeout_for_new_run();
     let handle = orchestrator
         .pipeline
-        .create_run_with_options(
+        .create_run_with_timeout(
             &project_path,
             &run_id,
             &prompt,
             &recipe,
             allow_local_fallback == Some(true),
+            step_timeout,
             &SystemClock,
             &sink,
         )
