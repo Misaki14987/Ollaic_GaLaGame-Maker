@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { aiChatTurn, appendAiAgentTrace, getAiConfig, type AiChatMessage } from '../lib/ai-ipc';
+import { aiChatTurn, aiChatCancel, appendAiAgentTrace, getAiConfig, type AiChatMessage } from '../lib/ai-ipc';
 import {
   buildInlineUploadContext,
   buildUploadContext,
@@ -308,6 +308,13 @@ export function useAiAgent(params: UseAiAgentParams) {
   // an old request's finally only touches shared UI state when its token still
   // matches, so a stale request can't clobber a newer one.
   const requestTokenRef = useRef(0);
+  /// Per-Run identity shared with the backend `ChatRunRegistry`. Every awaited
+  /// continuation funnels through [`ownsRun`] before applying any side effect
+  /// (write trace, set error/status, replace messages, execute tools, publish
+  /// Preview) so a late success or late error from Run A cannot mutate the
+  /// UI after Run B has started or after Stop has fired.
+  const currentRunIdRef = useRef<string | null>(null);
+  const ownsRun = useCallback((runId: string) => currentRunIdRef.current === runId, []);
   const currentSceneNameRef = useRef(currentSceneName);
   const projectPathRef = useRef(projectPath);
   projectPathRef.current = projectPath;
@@ -472,9 +479,9 @@ export function useAiAgent(params: UseAiAgentParams) {
   }, [sceneHeaders, replaceAssistantMessage, setSelectedNode, setShowScript]);
 
   // --- Function-calling agent loop ----------------------------------------
-  const runAgentLoop = useCallback(async (text: string, assistantId: string, attachedUploadIds: string[]) => {
+  const runAgentLoop = useCallback(async (runId: string, text: string, assistantId: string, attachedUploadIds: string[]) => {
     const trace: AiAgentTrace = {
-      traceId: `trace-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      traceId: runId,
       createdAt: new Date().toISOString(),
       projectId,
       currentSceneName,
@@ -584,15 +591,26 @@ export function useAiAgent(params: UseAiAgentParams) {
     let finalText = '';
     const traceSummary: string[] = [];
     for (let turn = 0; turn < MAX_TURNS; turn += 1) {
+      if (!ownsRun(runId)) return;
       if (cancelledRef.current) return;
       setStatus(turn === 0 ? 'generating' : 'tooling');
       setStepLabel(turn === 0 ? '思考中…' : '继续分析…');
-      const res = await aiChatTurn(convo, toolDefs()).catch((e) => {
+      let res: Awaited<ReturnType<typeof aiChatTurn>>;
+      try {
+        res = await aiChatTurn(runId, convo, toolDefs());
+      } catch (e) {
+        // Late reject (e.g. Provider returned *after* Stop, or after Run B
+        // started): never write trace or surface an error unless this loop
+        // still owns the run. Dropping the rejection (rather than
+        // re-rejecting) also avoids an unhandled rejection when no one is
+        // awaiting this loop anymore.
+        if (!ownsRun(runId)) return;
         trace.outcome = 'error';
         trace.error = String(e);
         void writeAgentTrace(trace);
         throw e;
-      });
+      }
+      if (!ownsRun(runId)) return;
       if (cancelledRef.current) return;
       const turnText = res.text ?? '';
       const turnTrace: AiAgentTraceTurn = {
@@ -613,6 +631,7 @@ export function useAiAgent(params: UseAiAgentParams) {
       convo.push({ role: 'assistant', content: turnText, toolCalls: res.toolCalls });
       const stepCalls: StepToolCall[] = [];
       for (const call of res.toolCalls) {
+        if (!ownsRun(runId)) return;
         const label = stepLabelForTool(call.name, call.arguments, sceneHeaders);
         setStepLabel(label);
         const tool = getTool(call.name);
@@ -628,7 +647,9 @@ export function useAiAgent(params: UseAiAgentParams) {
         } else if (tool.kind === 'write') {
           try {
             const staged = (await tool.run(call.arguments, { projectPath, currentSceneName, attachedUploadIds })) as StagedWrite;
+            if (!ownsRun(runId)) return;
             const result = await stage(staged);
+            if (!ownsRun(runId)) return;
             resultPayload = JSON.parse(result.content) as unknown;
             content = result.content;
             ok = result.ok;
@@ -636,6 +657,7 @@ export function useAiAgent(params: UseAiAgentParams) {
           } catch (e) {
             // Arg validation failure — feed the explicit message back so the
             // model can fix its patch instead of aborting the whole loop.
+            if (!ownsRun(runId)) return;
             resultPayload = { staged: false, error: String(e) };
             content = JSON.stringify(resultPayload);
             ok = false;
@@ -644,14 +666,17 @@ export function useAiAgent(params: UseAiAgentParams) {
         } else {
           try {
             resultPayload = await tool.run(call.arguments, { projectPath, currentSceneName, attachedUploadIds });
+            if (!ownsRun(runId)) return;
             content = JSON.stringify(resultPayload);
           } catch (e) {
+            if (!ownsRun(runId)) return;
             resultPayload = { error: String(e) };
             content = JSON.stringify(resultPayload);
             ok = false;
             errMsg = String(e);
           }
         }
+        if (!ownsRun(runId)) return;
         turnTrace.toolCalls.push({
           id: call.id,
           name: call.name,
@@ -666,6 +691,7 @@ export function useAiAgent(params: UseAiAgentParams) {
         traceSummary.push(`${call.name}: ${ok ? 'ok' : `失败（${errMsg}）`}`);
         convo.push({ role: 'tool', content, toolCallId: call.id });
       }
+      if (!ownsRun(runId)) return;
       pushStep({ text: turnText || undefined, toolCalls: stepCalls });
 
       if (turn === MAX_TURNS - 1) {
@@ -736,12 +762,12 @@ export function useAiAgent(params: UseAiAgentParams) {
       trace.outcome = 'pending_preview';
     }
     void writeAgentTrace(trace);
-  }, [assets, buildAgentSystemContext, buildStagingContext, currentSceneName, projectId, sceneHeaders, finalizeChangeSet, messages, projectPath, setMessages]);
+  }, [assets, buildAgentSystemContext, buildStagingContext, currentSceneName, ownsRun, projectId, sceneHeaders, finalizeChangeSet, messages, projectPath, setMessages]);
 
   // --- Legacy single-shot for providers without function calling ----------
-  const runLegacyTurn = useCallback(async (text: string, assistantId: string, attachedUploadIds: string[]) => {
+  const runLegacyTurn = useCallback(async (runId: string, text: string, assistantId: string, attachedUploadIds: string[]) => {
     const trace: AiAgentTrace = {
-      traceId: `trace-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      traceId: runId,
       createdAt: new Date().toISOString(),
       projectId,
       currentSceneName,
@@ -762,16 +788,26 @@ export function useAiAgent(params: UseAiAgentParams) {
       ...truncateContextMessages(messages, 8),
       { role: 'user', content: text },
     ];
-    const res = await aiChatTurn(convo, []).catch((e) => {
+    let res: Awaited<ReturnType<typeof aiChatTurn>>;
+    try {
+      res = await aiChatTurn(runId, convo, []);
+    } catch (e) {
+      // Late reject: do not mutate the trace or UI for a Stopped run or for
+      // a run that has been superseded by Run B. Without this guard a
+      // Provider that does not honor transport cancellation would still
+      // flip the UI from `idle` back to `error` minutes later.
+      if (!ownsRun(runId)) return;
       trace.outcome = 'error';
       trace.error = String(e);
       void writeAgentTrace(trace);
       throw e;
-    });
+    }
+    if (!ownsRun(runId)) return;
     if (cancelledRef.current) return;
     setStepLabel('');
     trace.turns.push({ turn: 0, modelText: res.text ?? '', toolCalls: [] });
     const parsed = res.text ? extractEditorResponse(res.text) : null;
+    if (!ownsRun(runId)) return;
     if (!parsed) {
       trace.outcome = 'invalid_legacy_response';
       trace.finalText = res.text ?? '';
@@ -791,6 +827,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     }
     try {
       const freshAssets = projectPath ? await listAllAssets(projectPath).catch(() => assets) : assets;
+      if (!ownsRun(runId)) return;
       if (freshAssets !== assets) setAssets(freshAssets);
       trace.assetCount = freshAssets.length;
       const edit = await stageSceneEdit(
@@ -798,6 +835,7 @@ export function useAiAgent(params: UseAiAgentParams) {
         { tool: 'edit_scene', file: currentSceneName, patches: parsed.patches },
         buildStagingContext(freshAssets),
       );
+      if (!ownsRun(runId)) return;
       trace.edits = [describeEdit(edit, sceneHeaders)];
       if (!finalizeChangeSet([edit], assistantId)) {
         trace.outcome = 'no_executable_changes';
@@ -809,6 +847,11 @@ export function useAiAgent(params: UseAiAgentParams) {
         void writeAgentTrace(trace);
       }
     } catch (e) {
+      // Stage/edit failure must not flip UI to `error` once this run has
+      // been Stopped or superseded. Without this guard a Provider that
+      // races a Stop request would still write a stale trace row and a
+      // misleading error banner.
+      if (!ownsRun(runId)) return;
       const msg = isStageError(e) ? e.message : String(e);
       trace.outcome = 'stage_error';
       trace.error = msg;
@@ -816,7 +859,7 @@ export function useAiAgent(params: UseAiAgentParams) {
       setStatus('error');
       setError({ kind: 'other', retryable: true, message: msg });
     }
-  }, [assets, buildLegacySystemContext, buildStagingContext, currentSceneName, projectId, projectPath, sceneHeaders, finalizeChangeSet, messages, replaceAssistantMessage]);
+  }, [assets, buildLegacySystemContext, buildStagingContext, currentSceneName, ownsRun, projectId, projectPath, sceneHeaders, finalizeChangeSet, messages, replaceAssistantMessage]);
 
   const sendPrompt = useCallback(async (prompt: string, retryAttachmentIds?: string[]) => {
     const text = prompt.trim();
@@ -829,6 +872,13 @@ export function useAiAgent(params: UseAiAgentParams) {
     cancelledRef.current = false;
     const myToken = requestTokenRef.current + 1;
     requestTokenRef.current = myToken;
+    // Install the per-Run identity before any awaited IPC can resolve. Every
+    // awaited continuation in runAgentLoop / runLegacyTurn reads this ref
+    // through `ownsRun(runId)`. Replacing it on a new prompt instantly
+    // invalidates every in-flight callback for the previous Run, so late
+    // success/error cannot reach the UI.
+    const myRunId = `run-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    currentRunIdRef.current = myRunId;
     setError(null);
     setPendingChangeSet(null);
     setStatus('generating');
@@ -859,8 +909,8 @@ export function useAiAgent(params: UseAiAgentParams) {
     try {
       const cfg = await getAiConfig();
       const useFc = FC_PROVIDERS.has(cfg.provider);
-      if (useFc) await runAgentLoop(text, assistantId, sentIds);
-      else await runLegacyTurn(text, assistantId, sentIds);
+      if (useFc) await runAgentLoop(myRunId, text, assistantId, sentIds);
+      else await runLegacyTurn(myRunId, text, assistantId, sentIds);
       setRetryCount(0);
     } catch (e) {
       if (!cancelledRef.current) {
@@ -878,6 +928,10 @@ export function useAiAgent(params: UseAiAgentParams) {
         streamingIdRef.current = null;
         setBusy(false);
         setStepLabel('');
+        // Release the per-Run identity so any *late* Provider response that
+        // arrives after this finally runs is correctly classified as
+        // "superseded" by ownsRun checks inside runAgentLoop / runLegacyTurn.
+        if (currentRunIdRef.current === myRunId) currentRunIdRef.current = null;
       }
     }
   }, [attachedIds, busy, ensureTitleFromFirstMessage, messages, pendingChangeSet, replaceAssistantMessage, runAgentLoop, runLegacyTurn, setMessages, uploads]);
@@ -1212,6 +1266,14 @@ export function useAiAgent(params: UseAiAgentParams) {
     const stoppedId = streamingIdRef.current;
     streamingIdRef.current = null;
     inFlightRef.current = false;
+    // Revoke the active Run on the backend first; local ownership is also
+    // flipped so any later Provider response (whether the transport honored
+    // cancellation or not) is dropped by `ownsRun` checks before mutating UI.
+    const stoppingRunId = currentRunIdRef.current;
+    currentRunIdRef.current = null;
+    if (stoppingRunId) {
+      void aiChatCancel(stoppingRunId);
+    }
     if (stoppedId) {
       setMessages(prev => prev.map(message => (message.id === stoppedId ? { ...message, stopped: true } : message)));
     }
