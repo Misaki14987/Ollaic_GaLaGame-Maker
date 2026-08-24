@@ -26,6 +26,15 @@ const MAX_TRACE_FIELD_CHARS: usize = 50_000;
 const HTTP_REQUEST_TIMEOUT_SECS: u64 = 180;
 const MEDIA_DNS_TIMEOUT_SECS: u64 = 10;
 const MAX_MEDIA_REDIRECTS: usize = 10;
+/// Hard cap on a single media download. Provider-generated images rarely exceed
+/// ~25 MB and audio clips rarely exceed ~50 MB; anything larger is almost
+/// certainly a misconfigured endpoint or an attack, so refuse to allocate the
+/// buffer before it lands in memory.
+const MAX_MEDIA_BYTES: u64 = 64 * 1024 * 1024;
+/// Allowlist of Content-Types we will actually base64-embed. The extension
+/// guesser accepts the same set, so anything else would land as an unknown
+/// file and confuse downstream tools.
+const MEDIA_ALLOWED_PREFIXES: &[&str] = &["image/", "audio/"];
 
 /// A reqwest client with the standard request timeout applied. Using this
 /// everywhere prevents media/TTS HTTP calls from hanging forever when a
@@ -2079,6 +2088,22 @@ async fn download_generated_media(
     extension: &str,
     action: &str,
 ) -> Result<GeneratedMedia, String> {
+    // Refuse providers that have not declared they hand back usable media
+    // URLs. Otherwise a hostile or misconfigured provider can use this
+    // path to pivot the SSRF guard into a real network fetch — and a
+    // permissive `media_url_output` flag is exactly what we want to
+    // gate behind explicit acknowledgement. `AiProviderConfig` does not
+    // carry the optional `capabilities` declaration; the capability
+    // resolver falls back to the table default in that case.
+    let as_chat_config = AiConfig {
+        provider: cfg.provider.clone(),
+        model: cfg.model.clone(),
+        api_key: cfg.api_key.clone(),
+        base_url: cfg.base_url.clone(),
+        capabilities: None,
+    };
+    let capability = capability_for_config(&as_chat_config)?;
+    capability.require(RequiredCapability::MediaUrlOutput)?;
     let bytes = fetch_media_bytes_with_policy(url, &SystemMediaDnsResolver, |_, ip| {
         is_public_download_ip(ip)
     })
@@ -2239,11 +2264,55 @@ where
                 response.status()
             ));
         }
-        return response
-            .bytes()
-            .await
-            .map(|bytes| bytes.to_vec())
-            .map_err(|error| format!("读取生成媒体失败: {error}。可稍后重试。"));
+        // Reject oversized responses before allocating the full buffer: a
+        // declared Content-Length above the cap is a hard failure; chunked
+        // / unknown-length responses are bounded by MAX_MEDIA_BYTES while
+        // streaming so the producer cannot OOM the process.
+        if let Some(declared) = response.content_length() {
+            if declared > MAX_MEDIA_BYTES {
+                return Err(format!(
+                    "媒体下载 Content-Length {} 超过上限 {} 字节",
+                    declared, MAX_MEDIA_BYTES
+                ));
+            }
+        }
+        if let Some(content_type) = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+        {
+            let mime = content_type.split(';').next().unwrap_or("").trim();
+            if !MEDIA_ALLOWED_PREFIXES.iter().any(|prefix| mime.starts_with(prefix)) {
+                return Err(format!("媒体下载 Content-Type 不被接受: {mime}"));
+            }
+        }
+        let mut stream = response.bytes_stream();
+        let mut collected = Vec::new();
+        let mut received: u64 = 0;
+        while let Some(chunk) = stream.try_next().await.map_err(|error| {
+            format!("读取生成媒体失败: {error}。可稍后重试。")
+        })? {
+            // A single chunk larger than the cap (e.g. an attacker setting
+            // a huge Content-Length and never actually streaming it) would
+            // blow past the cumulative check on the next iteration, so
+            // fail fast on chunk size first.
+            if chunk.len() as u64 > MAX_MEDIA_BYTES {
+                return Err(format!(
+                    "媒体下载单个分块 {} 字节超过上限 {}",
+                    chunk.len(),
+                    MAX_MEDIA_BYTES
+                ));
+            }
+            received = received.saturating_add(chunk.len() as u64);
+            if received > MAX_MEDIA_BYTES {
+                return Err(format!(
+                    "媒体下载实际大小超过上限 {} 字节",
+                    MAX_MEDIA_BYTES
+                ));
+            }
+            collected.extend_from_slice(&chunk);
+        }
+        return Ok(collected);
     }
 
     unreachable!("redirect loop returns at its configured bound")
@@ -2418,6 +2487,7 @@ fn log_provider_event(
         model: model.to_string(),
         api_key: cfg.api_key.clone(),
         base_url: cfg.base_url.clone(),
+        capabilities: None,
     };
     log_ai_event(action, &chat_cfg, endpoint, success, message);
 }
