@@ -281,8 +281,15 @@ export async function aiChatStream(
  * One non-streaming agent turn. Sends conversation + available tools to the
  * model and returns either tool calls (to execute) or final text. Used by the
  * multi-step agent loop; pure-chat streaming still goes through aiChatStream.
+ *
+ * `runId` ties the IPC to the [`ChatRunRegistry`] on the backend so Stop can
+ * revoke the in-flight Provider future. Frontend ownership checks must run
+ * in every awaited continuation before any side effect is applied locally;
+ * the backend ownership alone does not stop local state mutations when a
+ * Provider transport does not honor cancellation.
  */
 export async function aiChatTurn(
+  runId: string,
   messages: AiChatMessage[],
   tools: ToolDef[],
   characterContext?: string,
@@ -293,9 +300,15 @@ export async function aiChatTurn(
     tool_calls: m.toolCalls?.map((c) => ({ id: c.id, name: c.name, arguments: c.arguments })) ?? null,
     tool_call_id: m.toolCallId ?? null,
   }));
-  return invoke<AiTurnResult>('ai_chat_turn', {
+  return invoke<AiTurnResult>('ai_chat_turn_owned', {
+    runId,
     messages: wireMessages,
     tools,
     characterContext,
   });
+}
+
+/** Tell the backend to cancel the chat run with this id. Idempotent. */
+export async function aiChatCancel(runId: string): Promise<boolean> {
+  return invoke<boolean>('ai_chat_cancel', { runId });
 }

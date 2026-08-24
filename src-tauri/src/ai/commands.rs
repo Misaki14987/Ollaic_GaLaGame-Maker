@@ -2,7 +2,7 @@ use super::chat_runs::ChatRunRegistry;
 use super::config::{self, AiConfig, AiProviderConfig};
 use super::provider_capability::{capability_for_config, ProviderCapability, RequiredCapability};
 use base64::Engine;
-use futures::{SinkExt, StreamExt};
+use futures::{SinkExt, StreamExt, TryStreamExt};
 use genai::adapter::AdapterKind;
 use genai::chat::{
     ChatMessage, ChatOptions, ChatRequest, ChatResponseFormat, ChatStreamEvent, StreamChunk, Tool,
