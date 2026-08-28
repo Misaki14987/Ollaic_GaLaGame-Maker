@@ -213,3 +213,8 @@ export type PipelineEvent =
   | { type: 'runCompleted'; runId: string }
   | { type: 'runFailed'; runId: string; error: string }
   | { type: 'runStopped'; runId: string };
+
+export interface PipelineEventRecord {
+  event: PipelineEvent;
+  receivedAt: number;
+}

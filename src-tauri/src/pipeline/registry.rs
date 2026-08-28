@@ -1,11 +1,12 @@
 //! Tauri-free registry of live runs with project ownership enforcement.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use crate::pipeline::scheduler::RunHandle;
+use crate::pipeline::run_control::RunHandle;
 
 /// A live run held in memory, bound to the project that owns it.
 #[derive(Clone)]
@@ -15,10 +16,8 @@ pub struct ManagedRun {
     pub driving: Arc<AtomicBool>,
 }
 
-/// Maps a `run_id` to its live `ManagedRun`. Resolves by id but refuses to
-/// hand a run to a caller whose project path differs, closing the cross-project
-/// run-id hijack where a run created in project A could be reached from
-/// project B.
+/// Maps a `run_id` to its live `ManagedRun` and serializes lifecycle changes
+/// that acquire a project's single active-run slot.
 pub struct RunRegistry {
     runs: tokio::sync::Mutex<HashMap<String, ManagedRun>>,
 }
@@ -30,12 +29,40 @@ impl RunRegistry {
         }
     }
 
-    pub async fn insert(&self, run_id: String, run: ManagedRun) {
+    #[cfg(test)]
+    async fn insert(&self, run_id: String, run: ManagedRun) {
         self.runs.lock().await.insert(run_id, run);
     }
 
-    pub async fn contains(&self, run_id: &str) -> bool {
-        self.runs.lock().await.contains_key(run_id)
+    /// Atomically reserve a project's active-run slot, create the run, and
+    /// publish it by id. A non-terminal run owns the project whether it is
+    /// currently running or paused.
+    pub async fn insert_active_with(
+        &self,
+        run_id: &str,
+        project_path: &Path,
+        make_run: impl FnOnce() -> Result<ManagedRun, String>,
+    ) -> Result<ManagedRun, String> {
+        let mut guard = self.runs.lock().await;
+        if let Some(existing) = guard.get(run_id) {
+            if same_project(&existing.project_path, project_path) {
+                return Err(format!(
+                    "run {} is already in memory for project {}; resume that live run instead",
+                    run_id,
+                    existing.project_path.display()
+                ));
+            }
+            return Err(format!(
+                "run {} belongs to project {}, not {}",
+                run_id,
+                existing.project_path.display(),
+                project_path.display()
+            ));
+        }
+        Self::ensure_project_available(&guard, project_path, run_id, None).await?;
+        let run = make_run()?;
+        guard.insert(run_id.to_string(), run.clone());
+        Ok(run)
     }
 
     /// Resolve a live run, rejecting cross-project access.
@@ -44,7 +71,7 @@ impl RunRegistry {
         let entry = guard
             .get(run_id)
             .ok_or_else(|| format!("run not found: {}", run_id))?;
-        if entry.project_path != caller_project {
+        if !same_project(&entry.project_path, caller_project) {
             return Err(format!(
                 "run {} belongs to project {}, not {}",
                 run_id,
@@ -66,7 +93,7 @@ impl RunRegistry {
         let Some(entry) = guard.get(run_id) else {
             return Ok(None);
         };
-        if entry.project_path != caller_project {
+        if !same_project(&entry.project_path, caller_project) {
             return Err(format!(
                 "run {} belongs to project {}, not {}",
                 run_id,
@@ -77,8 +104,8 @@ impl RunRegistry {
         Ok(Some(entry.clone()))
     }
 
-    /// Insert a run if absent; reject if a run with this id already exists
-    /// under a different project.
+    /// Insert a persisted run if absent without attaching it alongside a
+    /// different active run for the same project.
     pub async fn attach_if_needed(
         &self,
         run_id: &str,
@@ -87,7 +114,7 @@ impl RunRegistry {
     ) -> Result<(), String> {
         let mut guard = self.runs.lock().await;
         if let Some(existing) = guard.get(run_id) {
-            if existing.project_path != caller_project {
+            if !same_project(&existing.project_path, caller_project) {
                 return Err(format!(
                     "run {} belongs to project {}, not {}",
                     run_id,
@@ -97,10 +124,71 @@ impl RunRegistry {
             }
             return Ok(());
         }
+        Self::ensure_project_available(&guard, caller_project, run_id, None).await?;
         let run = make_run()?;
         guard.insert(run_id.to_string(), run);
         Ok(())
     }
+
+    /// Run an operation that may reactivate a terminal run while holding the
+    /// same project-level claim used by new starts and crash-resumes.
+    pub async fn with_project_activation<T, F, Fut>(
+        &self,
+        run_id: &str,
+        caller_project: &Path,
+        operation: F,
+    ) -> Result<T, String>
+    where
+        F: FnOnce(ManagedRun) -> Fut,
+        Fut: Future<Output = Result<T, String>>,
+    {
+        let guard = self.runs.lock().await;
+        let entry = guard
+            .get(run_id)
+            .ok_or_else(|| format!("run not found: {}", run_id))?;
+        if !same_project(&entry.project_path, caller_project) {
+            return Err(format!(
+                "run {} belongs to project {}, not {}",
+                run_id,
+                entry.project_path.display(),
+                caller_project.display()
+            ));
+        }
+        Self::ensure_project_available(&guard, caller_project, run_id, Some(run_id)).await?;
+        operation(entry.clone()).await
+    }
+
+    async fn ensure_project_available(
+        runs: &HashMap<String, ManagedRun>,
+        project_path: &Path,
+        requested_run_id: &str,
+        excluded_run_id: Option<&str>,
+    ) -> Result<(), String> {
+        for (run_id, run) in runs {
+            if excluded_run_id == Some(run_id.as_str())
+                || !same_project(&run.project_path, project_path)
+            {
+                continue;
+            }
+            if !run.handle.state().lock().await.status.is_terminal() {
+                return Err(format!(
+                    "project {} already has active run {}; finish or stop it before activating run {}",
+                    project_path.display(),
+                    run_id,
+                    requested_run_id
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn same_project(left: &Path, right: &Path) -> bool {
+    project_key(left) == project_key(right)
+}
+
+fn project_key(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
 impl Default for RunRegistry {
@@ -115,8 +203,8 @@ mod tests {
     use crate::pipeline::dsl::default_recipe;
     use crate::pipeline::events::RecordingSink;
     use crate::pipeline::scheduler::Pipeline;
-    use crate::pipeline::state::SystemClock;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use crate::pipeline::state::{RunStatus, SystemClock};
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
     static NEXT_TEST_ROOT: AtomicU64 = AtomicU64::new(1);
 
@@ -147,12 +235,12 @@ mod tests {
     }
 
     fn make_run(project_path: &Path, run_id: &str) -> ManagedRun {
-        std::fs::create_dir_all(&project_path).unwrap();
+        std::fs::create_dir_all(project_path).unwrap();
         let pipeline = Pipeline::with_default_agents();
         let sink = RecordingSink::new();
         let handle = pipeline
             .create_run(
-                &project_path,
+                project_path,
                 run_id,
                 "brief",
                 &default_recipe(),
@@ -219,5 +307,100 @@ mod tests {
             .err()
             .unwrap();
         assert!(err.contains("belongs to project"));
+    }
+
+    #[tokio::test]
+    async fn concurrent_active_inserts_create_only_one_run_for_a_project() {
+        let root = TestRoot::new("concurrent_claim");
+        let project = root.project("project");
+        let registry = RunRegistry::new();
+        let creations = AtomicUsize::new(0);
+
+        let first = registry.insert_active_with("run_a", &project, || {
+            creations.fetch_add(1, Ordering::SeqCst);
+            Ok(make_run(&project, "run_a"))
+        });
+        let second = registry.insert_active_with("run_b", &project, || {
+            creations.fetch_add(1, Ordering::SeqCst);
+            Ok(make_run(&project, "run_b"))
+        });
+        let (first, second) = tokio::join!(first, second);
+
+        assert_eq!(usize::from(first.is_ok()) + usize::from(second.is_ok()), 1);
+        assert_eq!(creations.load(Ordering::SeqCst), 1);
+        let error = first.err().or_else(|| second.err()).unwrap();
+        assert!(error.contains("already has active run"));
+        assert!(error.contains("finish or stop it"));
+    }
+
+    #[tokio::test]
+    async fn terminal_run_releases_project_for_a_new_run() {
+        let root = TestRoot::new("terminal_release");
+        let project = root.project("project");
+        let registry = RunRegistry::new();
+        let first = registry
+            .insert_active_with("run_a", &project, || Ok(make_run(&project, "run_a")))
+            .await
+            .unwrap();
+        first.handle.state().lock().await.status = RunStatus::Completed;
+
+        registry
+            .insert_active_with("run_b", &project, || Ok(make_run(&project, "run_b")))
+            .await
+            .unwrap();
+
+        assert!(registry.resolve("run_a", &project).await.is_ok());
+        assert!(registry.resolve("run_b", &project).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn attach_does_not_mutate_a_project_owned_by_another_active_run() {
+        let root = TestRoot::new("attach_claim");
+        let project = root.project("project");
+        let registry = RunRegistry::new();
+        registry
+            .insert_active_with("run_a", &project, || Ok(make_run(&project, "run_a")))
+            .await
+            .unwrap();
+        let attached = AtomicBool::new(false);
+
+        let error = registry
+            .attach_if_needed("run_b", &project, || {
+                attached.store(true, Ordering::SeqCst);
+                Ok(make_run(&project, "run_b"))
+            })
+            .await
+            .unwrap_err();
+
+        assert!(!attached.load(Ordering::SeqCst));
+        assert!(error.contains("already has active run run_a"));
+    }
+
+    #[tokio::test]
+    async fn terminal_run_cannot_reactivate_while_a_new_run_owns_the_project() {
+        let root = TestRoot::new("reactivation_claim");
+        let project = root.project("project");
+        let registry = RunRegistry::new();
+        let first = registry
+            .insert_active_with("run_a", &project, || Ok(make_run(&project, "run_a")))
+            .await
+            .unwrap();
+        first.handle.state().lock().await.status = RunStatus::Failed;
+        registry
+            .insert_active_with("run_b", &project, || Ok(make_run(&project, "run_b")))
+            .await
+            .unwrap();
+        let reactivated = AtomicBool::new(false);
+
+        let error = registry
+            .with_project_activation("run_a", &project, |_| async {
+                reactivated.store(true, Ordering::SeqCst);
+                Ok(())
+            })
+            .await
+            .unwrap_err();
+
+        assert!(!reactivated.load(Ordering::SeqCst));
+        assert!(error.contains("already has active run run_b"));
     }
 }

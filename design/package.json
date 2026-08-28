@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
+    "lint": "eslint src/app/components/FlowBoard.tsx src/app/hooks/useFlowRunController.ts --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "dev": "vite",
     "preview": "vite preview",
@@ -47,7 +48,10 @@
     "@testing-library/user-event": "^14.6.1",
     "@types/react": "^18.3.23",
     "@types/react-dom": "^18.3.5",
+    "@typescript-eslint/parser": "^8.68.0",
     "@vitejs/plugin-react": "4.7.0",
+    "eslint": "^10.9.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "jsdom": "^29.1.1",
     "tailwindcss": "4.1.12",
     "typescript": "^5.7.3",

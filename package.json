@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "pnpm --dir design dev",
     "build": "pnpm --dir design build",
+    "lint": "pnpm --dir design lint",
     "typecheck": "pnpm --dir design typecheck",
     "preview": "pnpm --dir design preview",
     "test": "pnpm --dir design test && cargo test --manifest-path src-tauri/Cargo.toml",

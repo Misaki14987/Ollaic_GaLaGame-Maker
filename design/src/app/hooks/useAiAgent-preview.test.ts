@@ -22,6 +22,10 @@ vi.mock('../lib/ai-tools', () => ({
   toolDefs: vi.fn(() => []),
 }));
 
+vi.mock('../lib/ai-change-set-ipc', () => ({
+  applyAiChangeSet: vi.fn(async () => ({ outcome: 'applied' })),
+}));
+
 vi.mock('../lib/assets-ipc', () => ({
   listAllAssets: vi.fn(async () => []),
 }));
@@ -59,6 +63,7 @@ vi.mock('../lib/webgal-ipc', () => ({
 }));
 
 import { aiChatTurn } from '../lib/ai-ipc';
+import { applyAiChangeSet } from '../lib/ai-change-set-ipc';
 import { getTool } from '../lib/ai-tools';
 import { createCharacter, updateCharacter } from '../lib/character-ipc';
 import { createScene, deleteScene, readFileText, saveScene, updateSceneHeader } from '../lib/webgal-ipc';
@@ -127,10 +132,38 @@ describe('AI pending preview isolation', () => {
     expect(params.setScriptSource).not.toHaveBeenCalled();
     expect(params.setDirty).not.toHaveBeenCalled();
   });
+
+  it('does not replace the live buffer during force apply until the backend commit succeeds', async () => {
+    let finishCommit!: (value: { outcome: 'applied' }) => void;
+    vi.mocked(applyAiChangeSet).mockImplementationOnce(() => new Promise((resolve) => {
+      finishCommit = resolve;
+    }));
+    const params = makeParams({
+      nodes: [{ id: 'manual', type: 'comment', content: 'manual edit', flags: [], position: { x: 0, y: 0 }, connections: [] }],
+      scriptSource: 'manual edit',
+    });
+    const { result } = renderHook(() => useAiAgent(params), { wrapper: MemoryRouter });
+    await act(async () => { await result.current.sendPrompt('请修改场景'); });
+    await waitFor(() => { expect(result.current.pendingChangeSet).toBeTruthy(); });
+
+    let applyPromise!: Promise<void>;
+    act(() => { applyPromise = result.current.forceApplyChange(); });
+
+    expect(params.pushHistory).not.toHaveBeenCalled();
+    expect(params.setNodes).not.toHaveBeenCalled();
+    expect(params.setScriptSource).not.toHaveBeenCalled();
+
+    await act(async () => {
+      finishCommit({ outcome: 'applied' });
+      await applyPromise;
+    });
+    expect(params.setNodes).toHaveBeenCalled();
+    expect(params.setScriptSource).toHaveBeenCalled();
+  });
 });
 
-describe('create_scene rollback on mid-batch failure', () => {
-  it('deletes the scene file created before a later failure', async () => {
+describe('backend change-set recovery', () => {
+  it('reports a restored backend failure without attempting a second rollback in React', async () => {
     vi.mocked(aiChatTurn)
       .mockResolvedValueOnce({
         text: '',
@@ -143,8 +176,12 @@ describe('create_scene rollback on mid-batch failure', () => {
       schema: {},
       run: async () => ({ tool: 'create_scene', name: 'chapter_02', chapter: '第一章' }),
     } as never);
-    vi.mocked(createScene).mockResolvedValue('/tmp/proj/game/scene/chapter_02.txt');
-    vi.mocked(updateSceneHeader).mockRejectedValue(new Error('disk full'));
+    vi.mocked(applyAiChangeSet).mockResolvedValueOnce({
+      outcome: 'failed',
+      resource: 'scene',
+      message: 'disk full',
+      recovery: { status: 'restored' },
+    });
 
     const params = makeParams();
     const { result } = renderHook(() => useAiAgent(params), { wrapper: MemoryRouter });
@@ -154,7 +191,44 @@ describe('create_scene rollback on mid-batch failure', () => {
 
     await act(async () => { await result.current.acceptChange(); });
 
-    expect(vi.mocked(deleteScene)).toHaveBeenCalledWith('/tmp/proj/game/scene/chapter_02.txt');
+    expect(result.current.status).toBe('error');
+    expect(result.current.error?.message).toContain('项目已恢复到提交前状态');
+    expect(vi.mocked(deleteScene)).not.toHaveBeenCalled();
+  });
+
+  it('warns that the project may be partially written when snapshot recovery fails', async () => {
+    vi.mocked(aiChatTurn)
+      .mockResolvedValueOnce({
+        text: '',
+        toolCalls: [{ id: 'c1', name: 'create_scene', arguments: { name: 'chapter_02' } }],
+      } as unknown as AiTurnResult)
+      .mockResolvedValue({ text: 'done', toolCalls: [] } as unknown as AiTurnResult);
+    vi.mocked(getTool).mockReturnValue({
+      name: 'create_scene',
+      kind: 'write',
+      schema: {},
+      run: async () => ({ tool: 'create_scene', name: 'chapter_02' }),
+    } as never);
+    vi.mocked(applyAiChangeSet).mockResolvedValueOnce({
+      outcome: 'failed',
+      resource: 'memory',
+      message: 'disk full',
+      recovery: {
+        status: 'failed',
+        message: 'permission denied',
+        snapshotId: 'rollback-123',
+      },
+    });
+
+    const params = makeParams();
+    const { result } = renderHook(() => useAiAgent(params), { wrapper: MemoryRouter });
+    await act(async () => { await result.current.sendPrompt('创建场景'); });
+    await waitFor(() => { expect(result.current.pendingChangeSet).toBeTruthy(); });
+    await act(async () => { await result.current.acceptChange(); });
+
+    expect(result.current.error?.message).toContain('项目可能只写入了一部分');
+    expect(result.current.error?.message).toContain('rollback-123');
+    expect(result.current.error?.message).toContain('请先在快照管理中恢复它');
   });
 });
 
@@ -223,12 +297,20 @@ describe('same-turn created resource acceptance', () => {
     await act(async () => { await result.current.acceptChange(); });
 
     expect(result.current.status).toBe('accepted');
-    expect(vi.mocked(createScene)).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(saveScene)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(applyAiChangeSet)).toHaveBeenCalledTimes(1);
+    const persistedScene = vi.mocked(applyAiChangeSet).mock.calls[0]?.[1].edits
+      .find((edit) => edit.kind === 'create_scene');
+    expect(persistedScene).toEqual(expect.objectContaining({
+      kind: 'create_scene',
+      file: 'chapter_02.txt',
+    }));
+    expect(persistedScene?.kind === 'create_scene' ? persistedScene.initialContent : '').toContain('B:world;');
+    expect(vi.mocked(createScene)).not.toHaveBeenCalled();
+    expect(vi.mocked(saveScene)).not.toHaveBeenCalled();
     expect(vi.mocked(deleteScene)).not.toHaveBeenCalled();
   });
 
-  it('deletes a newly created scene when its merged content cannot be saved', async () => {
+  it('shows the backend recovery result when a newly created scene cannot be saved', async () => {
     vi.mocked(aiChatTurn)
       .mockResolvedValueOnce({
         text: '',
@@ -250,7 +332,12 @@ describe('same-turn created resource acceptance', () => {
           patches: [{ type: 'insert', file: 'chapter_02.txt', afterLine: 'end', text: 'B:world;' }],
         },
     }) as never);
-    vi.mocked(saveScene).mockRejectedValue(new Error('disk full'));
+    vi.mocked(applyAiChangeSet).mockResolvedValueOnce({
+      outcome: 'failed',
+      resource: 'scene',
+      message: 'disk full',
+      recovery: { status: 'restored' },
+    });
 
     const params = makeParams();
     const { result } = renderHook(() => useAiAgent(params), { wrapper: MemoryRouter });
@@ -259,7 +346,8 @@ describe('same-turn created resource acceptance', () => {
     await act(async () => { await result.current.acceptChange(); });
 
     expect(result.current.status).toBe('error');
-    expect(vi.mocked(deleteScene)).toHaveBeenCalledWith('/tmp/proj/game/scene/chapter_02.txt');
+    expect(result.current.error?.message).toContain('项目已恢复到提交前状态');
+    expect(vi.mocked(deleteScene)).not.toHaveBeenCalled();
   });
 
   it('keeps the pending change retryable when conflict re-read fails', async () => {
@@ -279,9 +367,13 @@ describe('same-turn created resource acceptance', () => {
         patches: [{ type: 'insert', file: 'other.txt', afterLine: 'end', text: 'B:world;' }],
       }),
     } as never);
-    vi.mocked(readFileText)
-      .mockResolvedValueOnce('')
-      .mockRejectedValueOnce(new Error('permission denied'));
+    vi.mocked(readFileText).mockResolvedValueOnce('');
+    vi.mocked(applyAiChangeSet).mockResolvedValueOnce({
+      outcome: 'failed',
+      resource: 'scene:other.txt',
+      message: 'permission denied',
+      recovery: { status: 'not_needed' },
+    });
 
     const params = makeParams();
     const { result } = renderHook(() => useAiAgent(params), { wrapper: MemoryRouter });
@@ -359,12 +451,16 @@ describe('same-turn created resource acceptance', () => {
     await act(async () => { await result.current.acceptChange(); });
 
     expect(result.current.status).toBe('accepted');
-    expect(vi.mocked(createCharacter)).toHaveBeenCalledTimes(1);
-    const createdDraft = vi.mocked(createCharacter).mock.calls[0]?.[1];
+    expect(vi.mocked(applyAiChangeSet)).toHaveBeenCalledTimes(1);
+    const createdDraft = vi.mocked(applyAiChangeSet).mock.calls[0]?.[1].edits
+      .find((edit) => edit.kind === 'create_character')?.draft;
+    expect(createdDraft).toBeTruthy();
+    if (!createdDraft) throw new Error('missing persisted create character edit');
     expect(createdDraft.personality).toBe('勇敢');
     expect(createdDraft.sprites).toEqual(expect.arrayContaining([
       expect.objectContaining({ emotion: 'happy', prompt: 'smiling' }),
     ]));
+    expect(vi.mocked(createCharacter)).not.toHaveBeenCalled();
     expect(vi.mocked(updateCharacter)).not.toHaveBeenCalled();
     dateNow.mockRestore();
     random.mockRestore();

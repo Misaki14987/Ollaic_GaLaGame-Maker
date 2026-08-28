@@ -8,6 +8,7 @@ mod characters;
 mod json_store;
 mod matting;
 mod pipeline;
+mod project_lock;
 mod story_plan;
 mod webgal;
 
@@ -204,6 +205,7 @@ fn main() {
             ai::commands::get_ai_log_path,
             ai::commands::get_ai_agent_trace_path,
             ai::commands::append_ai_agent_trace,
+            ai::change_set::apply_ai_change_set,
             ai::commands::generate_batch_tts,
             asset_queue::commands::asset_queue_get,
             asset_queue::commands::asset_queue_preview_artifact,

@@ -226,7 +226,7 @@ pub fn append_log_line_at(path: &PathBuf, line: &str) -> Result<(), String> {
     let dir = path
         .parent()
         .ok_or_else(|| "Unable to locate log directory".to_string())?;
-    fs::create_dir_all(&dir).map_err(|e| format!("Failed to create log directory: {e}"))?;
+    fs::create_dir_all(dir).map_err(|e| format!("Failed to create log directory: {e}"))?;
 
     use std::io::Write;
     let mut file = fs::OpenOptions::new()

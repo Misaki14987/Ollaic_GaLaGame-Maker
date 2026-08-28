@@ -12,15 +12,9 @@ import {
   type AiUploadContent,
 } from '../lib/ai-uploads-ipc';
 import { listAllAssets, type AssetInfo } from '../lib/assets-ipc';
-import {
-  extractSceneBackgroundAssets,
-  loadAssetMetadata,
-  saveAssetMetadata,
-  type AssetMetadata,
-  syncSceneCardsFromBackgrounds,
-} from '../lib/asset-metadata';
-import { createCharacter, deleteCharacter, listCharacters, updateCharacter } from '../lib/character-ipc';
+import { listCharacters } from '../lib/character-ipc';
 import type { Character } from '../lib/character-types';
+import { applyAiChangeSet, type ApplyChangeSetResult } from '../lib/ai-change-set-ipc';
 import {
   describeEdit,
   stageCharacterEdit,
@@ -34,8 +28,6 @@ import {
   stageAssetPlanEdit,
   stageSceneEdit,
   stageSceneHeaderEdit,
-  detectConflicts,
-  type AssetPlanEdit,
   summarizeChangeSet,
   type ChangeEdit,
   type CharacterEdit,
@@ -63,7 +55,7 @@ import {
   hasAssetContextTruncation,
   truncateContextMessages,
 } from '../lib/story-agent';
-import { createScene, deleteScene, getScenePath, listScenes, readFileText, saveScene, sceneDisplayName, updateSceneHeader, type SceneHeader } from '../lib/webgal-ipc';
+import { getScenePath, listScenes, readFileText, sceneDisplayName, type SceneHeader } from '../lib/webgal-ipc';
 import type { WebGalNode } from '../lib/webgal-types';
 import { useChatSession, type AssistantStep, type ChatAttachment, type ChatMessage, type StepToolCall } from './useChatSession';
 
@@ -219,24 +211,6 @@ function stepLabelForTool(name: string, args: Record<string, unknown>, headers: 
 
 function isStageError(value: unknown): value is StageError {
   return typeof value === 'object' && value !== null && typeof (value as StageError).message === 'string';
-}
-
-function applyAssetPlanEdit(metadata: AssetMetadata, edit: AssetPlanEdit): AssetMetadata {
-  let changed = false;
-  const sceneCards = { ...(metadata.sceneCards ?? {}) };
-  const cgCards = { ...(metadata.cgCards ?? {}) };
-  for (const card of edit.cards) {
-    const { category, ...stored } = card;
-    const target = category === 'cg' ? cgCards : sceneCards;
-    const existing = target[card.id];
-    target[card.id] = {
-      ...existing,
-      ...stored,
-      imageAsset: existing?.imageAsset ?? stored.imageAsset ?? null,
-    };
-    changed = true;
-  }
-  return changed ? { ...metadata, sceneCards, cgCards } : metadata;
 }
 
 async function writeAgentTrace(trace: AiAgentTrace): Promise<void> {
@@ -960,121 +934,73 @@ export function useAiAgent(params: UseAiAgentParams) {
     void sendPrompt(lastRequest.prompt, lastRequest.attachmentIds);
   }, [busy, cooldown, lastRequest, retryCount, sendPrompt]);
 
-  const syncSceneBackgroundCard = useCallback(async (sceneFile: string, sceneNodes: WebGalNode[]) => {
-    if (!projectPath) return;
-    try {
-      const backgroundAssets = (await listAllAssets(projectPath)).filter((asset) => asset.category === 'background');
-      const availableBackgrounds = new Set(backgroundAssets.map((asset) => asset.name));
-      const backgroundFilenames = extractSceneBackgroundAssets(sceneNodes);
-      if (backgroundFilenames.length === 0) return;
-      const metadata = await loadAssetMetadata(projectPath, projectId);
-      const next = syncSceneCardsFromBackgrounds(
-        metadata,
-        sceneFile,
-        backgroundFilenames,
-        availableBackgrounds,
-      );
-      if (next !== metadata) await saveAssetMetadata(projectPath, next);
-    } catch (e) {
-      console.warn('[asset] sync scene background card failed:', e);
-    }
-  }, [projectId, projectPath]);
-
-  // Persist all edits atomically (all-or-rollback). No conflict guard — callers
-  // decide whether the current scene's live buffer is allowed to differ.
-  const persistChangeSet = useCallback(async (set: PendingChangeSet) => {
+  const persistChangeSet = useCallback(async (
+    set: PendingChangeSet,
+    options: { force: boolean; historyNodes?: WebGalNode[] },
+  ) => {
     if (!projectPath) return;
     const currentSceneEdit = set.edits.find((e): e is SceneEdit => e.kind === 'scene' && e.file === currentSceneName);
-    // Create scenes last so a failure in earlier edits rarely leaves an orphan
-    // file; any scene file created before the failure is still removed during
-    // rollback (see createdScenePaths below). New characters can be deleted
-    // during rollback, so they do not need special ordering.
-    const ordered = [...set.edits].sort((a, b) => (a.kind === 'create_scene' ? 1 : 0) - (b.kind === 'create_scene' ? 1 : 0));
-    let createdScene = false;
-    let changedCharacters = false;
-    const applied: ChangeEdit[] = [];
-    const createdCharacterIds = new Map<CreateCharacterEdit, string>();
-    const assetMetadataBefore = new Map<AssetPlanEdit, AssetMetadata>();
-    const createdScenePaths: string[] = [];
+    let result: ApplyChangeSetResult;
     try {
-      for (const edit of ordered) {
-        if (edit.kind === 'scene') {
-          const path = await getScenePath(projectPath, edit.file);
-          await saveScene(path, edit.afterNodes);
-          await syncSceneBackgroundCard(edit.file, edit.afterNodes);
-        } else if (edit.kind === 'create_character') {
-          const saved = await createCharacter(projectPath, edit.draft);
-          createdCharacterIds.set(edit, saved.id);
-          changedCharacters = true;
-        } else if (edit.kind === 'character') {
-          await updateCharacter(projectPath, edit.after);
-          changedCharacters = true;
-        } else if (edit.kind === 'memory') {
-          await saveProjectMemory(projectPath, edit.after);
-          setMemory(edit.after);
-        } else if (edit.kind === 'asset_plan') {
-          const before = await loadAssetMetadata(projectPath, projectId);
-          const after = applyAssetPlanEdit(before, edit);
-          assetMetadataBefore.set(edit, before);
-          if (after !== before) await saveAssetMetadata(projectPath, after);
-        } else {
-          // create_scene owns its same-turn content. Record the returned path
-          // before any follow-up write so every failure can remove the file.
-          const path = await createScene(projectPath, edit.file);
-          createdScenePaths.push(path);
-          if (edit.initialNodes) {
-            await saveScene(path, edit.initialNodes);
-            await syncSceneBackgroundCard(edit.file, edit.initialNodes);
-          }
-          if (edit.chapter || edit.outline) {
-            await updateSceneHeader(path, { chapter: edit.chapter, outline: edit.outline });
-          }
-          createdScene = true;
-        }
-        applied.push(edit);
-      }
+      result = await applyAiChangeSet(
+        projectPath,
+        set,
+        { file: currentSceneName, content: scriptSource },
+        options.force,
+      );
     } catch (e) {
-      // Roll back everything already written, in reverse order.
-      for (const edit of applied.reverse()) {
-        try {
-          if (edit.kind === 'scene') {
-            const path = await getScenePath(projectPath, edit.file);
-            await saveScene(path, edit.beforeNodes);
-          } else if (edit.kind === 'create_character') {
-            const savedId = createdCharacterIds.get(edit);
-            if (savedId) await deleteCharacter(projectPath, savedId);
-          } else if (edit.kind === 'character') {
-            await updateCharacter(projectPath, edit.before);
-          } else if (edit.kind === 'memory') {
-            await saveProjectMemory(projectPath, edit.before);
-            setMemory(edit.before);
-          } else if (edit.kind === 'asset_plan') {
-            const before = assetMetadataBefore.get(edit);
-            if (before) await saveAssetMetadata(projectPath, before);
-          }
-        } catch { /* best-effort rollback */ }
-      }
-      // create_scene has no beforeContent to restore, so its rollback is to
-      // remove the scene file it created before the failure.
-      for (const createdPath of createdScenePaths) {
-        try { await deleteScene(createdPath); } catch { /* best-effort rollback */ }
-      }
       setStatus('error');
-      setError({ kind: 'other', retryable: false, message: `落盘失败，已回滚全部修改：${String(e)}` });
+      setError({
+        kind: 'other',
+        retryable: true,
+        message: `无法确认修改是否提交成功。请重新打开项目核对磁盘内容后再重试：${String(e)}`,
+      });
+      return;
+    }
+
+    if (result.outcome === 'conflict') {
+      setStatus('conflict');
+      return;
+    }
+    if (result.outcome === 'failed') {
+      setStatus('error');
+      if (result.recovery.status === 'not_needed') {
+        setError({
+          kind: 'other',
+          retryable: true,
+          message: `修改在「${result.resource}」处提交前失败，项目尚未写入。请检查该资源后重试：${result.message}`,
+        });
+        return;
+      }
       setPendingChangeSet({ ...set, status: 'failed' });
+      if (result.recovery.status === 'restored') {
+        setError({
+          kind: 'other',
+          retryable: false,
+          message: `修改在「${result.resource}」处写入失败，项目已恢复到提交前状态。请排除写入问题后重新生成修改：${result.message}`,
+        });
+      } else {
+        setError({
+          kind: 'other',
+          retryable: false,
+          message: `修改在「${result.resource}」处写入失败，自动恢复也失败，项目可能只写入了一部分。恢复快照「${result.recovery.snapshotId}」已保留；请先在快照管理中恢复它。写入错误：${result.message}；恢复错误：${result.recovery.message}`,
+        });
+      }
       return;
     }
 
     if (currentSceneEdit) {
-      pushHistory(currentSceneEdit.beforeNodes);
+      pushHistory(options.historyNodes ?? currentSceneEdit.beforeNodes);
       setNodes(currentSceneEdit.afterNodes);
       setScriptSource(currentSceneEdit.afterContent);
       setSelectedNode(null);
       setDirty(false);
       setSaveStatus('saved');
     }
-    if (createdScene) onScenesChanged?.();
-    if (changedCharacters) onCharactersChanged?.();
+    if (set.edits.some((edit) => edit.kind === 'create_scene')) onScenesChanged?.();
+    if (set.edits.some((edit) => edit.kind === 'character' || edit.kind === 'create_character')) onCharactersChanged?.();
+    const memoryEdit = set.edits.find((edit): edit is MemoryEdit => edit.kind === 'memory');
+    if (memoryEdit) setMemory(memoryEdit.after);
     replaceAssistantMessage(set.sourceMessageId, `已同意修改：${summarizeChangeSet(set, sceneHeaders)}`, {
       diff: currentSceneEdit?.diff,
     });
@@ -1093,42 +1019,13 @@ export function useAiAgent(params: UseAiAgentParams) {
     setSaveStatus,
     setScriptSource,
     setSelectedNode,
-    syncSceneBackgroundCard,
+    scriptSource,
   ]);
 
   const acceptChange = useCallback(async () => {
     if (!pendingChangeSet || pendingChangeSet.status !== 'pending' || !projectPath) return;
-    // Confirm no edited resource changed and no staged create now collides
-    // with a live scene, character, or asset card.
-    let conflicts: string[];
-    try {
-      conflicts = await detectConflicts(pendingChangeSet, {
-        currentSceneName,
-        currentScriptSource: scriptSource,
-        readSceneContent: async (file) => {
-          const path = await getScenePath(projectPath, file);
-          return readFileText(path);
-        },
-        listSceneFiles: () => listScenes(`${projectPath}/game/scene`),
-        listCharacters: () => listCharacters(projectPath),
-        loadAssetMetadata: () => loadAssetMetadata(projectPath, projectId),
-        memory: memory ?? emptyProjectMemory(),
-      });
-    } catch (e) {
-      setStatus('error');
-      setError({
-        kind: 'other',
-        retryable: true,
-        message: `无法读取项目资源以确认修改是否冲突，项目尚未写入。请检查文件后重试：${String(e)}`,
-      });
-      return;
-    }
-    if (conflicts.length > 0) {
-      setStatus('conflict');
-      return;
-    }
-    await persistChangeSet(pendingChangeSet);
-  }, [characters, currentSceneName, memory, pendingChangeSet, persistChangeSet, projectPath, scriptSource]);
+    await persistChangeSet(pendingChangeSet, { force: false });
+  }, [pendingChangeSet, persistChangeSet, projectPath]);
 
   const revertChange = useCallback(() => {
     if (!pendingChangeSet) return;
@@ -1141,15 +1038,8 @@ export function useAiAgent(params: UseAiAgentParams) {
 
   const forceApplyChange = useCallback(async () => {
     if (!pendingChangeSet) return;
-    // User chose to overwrite their manual edits with the AI preview.
-    const currentSceneEdit = pendingChangeSet.edits.find((e): e is SceneEdit => e.kind === 'scene' && e.file === currentSceneName);
-    if (currentSceneEdit) {
-      pushHistory(nodes);
-      setNodes(currentSceneEdit.afterNodes);
-      setScriptSource(currentSceneEdit.afterContent);
-    }
-    await persistChangeSet(pendingChangeSet);
-  }, [currentSceneName, nodes, pendingChangeSet, persistChangeSet, pushHistory, setNodes, setScriptSource]);
+    await persistChangeSet(pendingChangeSet, { force: true, historyNodes: nodes });
+  }, [nodes, pendingChangeSet, persistChangeSet]);
 
   const regenerateAfterConflict = useCallback(() => {
     if (!pendingChangeSet) return;

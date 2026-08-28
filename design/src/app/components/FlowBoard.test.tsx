@@ -551,4 +551,72 @@ describe('FlowBoard', () => {
     });
     expect(screen.queryByText(/stale run error/)).not.toBeInTheDocument();
   });
+
+  it('uses the current project for controls and refreshes after navigation', async () => {
+    const old = runState('running');
+    old.runId = 'run_old';
+    old.projectPath = '/tmp/old';
+    old.prompt = 'old brief';
+    const current = runState('running');
+    current.runId = 'run_current';
+    current.projectPath = '/tmp/current';
+    current.prompt = 'current brief';
+    let currentStatus: RunState['status'] = 'running';
+    mockedInvoke.mockImplementation((cmd, args) => {
+      const projectPath = (args as { projectPath?: string } | undefined)?.projectPath;
+      if (cmd === 'pipeline_list_runs') {
+        return Promise.resolve([projectPath === '/tmp/old' ? old : { ...current, status: currentStatus }]) as Promise<never>;
+      }
+      if (cmd === 'pipeline_get_state') {
+        const snapshot = projectPath === '/tmp/old' ? old : { ...current, status: currentStatus };
+        return Promise.resolve(snapshot) as Promise<never>;
+      }
+      if (cmd === 'pipeline_pause') currentStatus = 'paused';
+      if (cmd === 'pipeline_stop') currentStatus = 'cancelled';
+      return Promise.resolve(undefined);
+    });
+    const user = userEvent.setup();
+
+    const view = render(<FlowBoard projectPath="/tmp/old" />);
+    expect(await screen.findByDisplayValue('old brief')).toBeInTheDocument();
+    view.rerender(<FlowBoard projectPath="/tmp/current" />);
+    expect(await screen.findByDisplayValue('current brief')).toBeInTheDocument();
+    mockedInvoke.mockClear();
+
+    await user.click(screen.getByRole('button', { name: '暂停' }));
+    expect(mockedInvoke).toHaveBeenCalledWith('pipeline_pause', {
+      runId: 'run_current', projectPath: '/tmp/current',
+    });
+    expect(mockedInvoke).toHaveBeenCalledWith('pipeline_get_state', {
+      runId: 'run_current', projectPath: '/tmp/current',
+    });
+
+    await user.click(await screen.findByRole('button', { name: 'open-plan' }));
+    await user.click(screen.getByRole('button', { name: '跳过' }));
+    expect(mockedInvoke).toHaveBeenCalledWith('pipeline_skip_step', {
+      runId: 'run_current', stepId: 'plan', projectPath: '/tmp/current',
+    });
+
+    currentStatus = 'paused';
+    emit({ type: 'runPaused', runId: 'run_current' });
+    await user.click(screen.getByRole('button', { name: 'delete-first-edge' }));
+    expect(mockedInvoke).toHaveBeenCalledWith('pipeline_update_dependencies', {
+      runId: 'run_current', stepId: 'outline', dependsOn: [], projectPath: '/tmp/current',
+    });
+
+    currentStatus = 'running';
+    emit({ type: 'runResumed', runId: 'run_current' });
+    await user.click(screen.getByRole('button', { name: '停止' }));
+    expect(mockedInvoke).toHaveBeenCalledWith('pipeline_stop', {
+      runId: 'run_current', projectPath: '/tmp/current',
+    });
+    expect(mockedInvoke.mock.calls.filter(([cmd, args]) => (
+      cmd === 'pipeline_get_state'
+      && (args as { projectPath?: string } | undefined)?.projectPath === '/tmp/current'
+    ))).toHaveLength(4);
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ projectPath: '/tmp/old' }),
+    );
+  });
 });

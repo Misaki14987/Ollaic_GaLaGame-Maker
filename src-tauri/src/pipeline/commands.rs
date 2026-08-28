@@ -4,7 +4,7 @@
 //! `scheduler.rs` and is tested there; these commands are not unit-tested,
 //! matching the codebase convention (e.g. `ai::commands`).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -12,10 +12,13 @@ use tauri::Emitter;
 
 use crate::pipeline::dsl::default_recipe;
 use crate::pipeline::events::{EventSink, PipelineEvent};
-use crate::pipeline::registry::{ManagedRun, RunRegistry};
-use crate::pipeline::scheduler::{
-    cleanup_rollback_snapshots, queue_rollback_snapshot_cleanup, rollback_snapshot_ids, Pipeline,
+use crate::pipeline::project_state::record_run_summary;
+use crate::pipeline::recovery::{
+    cleanup_rollback_snapshots, queue_rollback_snapshot_cleanup, rollback_snapshot_ids,
 };
+use crate::pipeline::registry::{ManagedRun, RunRegistry};
+use crate::pipeline::run_control::RunHandle;
+use crate::pipeline::scheduler::{Pipeline, RunCreation};
 use crate::pipeline::state::{Clock, RunState, RunStatus, StepStatus, SystemClock};
 use crate::pipeline::store;
 use crate::story_plan::{self, StoryPlan};
@@ -90,7 +93,7 @@ fn new_run_id() -> String {
 /// Drive a run to completion (or pause). Clears `driving` when done.
 async fn drive(
     pipeline: Arc<Pipeline>,
-    handle: Arc<crate::pipeline::scheduler::RunHandle>,
+    handle: Arc<RunHandle>,
     driving: Arc<AtomicBool>,
     project_path: PathBuf,
     app: tauri::AppHandle,
@@ -104,7 +107,7 @@ async fn drive(
 
 fn spawn_driver(
     pipeline: Arc<Pipeline>,
-    handle: Arc<crate::pipeline::scheduler::RunHandle>,
+    handle: Arc<RunHandle>,
     driving: Arc<AtomicBool>,
     project_path: PathBuf,
     app: tauri::AppHandle,
@@ -128,12 +131,6 @@ pub async fn pipeline_start(
     // custom declaration) must not silently downgrade into an unbounded Run.
     orchestrator.validate_flow_step_capability()?;
     let project_path = PathBuf::from(project_path);
-    if super::scheduler::project_has_story_content(&project_path)? {
-        return Err(
-            "项目已有故事内容；请使用 AI 聊天的可审阅 patch 工作流修改，Agent Flow 仅用于新建故事。"
-                .to_string(),
-        );
-    }
     let run_id = new_run_id();
     let recipe = default_recipe();
     let sink = make_sink(&app);
@@ -142,41 +139,40 @@ pub async fn pipeline_start(
     // for the next run. The in-flight run keeps its own creation-time snapshot
     // so mid-flight changes cannot shift semantics on a live step.
     let step_timeout = orchestrator.flow_step_timeout_for_new_run();
-    let handle = orchestrator
-        .pipeline
-        .create_run_with_timeout(
-            &project_path,
-            &run_id,
-            &prompt,
-            &recipe,
-            allow_local_fallback == Some(true),
-            step_timeout,
-            &SystemClock,
-            &sink,
-        )
-        .map_err(|e| e.to_string())?;
-    handle
+    let entry = orchestrator
+        .runs
+        .insert_active_with(&run_id, &project_path, || {
+            let handle = orchestrator
+                .pipeline
+                .create_new_story_run_with_timeout(RunCreation {
+                    project_path: &project_path,
+                    run_id: &run_id,
+                    prompt: &prompt,
+                    recipe: &recipe,
+                    allow_local_fallback: allow_local_fallback == Some(true),
+                    step_timeout,
+                    clock: &SystemClock,
+                    sink: &sink,
+                })
+                .map_err(|error| error.to_string())?;
+            Ok(ManagedRun {
+                handle,
+                project_path: project_path.clone(),
+                driving: Arc::new(AtomicBool::new(false)),
+            })
+        })
+        .await?;
+    entry
+        .handle
         .pause(&project_path, &sink, &SystemClock)
         .await
         .map_err(|e| e.to_string())?;
-    let driving = Arc::new(AtomicBool::new(false));
-    orchestrator
-        .runs
-        .insert(
-            run_id.clone(),
-            ManagedRun {
-                handle: handle.clone(),
-                project_path: project_path.clone(),
-                driving: driving.clone(),
-            },
-        )
-        .await;
     Ok(run_id)
 }
 
 async fn attach_run_if_needed(
     orchestrator: &Orchestrator,
-    project_path: &PathBuf,
+    project_path: &Path,
     run_id: &str,
 ) -> Result<(), String> {
     orchestrator
@@ -188,7 +184,7 @@ async fn attach_run_if_needed(
                 .map_err(|error| error.to_string())?;
             Ok(ManagedRun {
                 handle,
-                project_path: project_path.clone(),
+                project_path: project_path.to_path_buf(),
                 driving: Arc::new(AtomicBool::new(false)),
             })
         })
@@ -261,10 +257,7 @@ pub async fn pipeline_stop(
         .stop(&project_path, &make_sink(&app), &SystemClock)
         .await
         .map_err(|error| error.to_string())?;
-    orchestrator
-        .pipeline
-        .record_run_summary(&project_path, &run_id, &SystemClock)
-        .map_err(|error| error.to_string())
+    record_run_summary(&project_path, &run_id, &SystemClock).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -311,16 +304,23 @@ pub async fn pipeline_retry_step(
 ) -> Result<(), String> {
     let requested_path = PathBuf::from(project_path);
     attach_run_if_needed(&orchestrator, &requested_path, &run_id).await?;
-    let entry = orchestrator.runs.resolve(&run_id, &requested_path).await?;
+    let sink = make_sink(&app);
+    let entry = orchestrator
+        .runs
+        .with_project_activation(&run_id, &requested_path, |entry| async move {
+            entry
+                .handle
+                .retry_step(&entry.project_path, &step_id, &sink, &SystemClock)
+                .await
+                .map_err(|error| error.to_string())?;
+            Ok(entry)
+        })
+        .await?;
     let (handle, project_path, driving) = (
         entry.handle.clone(),
         entry.project_path.clone(),
         entry.driving.clone(),
     );
-    handle
-        .retry_step(&project_path, &step_id, &make_sink(&app), &SystemClock)
-        .await
-        .map_err(|e| e.to_string())?;
     // Atomically claim the driver role. If a driver is already running
     // (incl. paused-and-waiting), it picks up the retried step via the notify
     // sent by retry_step. Otherwise the run was terminal and we start one.
@@ -348,16 +348,23 @@ pub async fn pipeline_skip_step(
     project_path: String,
 ) -> Result<(), String> {
     let requested_path = PathBuf::from(project_path);
-    let entry = orchestrator.runs.resolve(&run_id, &requested_path).await?;
+    let sink = make_sink(&app);
+    let entry = orchestrator
+        .runs
+        .with_project_activation(&run_id, &requested_path, |entry| async move {
+            entry
+                .handle
+                .skip_step(&entry.project_path, &step_id, &sink, &SystemClock)
+                .await
+                .map_err(|error| error.to_string())?;
+            Ok(entry)
+        })
+        .await?;
     let (handle, project_path, driving) = (
         entry.handle.clone(),
         entry.project_path.clone(),
         entry.driving.clone(),
     );
-    handle
-        .skip_step(&project_path, &step_id, &make_sink(&app), &SystemClock)
-        .await
-        .map_err(|e| e.to_string())?;
     if driving
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_ok()
@@ -514,38 +521,28 @@ pub async fn pipeline_resume_run(
     project_path: String,
     run_id: String,
 ) -> Result<(), String> {
-    // Crash-recovery entry point: load a persisted run from disk and drive
-    // it. Refuse if the run is already in memory (use pipeline_resume to
-    // unpause a live run) - otherwise two drivers would race on the same
-    // logical run with divergent in-memory state copies.
-    if orchestrator.runs.contains(&run_id).await {
-        return Err(format!(
-            "run {} is already in memory; use pipeline_resume to unpause it",
-            run_id
-        ));
-    }
     let project_path = PathBuf::from(project_path);
     let sink = make_sink(&app);
-    let handle = orchestrator
-        .pipeline
-        .resume_run(&project_path, &run_id, &sink, &SystemClock)
-        .map_err(|e| e.to_string())?;
-    let driving = Arc::new(AtomicBool::new(false));
-    orchestrator
+    // The registry owns the atomic crash-recovery boundary so two resumes,
+    // or a resume racing a new start, cannot publish divergent live handles.
+    let entry = orchestrator
         .runs
-        .insert(
-            run_id.clone(),
-            ManagedRun {
-                handle: handle.clone(),
+        .insert_active_with(&run_id, &project_path, || {
+            let handle = orchestrator
+                .pipeline
+                .resume_run(&project_path, &run_id, &sink, &SystemClock)
+                .map_err(|error| error.to_string())?;
+            Ok(ManagedRun {
+                handle,
                 project_path: project_path.clone(),
-                driving: driving.clone(),
-            },
-        )
-        .await;
+                driving: Arc::new(AtomicBool::new(false)),
+            })
+        })
+        .await?;
     spawn_driver(
         orchestrator.pipeline.clone(),
-        handle,
-        driving,
+        entry.handle,
+        entry.driving,
         project_path,
         app,
     );

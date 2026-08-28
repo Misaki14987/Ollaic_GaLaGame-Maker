@@ -1,11 +1,8 @@
 import { Activity } from 'lucide-react';
-import type { PipelineEvent, StepDef } from '../lib/pipeline-types';
+import type { PipelineEvent, PipelineEventRecord, StepDef } from '../lib/pipeline-types';
 import { cn } from './ui/utils';
 
-export interface PipelineEventRecord {
-  event: PipelineEvent;
-  receivedAt: number;
-}
+export type { PipelineEventRecord } from '../lib/pipeline-types';
 
 export interface PipelineEventLedgerProps {
   events: readonly PipelineEventRecord[];

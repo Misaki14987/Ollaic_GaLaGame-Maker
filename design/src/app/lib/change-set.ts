@@ -5,7 +5,8 @@
  *
  * Write tools never touch disk during the loop; they produce StagedWrite
  * payloads which this module turns into reviewable ChangeEdits (with diffs).
- * On accept the whole set is applied atomically (all-or-rollback).
+ * On accept the backend commits the whole set as one transaction and reports
+ * whether a failed commit was restored or needs manual snapshot recovery.
  */
 
 import type { AssetInfo, AssetMetadata, SceneAssetCard } from './assets-ipc';

@@ -213,6 +213,11 @@ pub fn open_project(app: AppHandle, path: String) -> Result<ProjectInfo, String>
 /// Update config.txt for a project.
 #[tauri::command]
 pub fn save_config(project_path: String, config: HashMap<String, String>) -> Result<(), String> {
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || save_config_locked(&project_path, config))
+}
+
+fn save_config_locked(project_path: &str, config: HashMap<String, String>) -> Result<(), String> {
     let config_path = PathBuf::from(&project_path).join("game").join("config.txt");
     fs::write(&config_path, serialize_config(&config))
         .map_err(|e| format!("Failed to write config.txt: {}", e))
@@ -231,6 +236,14 @@ pub fn get_scene_path(project_path: String, scene_name: String) -> Result<String
 /// Create a new scene file in the project.
 #[tauri::command]
 pub fn create_scene(project_path: String, scene_name: String) -> Result<String, String> {
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || create_scene_locked(&project_path, scene_name))
+}
+
+pub(crate) fn create_scene_locked(
+    project_path: &str,
+    scene_name: String,
+) -> Result<String, String> {
     let scene_dir = PathBuf::from(&project_path).join("game").join("scene");
     fs::create_dir_all(&scene_dir).map_err(|e| format!("Failed to create scene dir: {}", e))?;
 
@@ -253,6 +266,13 @@ pub fn create_scene(project_path: String, scene_name: String) -> Result<String, 
 
 #[tauri::command]
 pub fn read_project_memory(project_path: String) -> Result<Option<ProjectMemory>, String> {
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || read_project_memory_locked(&project_path))
+}
+
+pub(crate) fn read_project_memory_locked(
+    project_path: &str,
+) -> Result<Option<ProjectMemory>, String> {
     let path = PathBuf::from(&project_path)
         .join("game")
         .join("ai-memory.json");
@@ -268,6 +288,16 @@ pub fn read_project_memory(project_path: String) -> Result<Option<ProjectMemory>
 
 #[tauri::command]
 pub fn save_project_memory(project_path: String, memory: ProjectMemory) -> Result<(), String> {
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || {
+        save_project_memory_locked(&project_path, memory)
+    })
+}
+
+pub(crate) fn save_project_memory_locked(
+    project_path: &str,
+    memory: ProjectMemory,
+) -> Result<(), String> {
     let game_dir = PathBuf::from(&project_path).join("game");
     if !game_dir.is_dir() {
         return Err(format!("Invalid project: {}/game/ not found", project_path));
@@ -297,12 +327,27 @@ pub fn save_project_metadata(
     project_path: String,
     metadata: ProjectMetadata,
 ) -> Result<(), String> {
-    write_project_metadata(&project_path, &metadata)
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || {
+        write_project_metadata(&project_path, &metadata)
+    })
 }
 
 #[tauri::command]
 pub fn create_project_snapshot(
     project_path: String,
+    label: Option<String>,
+    kind: Option<String>,
+    description: Option<String>,
+) -> Result<SnapshotInfo, String> {
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || {
+        create_project_snapshot_locked(&project_path, label, kind, description)
+    })
+}
+
+pub(crate) fn create_project_snapshot_locked(
+    project_path: &str,
     label: Option<String>,
     kind: Option<String>,
     description: Option<String>,
@@ -318,8 +363,7 @@ pub fn create_project_snapshot(
     let kind = normalize_snapshot_kind(kind);
     let description = normalize_snapshot_description(description);
     let id_label = snapshot_id_label(&label);
-    let (id, snapshot_dir) =
-        unique_snapshot_dir(&project_path, &format!("{created_at}-{id_label}"));
+    let (id, snapshot_dir) = unique_snapshot_dir(project_path, &format!("{created_at}-{id_label}"));
     fs::create_dir_all(&snapshot_dir)
         .map_err(|e| format!("Failed to create snapshot directory: {e}"))?;
 
@@ -403,8 +447,18 @@ pub fn rename_project_snapshot(
 
 #[tauri::command]
 pub fn delete_project_snapshot(project_path: String, snapshot_id: String) -> Result<(), String> {
-    validate_snapshot_id(&snapshot_id)?;
-    let snapshot_dir = snapshots_dir(&project_path).join(&snapshot_id);
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || {
+        delete_project_snapshot_locked(&project_path, &snapshot_id)
+    })
+}
+
+pub(crate) fn delete_project_snapshot_locked(
+    project_path: &str,
+    snapshot_id: &str,
+) -> Result<(), String> {
+    validate_snapshot_id(snapshot_id)?;
+    let snapshot_dir = snapshots_dir(project_path).join(snapshot_id);
     if !snapshot_dir.is_dir() {
         return Err(format!("Snapshot not found: {snapshot_id}"));
     }
@@ -414,9 +468,19 @@ pub fn delete_project_snapshot(project_path: String, snapshot_id: String) -> Res
 
 #[tauri::command]
 pub fn restore_project_snapshot(project_path: String, snapshot_id: String) -> Result<(), String> {
-    validate_snapshot_id(&snapshot_id)?;
     let root = PathBuf::from(&project_path);
-    let snapshot_dir = snapshots_dir(&project_path).join(&snapshot_id);
+    crate::project_lock::with_project_lock(&root, || {
+        restore_project_snapshot_locked(&project_path, &snapshot_id)
+    })
+}
+
+pub(crate) fn restore_project_snapshot_locked(
+    project_path: &str,
+    snapshot_id: &str,
+) -> Result<(), String> {
+    validate_snapshot_id(snapshot_id)?;
+    let root = PathBuf::from(&project_path);
+    let snapshot_dir = snapshots_dir(project_path).join(snapshot_id);
     let snapshot_game = snapshot_dir.join("game");
     if !snapshot_game.is_dir() {
         return Err(format!("Snapshot not found: {snapshot_id}"));

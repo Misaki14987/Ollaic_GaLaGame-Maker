@@ -18,6 +18,7 @@ use std::pin::Pin;
 
 use serde::{Deserialize, Serialize};
 
+use crate::asset_queue::AssetQueue;
 use crate::characters::types::Character;
 use crate::pipeline::dsl::StepKind;
 use crate::story_plan::types::{AssetTaskPlan, BranchGraph, ChapterPlan, SceneDraft, ScenePlan};
@@ -33,6 +34,7 @@ pub use scene::SceneAgent;
 /// The slice of StoryPlan context an Agent may read. Grows per slice as new
 /// agents need more context (worldbook, characters, branches, ...).
 pub struct AgentContext<'a> {
+    pub chat: &'a dyn router::ChatGateway,
     /// The immutable Production Brief that owns the run.
     pub prompt: &'a str,
     /// Optional per-step instruction edited from the Flow inspector.
@@ -49,51 +51,91 @@ pub struct AgentContext<'a> {
     pub allow_local_fallback: bool,
 }
 
-/// What an Agent produced for a step.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+/// The one valid domain payload produced by an Agent or pipeline executor.
+/// Each variant owns all fields that must change together, so impossible
+/// cross-step combinations cannot be constructed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data", rename_all = "camelCase")]
+pub enum AgentOutputPayload {
+    Synopsis(String),
+    Memory {
+        worldbook: String,
+        glossary: std::collections::BTreeMap<String, String>,
+    },
+    Outline {
+        chapters: Vec<ChapterPlan>,
+        scene_plans: Vec<ScenePlan>,
+        branches: BranchGraph,
+    },
+    Characters(Vec<Character>),
+    SceneDrafts(Vec<SceneDraft>),
+    AssetPlan(Vec<AssetTaskPlan>),
+    Scenes(Vec<SceneScript>),
+    AssetQueue(AssetQueue),
+}
+
+/// A typed payload plus provider provenance for one completed step.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentOutput {
-    #[serde(default)]
-    pub synopsis: Option<String>,
-    #[serde(default)]
-    pub worldbook: Option<String>,
-    #[serde(default)]
-    pub chapters: Option<Vec<ChapterPlan>>,
-    #[serde(default)]
-    pub characters: Option<Vec<Character>>,
-    #[serde(default)]
-    pub scene_plans: Option<Vec<ScenePlan>>,
-    #[serde(default)]
-    pub branches: Option<BranchGraph>,
-    #[serde(default)]
-    pub scene_drafts: Option<Vec<SceneDraft>>,
-    #[serde(default)]
-    pub asset_plan: Option<Vec<AssetTaskPlan>>,
-    #[serde(default)]
-    pub scenes: Option<Vec<SceneScript>>,
-    /// Persisted AssetTaskQueue summary produced by the P2 asset executor.
-    #[serde(default)]
-    pub asset_queue: Option<serde_json::Value>,
-    #[serde(default)]
-    pub glossary: Option<std::collections::BTreeMap<String, String>>,
-    #[serde(default)]
+    #[serde(flatten)]
+    pub payload: AgentOutputPayload,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_tokens: Option<u32>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub completion_tokens: Option<u32>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub downgrade: Option<String>,
 }
 
 impl AgentOutput {
+    pub fn new(payload: AgentOutputPayload) -> Self {
+        Self {
+            payload,
+            model: None,
+            prompt_tokens: None,
+            completion_tokens: None,
+            warnings: Vec::new(),
+            downgrade: None,
+        }
+    }
+
+    pub fn with_model(
+        mut self,
+        model: String,
+        prompt_tokens: Option<u32>,
+        completion_tokens: Option<u32>,
+    ) -> Self {
+        self.model = Some(model);
+        self.prompt_tokens = prompt_tokens;
+        self.completion_tokens = completion_tokens;
+        self
+    }
+
     pub fn local_fallback(mut self) -> Self {
         self.warnings
             .push("未配置可用的对话模型，已使用本地内容模板".to_string());
         self.downgrade = Some("local-template".to_string());
         self
+    }
+}
+
+#[cfg(test)]
+mod output_tests {
+    use super::{AgentOutput, AgentOutputPayload};
+
+    #[test]
+    fn serialized_output_has_one_tagged_payload() {
+        let output = AgentOutput::new(AgentOutputPayload::Synopsis("A story".into()));
+        let value = serde_json::to_value(output).unwrap();
+
+        assert_eq!(value["type"], "synopsis");
+        assert_eq!(value["data"], "A story");
+        assert!(value.get("characters").is_none());
     }
 }
 

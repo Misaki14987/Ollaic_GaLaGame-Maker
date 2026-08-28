@@ -2699,15 +2699,17 @@ pub async fn generate_batch_tts(
     // (e.g. "vo_角色_场景_3"), so generated audio is easy for users to locate
     // instead of the opaque "vo_batch_<id>" naming.
     let stem_map: std::collections::HashMap<String, String> =
-        crate::assets::commands::read_asset_metadata(&project_path)
-            .map(|meta| {
-                meta.voice_cards
-                    .into_iter()
-                    .filter(|(_, c)| !c.target_stem.trim().is_empty())
-                    .map(|(id, c)| (id, c.target_stem))
-                    .collect()
-            })
-            .unwrap_or_default();
+        crate::project_lock::with_project_lock(std::path::Path::new(&project_path), || {
+            crate::assets::commands::read_asset_metadata(&project_path)
+                .map(|meta| {
+                    meta.voice_cards
+                        .into_iter()
+                        .filter(|(_, c)| !c.target_stem.trim().is_empty())
+                        .map(|(id, c)| (id, c.target_stem))
+                        .collect()
+                })
+                .unwrap_or_default()
+        });
 
     for (index, item) in items.iter().enumerate() {
         let progress_start = BatchTtsProgress {
@@ -2786,26 +2788,28 @@ pub async fn generate_batch_tts(
                 };
 
                 // Update VoiceAssetCard
-                if let Ok(mut asset_meta) =
-                    crate::assets::commands::read_asset_metadata(&project_path)
-                {
-                    if let Some(card) = asset_meta.voice_cards.get_mut(&item.voice_card_id) {
-                        card.voice_asset = Some(asset_name.clone());
-                        // Update tags
-                        let tag_key = format!("vocal/{}", card.target_stem);
-                        let mut tags: Vec<String> =
-                            asset_meta.tags.get(&tag_key).cloned().unwrap_or_default();
-                        tags.retain(|t| !t.starts_with("status:"));
-                        tags.push("status:done".to_string());
-                        tags.retain(|t| !t.starts_with("source:"));
-                        tags.push("source:ai".to_string());
-                        asset_meta.tags.insert(tag_key, tags);
-                        let _ = crate::assets::commands::write_asset_metadata(
-                            &project_path,
-                            &asset_meta,
-                        );
+                crate::project_lock::with_project_lock(std::path::Path::new(&project_path), || {
+                    if let Ok(mut asset_meta) =
+                        crate::assets::commands::read_asset_metadata(&project_path)
+                    {
+                        if let Some(card) = asset_meta.voice_cards.get_mut(&item.voice_card_id) {
+                            card.voice_asset = Some(asset_name.clone());
+                            // Update tags
+                            let tag_key = format!("vocal/{}", card.target_stem);
+                            let mut tags: Vec<String> =
+                                asset_meta.tags.get(&tag_key).cloned().unwrap_or_default();
+                            tags.retain(|t| !t.starts_with("status:"));
+                            tags.push("status:done".to_string());
+                            tags.retain(|t| !t.starts_with("source:"));
+                            tags.push("source:ai".to_string());
+                            asset_meta.tags.insert(tag_key, tags);
+                            let _ = crate::assets::commands::write_asset_metadata(
+                                &project_path,
+                                &asset_meta,
+                            );
+                        }
                     }
-                }
+                });
 
                 let progress_done = BatchTtsProgress {
                     voice_card_id: item.voice_card_id.clone(),

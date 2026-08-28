@@ -177,7 +177,7 @@ mod tests {
             let capability = capability_for_config(&config(provider, "model")).unwrap();
             assert_eq!(capability.chat_tools, tools, "{provider}");
             assert_eq!(capability.json_mode, json, "{provider}");
-            assert_eq!(capability.flow_step_deadline_ms >= 120_000, true);
+            assert!(capability.flow_step_deadline_ms >= 120_000);
             assert_eq!(capability.flow_step_deadline_ms >= 600_000, local);
         }
     }

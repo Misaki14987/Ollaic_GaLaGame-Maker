@@ -200,7 +200,7 @@ impl RunState {
     }
 
     /// True when every step succeeded (no skips/failures).
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn all_steps_succeeded(&self) -> bool {
         !self.steps.is_empty() && self.steps.iter().all(|s| s.status == StepStatus::Succeeded)
     }

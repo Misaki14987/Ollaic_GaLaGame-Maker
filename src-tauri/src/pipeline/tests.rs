@@ -11,12 +11,14 @@ use std::sync::Arc;
 use tokio::sync::{Mutex as AsyncMutex, Notify, Semaphore};
 use tokio::time::{sleep, timeout, Duration};
 
-use crate::agents::{Agent, AgentContext, AgentError, AgentOutput, AgentRegistry};
+use crate::agents::{
+    Agent, AgentContext, AgentError, AgentOutput, AgentOutputPayload, AgentRegistry,
+};
 use crate::pipeline::dsl::{default_recipe, FlowRecipe, RecipeError, StepDef, StepKind};
 use crate::pipeline::events::{PipelineEvent, RecordingSink};
-use crate::pipeline::scheduler::{
-    cleanup_rollback_snapshots, project_has_story_content, Pipeline, DEFAULT_STEP_TIMEOUT,
-};
+use crate::pipeline::project_state::project_has_story_content;
+use crate::pipeline::recovery::cleanup_rollback_snapshots;
+use crate::pipeline::scheduler::{Pipeline, RunCreation, DEFAULT_STEP_TIMEOUT};
 use crate::pipeline::state::{Clock, RunStatus, StepRunHistory, StepStatus, SystemClock};
 use crate::story_plan::types::ChapterPlan;
 
@@ -132,15 +134,12 @@ impl Agent for CountingAgent {
 }
 
 fn synopsis_output(text: &str) -> AgentOutput {
-    AgentOutput {
-        synopsis: Some(text.to_string()),
-        ..AgentOutput::default()
-    }
+    AgentOutput::new(AgentOutputPayload::Synopsis(text.to_string()))
 }
 
 fn chapters_output() -> AgentOutput {
-    AgentOutput {
-        chapters: Some(vec![
+    AgentOutput::new(AgentOutputPayload::Outline {
+        chapters: vec![
             ChapterPlan {
                 id: "ch1".to_string(),
                 title: "序章".to_string(),
@@ -151,9 +150,10 @@ fn chapters_output() -> AgentOutput {
                 title: "第一章".to_string(),
                 summary: "s2".to_string(),
             },
-        ]),
-        ..AgentOutput::default()
-    }
+        ],
+        scene_plans: Vec::new(),
+        branches: Default::default(),
+    })
 }
 
 fn fresh_project(name: &str) -> std::path::PathBuf {
@@ -859,16 +859,16 @@ async fn create_run_with_timeout_overrides_pipeline_default() {
 
     let recipe = FlowRecipe::new().step(StepDef::new("plan", StepKind::Plan));
     let handle = pipeline
-        .create_run_with_timeout(
-            &project,
-            "run_custom_deadline",
-            "brief",
-            &recipe,
-            false,
-            Some(Duration::from_millis(50)),
-            &clock,
-            sink.as_ref(),
-        )
+        .create_run_with_timeout(RunCreation {
+            project_path: &project,
+            run_id: "run_custom_deadline",
+            prompt: "brief",
+            recipe: &recipe,
+            allow_local_fallback: false,
+            step_timeout: Some(Duration::from_millis(50)),
+            clock: &clock,
+            sink: sink.as_ref(),
+        })
         .unwrap();
     assert_eq!(handle.step_timeout, Some(Duration::from_millis(50)));
 
@@ -908,16 +908,16 @@ async fn asset_queue_retry_after_timeout_runs_again() {
     let recipe =
         FlowRecipe::new().step(StepDef::new("assetQueue", StepKind::Asset).agent("assetQueue"));
     let handle = pipeline
-        .create_run_with_timeout(
-            &project,
-            "run_retry",
-            "brief",
-            &recipe,
-            false,
-            Some(Duration::from_secs(30)),
-            &clock,
-            sink.as_ref(),
-        )
+        .create_run_with_timeout(RunCreation {
+            project_path: &project,
+            run_id: "run_retry",
+            prompt: "brief",
+            recipe: &recipe,
+            allow_local_fallback: false,
+            step_timeout: Some(Duration::from_secs(30)),
+            clock: &clock,
+            sink: sink.as_ref(),
+        })
         .unwrap();
     let first = {
         let pipeline = pipeline.clone();
@@ -1674,7 +1674,7 @@ async fn retry_after_stop_ignores_the_cancelled_attempt_result() {
     .await;
 
     handle.stop(&project, sink.as_ref(), &clock).await.unwrap();
-    let _ = timeout(Duration::from_secs(3), first)
+    timeout(Duration::from_secs(3), first)
         .await
         .expect("cancelled driver did not finish")
         .unwrap();
@@ -2111,15 +2111,16 @@ fn run_creation_persists_local_fallback_authorization_atomically() {
     let sink = RecordingSink::new();
     let clock = StepClock::new();
     Pipeline::with_default_agents()
-        .create_run_with_options(
-            &project,
-            "run_fallback_authorization",
-            "brief",
-            &default_recipe(),
-            true,
-            &clock,
-            &sink,
-        )
+        .create_run_with_options(RunCreation {
+            project_path: &project,
+            run_id: "run_fallback_authorization",
+            prompt: "brief",
+            recipe: &default_recipe(),
+            allow_local_fallback: true,
+            step_timeout: Some(DEFAULT_STEP_TIMEOUT),
+            clock: &clock,
+            sink: &sink,
+        })
         .unwrap();
 
     assert!(
@@ -2128,6 +2129,43 @@ fn run_creation_persists_local_fallback_authorization_atomically() {
             .unwrap()
             .allow_local_fallback
     );
+}
+
+#[test]
+fn new_story_run_rejects_an_unfinished_run_loaded_from_disk() {
+    let project = fresh_project("persisted_active_claim");
+    let sink = RecordingSink::new();
+    let clock = StepClock::new();
+    let pipeline = Pipeline::with_default_agents();
+    pipeline
+        .create_run(
+            &project,
+            "run_existing",
+            "brief",
+            &default_recipe(),
+            &clock,
+            &sink,
+        )
+        .unwrap();
+
+    let error = pipeline
+        .create_new_story_run_with_timeout(RunCreation {
+            project_path: &project,
+            run_id: "run_new",
+            prompt: "other brief",
+            recipe: &default_recipe(),
+            allow_local_fallback: false,
+            step_timeout: Some(DEFAULT_STEP_TIMEOUT),
+            clock: &clock,
+            sink: &sink,
+        })
+        .err()
+        .expect("an unfinished persisted run must keep the project claim");
+
+    assert!(error.to_string().contains("unfinished run run_existing"));
+    assert!(crate::pipeline::load_run_state(&project, "run_new")
+        .unwrap()
+        .is_none());
 }
 
 #[tokio::test]

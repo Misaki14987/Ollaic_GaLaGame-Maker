@@ -270,7 +270,8 @@ pub(crate) fn write_asset_metadata(
         fs::create_dir_all(parent).map_err(|e| format!("创建配置目录失败: {e}"))?;
     }
     let source = serde_json::to_string_pretty(metadata).map_err(|e| e.to_string())?;
-    fs::write(&path, source).map_err(|e| format!("写入素材元数据失败 {}: {e}", path.display()))
+    crate::json_store::write_crash_safe(&path, source.as_bytes())
+        .map_err(|e| format!("写入素材元数据失败 {}: {e}", path.display()))
 }
 
 fn asset_metadata_key(category: &str, filename: &str) -> String {
@@ -371,12 +372,14 @@ fn rename_scene_asset_references(
 
 #[tauri::command]
 pub fn load_asset_metadata(project_path: String) -> Result<AssetMetadata, String> {
-    read_asset_metadata(&project_path)
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || read_asset_metadata(&project_path))
 }
 
 #[tauri::command]
 pub fn save_asset_metadata(project_path: String, metadata: AssetMetadata) -> Result<(), String> {
-    write_asset_metadata(&project_path, &metadata)
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || write_asset_metadata(&project_path, &metadata))
 }
 
 /// List all media files in a project's asset subdirectory.
@@ -454,6 +457,17 @@ pub fn import_asset(
     project_path: String,
     category: String,
 ) -> Result<AssetInfo, String> {
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || {
+        import_asset_locked(source_path, project_path, category)
+    })
+}
+
+fn import_asset_locked(
+    source_path: String,
+    project_path: String,
+    category: String,
+) -> Result<AssetInfo, String> {
     let subdir = category_to_dir(&category).ok_or_else(|| format!("未知素材类型: {category}"))?;
     let target_dir = PathBuf::from(&project_path).join("game").join(&subdir);
     fs::create_dir_all(&target_dir).map_err(|e| format!("创建目录失败: {e}"))?;
@@ -504,6 +518,18 @@ pub fn save_generated_asset(
     filename: String,
     base64_data: String,
 ) -> Result<AssetInfo, String> {
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || {
+        save_generated_asset_locked(project_path, category, filename, base64_data)
+    })
+}
+
+fn save_generated_asset_locked(
+    project_path: String,
+    category: String,
+    filename: String,
+    base64_data: String,
+) -> Result<AssetInfo, String> {
     validate_asset_filename(&filename)?;
     let subdir = category_to_dir(&category).ok_or_else(|| format!("未知素材类型: {category}"))?;
     let target_dir = PathBuf::from(&project_path).join("game").join(&subdir);
@@ -543,6 +569,17 @@ pub fn delete_asset(
     category: String,
     filename: String,
 ) -> Result<(), String> {
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || {
+        delete_asset_locked(project_path, category, filename)
+    })
+}
+
+fn delete_asset_locked(
+    project_path: String,
+    category: String,
+    filename: String,
+) -> Result<(), String> {
     validate_asset_filename(&filename)?;
     let subdir = category_to_dir(&category).ok_or_else(|| format!("未知素材类型: {category}"))?;
     let path = PathBuf::from(&project_path)
@@ -577,6 +614,18 @@ pub fn delete_asset(
 /// Rename an asset file.
 #[tauri::command]
 pub fn rename_asset(
+    project_path: String,
+    category: String,
+    old_name: String,
+    new_name: String,
+) -> Result<AssetInfo, String> {
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || {
+        rename_asset_locked(project_path, category, old_name, new_name)
+    })
+}
+
+fn rename_asset_locked(
     project_path: String,
     category: String,
     old_name: String,
@@ -760,6 +809,16 @@ pub fn sync_scene_voice_cards(
     project_path: String,
     scene_file: String,
 ) -> Result<Vec<VoiceAssetCard>, String> {
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || {
+        sync_scene_voice_cards_locked(project_path, scene_file)
+    })
+}
+
+fn sync_scene_voice_cards_locked(
+    project_path: String,
+    scene_file: String,
+) -> Result<Vec<VoiceAssetCard>, String> {
     let scene_path = PathBuf::from(&project_path)
         .join("game")
         .join("scene")
@@ -859,6 +918,17 @@ pub fn fill_voice_card(
     voice_card_id: String,
     asset_filename: String,
 ) -> Result<VoiceAssetCard, String> {
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || {
+        fill_voice_card_locked(project_path, voice_card_id, asset_filename)
+    })
+}
+
+fn fill_voice_card_locked(
+    project_path: String,
+    voice_card_id: String,
+    asset_filename: String,
+) -> Result<VoiceAssetCard, String> {
     let mut metadata = read_asset_metadata(&project_path)?;
     // Snapshot the fields we need before taking a mutable reference.
     let card = metadata
@@ -895,6 +965,13 @@ pub fn fill_voice_card(
 /// Delete a voice card (mark as deleted so it won't be re-created on sync).
 #[tauri::command]
 pub fn delete_voice_card(project_path: String, voice_card_id: String) -> Result<(), String> {
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || {
+        delete_voice_card_locked(project_path, voice_card_id)
+    })
+}
+
+fn delete_voice_card_locked(project_path: String, voice_card_id: String) -> Result<(), String> {
     let mut metadata = read_asset_metadata(&project_path)?;
     let already_deleted = metadata.deleted_voice_cards.contains(&voice_card_id);
     metadata.voice_cards.remove(&voice_card_id);
