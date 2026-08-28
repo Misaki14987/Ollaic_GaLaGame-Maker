@@ -1,6 +1,6 @@
 import { memo, useEffect, useState, type ReactNode } from 'react';
 import {
-  ArrowUp, Loader2, MessageCircle, MessageSquarePlus, MoreHorizontal, Pencil, Square, Trash2, Wand2, X,
+  ArrowUp, Loader2, MessageSquarePlus, MoreHorizontal, Pencil, Square, Trash2, Wand2,
 } from 'lucide-react';
 import type { SceneHeader } from '../../lib/webgal-ipc';
 import { useAiAgent } from '../../hooks/useAiAgent';

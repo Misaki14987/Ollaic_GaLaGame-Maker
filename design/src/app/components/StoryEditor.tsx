@@ -1,8 +1,7 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router';
+import { useParams, useSearchParams } from 'react-router';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
-import { convertFileSrc } from '@tauri-apps/api/core';
 import { Loader2 } from 'lucide-react';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -16,7 +15,7 @@ import {
   parseScene, serializeScene, saveScene, loadScene,
   openProject, getScenePath, createScene,
   setRuntimeProject, setRuntimeTemplateDir, getRuntimeUrl, jumpToSentence, openInBrowser,
-  readFileText, writeFileText, deleteScene, renameScene,
+  writeFileText, deleteScene, renameScene,
   type ProjectInfo,
 } from '../lib/webgal-ipc';
 import { listCharacters, listCharacterNames } from '../lib/character-ipc';
@@ -60,7 +59,6 @@ import { useProjectExport } from './story-editor/useProjectExport';
 const AUTO_SAVE_INTERVAL_MS = 3_000;
 
 export function StoryEditor() {
-  const navigate = useNavigate();
   const { projectId } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedScene = searchParams.get('scene');
@@ -1167,7 +1165,6 @@ export function StoryEditor() {
           sceneHeaders={sceneHeaders}
           onSwitchScene={stableSwitchScene}
           onHeaderUpdated={handleHeaderUpdated}
-          onRefreshProject={refreshProjectInfo}
           onNewScene={handleNewScene}
           onDeleteScene={handleDeleteScene}
         />

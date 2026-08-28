@@ -150,6 +150,13 @@ pub struct RunState {
     pub allow_local_fallback: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_snapshot_cleanup: Vec<String>,
+    /// Per-run Step deadline snapshot, taken at run-creation time from the
+    /// Provider capability that was live then. `None` means "no timeout
+    /// enforced" (legacy behavior; new Flows always set this from the
+    /// resolved capability). `#[serde(default)]` keeps backward compat with
+    /// state files written before this field existed.
+    #[serde(default)]
+    pub step_timeout_ms: Option<u64>,
 }
 
 impl RunState {
@@ -175,6 +182,7 @@ impl RunState {
             pinned: false,
             allow_local_fallback: false,
             pending_snapshot_cleanup: Vec::new(),
+            step_timeout_ms: None,
         }
     }
 
