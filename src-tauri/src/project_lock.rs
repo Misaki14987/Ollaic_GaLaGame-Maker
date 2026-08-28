@@ -15,7 +15,49 @@ fn project_key(project_path: &Path) -> PathBuf {
         .unwrap_or_else(|_| project_path.to_path_buf())
 }
 
-pub fn with_project_lock<T>(project_path: &Path, operation: impl FnOnce() -> T) -> T {
+pub(crate) trait ProjectRecoveryError {
+    fn project_recovery(error: String) -> Self;
+}
+
+impl ProjectRecoveryError for String {
+    fn project_recovery(error: String) -> Self {
+        error
+    }
+}
+
+impl ProjectRecoveryError for crate::agents::AgentError {
+    fn project_recovery(error: String) -> Self {
+        Self(error)
+    }
+}
+
+impl ProjectRecoveryError for crate::pipeline::PipelineError {
+    fn project_recovery(error: String) -> Self {
+        Self::Recovery(error)
+    }
+}
+
+pub(crate) fn with_project_lock<T, E: ProjectRecoveryError>(
+    project_path: &Path,
+    operation: impl FnOnce() -> Result<T, E>,
+) -> Result<T, E> {
+    with_project_lock_unrecovered(project_path, || {
+        recover_project_locked(project_path).map_err(E::project_recovery)?;
+        operation()
+    })
+}
+
+pub(crate) fn recover_project_locked(project_path: &Path) -> Result<(), String> {
+    crate::asset_queue::transaction::recover_pending_locked(project_path)?;
+    crate::assets::transaction::recover_pending_locked(project_path)
+}
+
+/// Acquires the mutex without running recovery. Only recovery implementations
+/// may use this entry point, otherwise a stale journal can overwrite later work.
+pub(crate) fn with_project_lock_unrecovered<T>(
+    project_path: &Path,
+    operation: impl FnOnce() -> T,
+) -> T {
     let key = project_key(project_path);
     let project_lock = {
         let mut entries = locks()
@@ -47,7 +89,10 @@ pub fn project_root_for_game_path(path: &Path) -> Option<PathBuf> {
     None
 }
 
-pub fn with_game_path_lock<T>(path: &Path, operation: impl FnOnce() -> T) -> T {
+pub(crate) fn with_game_path_lock<T, E: ProjectRecoveryError>(
+    path: &Path,
+    operation: impl FnOnce() -> Result<T, E>,
+) -> Result<T, E> {
     match project_root_for_game_path(path) {
         Some(root) => with_project_lock(&root, operation),
         None => operation(),

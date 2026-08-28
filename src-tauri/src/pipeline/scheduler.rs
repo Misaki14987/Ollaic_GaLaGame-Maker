@@ -13,12 +13,11 @@ use tokio::sync::{Mutex, Notify};
 #[cfg(test)]
 use crate::agents::router::NoChatGateway;
 use crate::agents::router::{ChatGateway, ConfiguredChatGateway};
-use crate::agents::{AgentContext, AgentError, AgentOutput, AgentOutputPayload, AgentRegistry};
-use crate::asset_queue::AssetTaskStatus;
+use crate::agents::{AgentContext, AgentRegistry};
 #[cfg(test)]
 use crate::pipeline::asset_executor::PlaceholderAssetGeneratorFactory;
 use crate::pipeline::asset_executor::{AssetGeneratorFactory, ConfiguredAssetGeneratorFactory};
-use crate::pipeline::dsl::{FlowRecipe, StepExecutor, StepKind};
+use crate::pipeline::dsl::{FlowRecipe, StepKind};
 use crate::pipeline::events::{EventSink, PipelineEvent};
 use crate::pipeline::output_commit::{
     apply_canonical_characters, apply_output, commit_step_output, restore_interrupted_outputs,
@@ -29,6 +28,7 @@ use crate::pipeline::recovery::PipelineError;
 use crate::pipeline::run_control::RunHandle;
 use crate::pipeline::run_driver::{next_action, Action};
 use crate::pipeline::state::{Clock, RunState, RunStatus, StepStatus};
+use crate::pipeline::step_executor::{execute as execute_step, ExecutorContext};
 use crate::pipeline::store;
 use crate::story_plan::{self, StoryPlan};
 
@@ -589,34 +589,41 @@ impl Pipeline {
                 .map(|step| step.def.executor.clone())
                 .unwrap_or_default()
         };
-        let result = if executor == StepExecutor::AssetQueue {
-            let run_id = handle.state.lock().await.run_id.clone();
-            let generator = self
-                .asset_generators
-                .create(allow_local_fallback, handle.cancelled.clone());
-            let cancel_wait = handle.cancel_notify.notified();
-            tokio::pin!(cancel_wait);
-            cancel_wait.as_mut().enable();
-            if handle.cancelled.load(Ordering::SeqCst) {
-                return;
-            }
-            let queue_run = async {
-                #[cfg(test)]
-                if let Some(started) = &self.hanging_asset_queue_started {
-                    started.add_permits(1);
-                    return std::future::pending().await;
-                }
-                crate::asset_queue::run_queue_cancellable(
-                    project_path,
-                    &run_id,
-                    &plan,
-                    generator,
-                    handle.cancelled.clone(),
-                    handle.asset_binding_gate.clone(),
-                )
+        #[cfg(test)]
+        if let Some((entered, release)) = &self.cancel_wait_registration_hook {
+            entered.add_permits(1);
+            release
+                .acquire()
                 .await
-            };
-            tokio::pin!(queue_run);
+                .expect("cancel registration test hook closed")
+                .forget();
+        }
+        let cancel_wait = handle.cancel_notify.notified();
+        tokio::pin!(cancel_wait);
+        // notify_waiters() stores no permit. Register this waiter before
+        // checking the durable atomic flag so stop() cannot land in the gap
+        // between the check and select polling.
+        cancel_wait.as_mut().enable();
+        if handle.cancelled.load(Ordering::SeqCst) {
+            return;
+        }
+        let result = {
+            let run_id = handle.state.lock().await.run_id.clone();
+            let executor_run = execute_step(ExecutorContext {
+                executor: &executor,
+                kind,
+                agent_context: &ctx,
+                agents: &self.agents,
+                asset_generators: self.asset_generators.as_ref(),
+                project_path,
+                run_id: &run_id,
+                plan: &plan,
+                cancelled: &handle.cancelled,
+                asset_binding_gate: &handle.asset_binding_gate,
+                #[cfg(test)]
+                hanging_asset_queue_started: self.hanging_asset_queue_started.as_ref(),
+            });
+            tokio::pin!(executor_run);
             if handle.cancelled.load(Ordering::SeqCst) {
                 return;
             }
@@ -626,116 +633,16 @@ impl Pipeline {
                     None => std::future::pending::<()>().await,
                 }
             };
-            let queue_result = tokio::select! {
+            tokio::select! {
                 biased;
                 _ = &mut cancel_wait => return,
-                result = &mut queue_run => result,
+                result = &mut executor_run => result,
                 _ = timeout_sleep => {
                     if let Some(timeout) = handle.step_timeout {
-                        self.fail_step_timeout(execution, id, timeout)
-                            .await;
+                        self.fail_step_timeout(execution, id, timeout).await;
                     }
                     return;
                 }
-            };
-            match queue_result {
-                Ok(queue) => {
-                    let failed = queue
-                        .tasks
-                        .iter()
-                        .filter(|task| task.status == AssetTaskStatus::Failed)
-                        .count();
-                    if failed == 0 {
-                        let downgraded = queue.tasks.iter().any(|task| {
-                            task.status == AssetTaskStatus::Succeeded && task.used_local_fallback
-                        });
-                        let pending_configuration = queue
-                            .tasks
-                            .iter()
-                            .filter(|task| {
-                                task.status == AssetTaskStatus::Pending
-                                    && task.error.as_deref().is_some_and(|error| {
-                                        error.starts_with("pending configuration:")
-                                    })
-                            })
-                            .count();
-                        let mut warnings = downgraded
-                            .then(|| "部分媒体供应商不可用，已生成本地占位素材".to_string())
-                            .into_iter()
-                            .collect::<Vec<_>>();
-                        if pending_configuration > 0 {
-                            warnings
-                                .push(format!("{pending_configuration} 个媒体任务等待供应商配置"));
-                        }
-                        let mut output = AgentOutput::new(AgentOutputPayload::AssetQueue(queue));
-                        output.warnings = warnings;
-                        output.downgrade = downgraded
-                            .then(|| "local-placeholder-assets".to_string())
-                            .or_else(|| {
-                                (pending_configuration > 0)
-                                    .then(|| "media-capability-pending".to_string())
-                            });
-                        Ok(output)
-                    } else {
-                        Err(AgentError(format!(
-                            "asset queue finished with {failed} failed task(s)"
-                        )))
-                    }
-                }
-                Err(error) => Err(AgentError(error)),
-            }
-        } else {
-            match self.agents.get(kind, executor.agent_key()) {
-                Some(agent) => {
-                    #[cfg(test)]
-                    if let Some((entered, release)) = &self.cancel_wait_registration_hook {
-                        entered.add_permits(1);
-                        release
-                            .acquire()
-                            .await
-                            .expect("cancel registration test hook closed")
-                            .forget();
-                    }
-                    let cancel_wait = handle.cancel_notify.notified();
-                    tokio::pin!(cancel_wait);
-                    // notify_waiters() stores no permit. Register this waiter
-                    // before checking the durable atomic flag so stop() cannot
-                    // land in the gap between the check and select polling.
-                    cancel_wait.as_mut().enable();
-                    if handle.cancelled.load(Ordering::SeqCst) {
-                        return;
-                    }
-                    let agent_run = agent.run(&ctx);
-                    if handle.cancelled.load(Ordering::SeqCst) {
-                        return;
-                    }
-                    let timeout_sleep = async {
-                        match handle.step_timeout {
-                            Some(timeout) => tokio::time::sleep(timeout).await,
-                            None => std::future::pending::<()>().await,
-                        }
-                    };
-                    tokio::select! {
-                        biased;
-                        _ = &mut cancel_wait => {
-                            // stop() aborted the run: drop the in-flight agent
-                            // future and return without applying anything.
-                            return;
-                        }
-                        result = agent_run => result,
-                        _ = timeout_sleep => {
-                            if let Some(timeout) = handle.step_timeout {
-                                self.fail_step_timeout(execution, id, timeout)
-                                    .await;
-                            }
-                            return;
-                        }
-                    }
-                }
-                None => Err(AgentError(format!(
-                    "no agent registered for step kind '{}'",
-                    kind.as_str()
-                ))),
             }
         };
         match result {

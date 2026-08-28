@@ -59,7 +59,7 @@ impl RunRegistry {
                 project_path.display()
             ));
         }
-        Self::ensure_project_available(&guard, project_path, run_id, None).await?;
+        Self::ensure_project_available(&guard, project_path, run_id, Some(run_id)).await?;
         let run = make_run()?;
         guard.insert(run_id.to_string(), run.clone());
         Ok(run)
@@ -124,7 +124,7 @@ impl RunRegistry {
             }
             return Ok(());
         }
-        Self::ensure_project_available(&guard, caller_project, run_id, None).await?;
+        Self::ensure_project_available(&guard, caller_project, run_id, Some(run_id)).await?;
         let run = make_run()?;
         guard.insert(run_id.to_string(), run);
         Ok(())
@@ -178,6 +178,19 @@ impl RunRegistry {
                     requested_run_id
                 ));
             }
+        }
+        for run in crate::pipeline::store::list_run_states(project_path)
+            .map_err(|error| format!("failed to inspect persisted runs: {error}"))?
+        {
+            if excluded_run_id == Some(run.run_id.as_str()) || run.status.is_terminal() {
+                continue;
+            }
+            return Err(format!(
+                "project {} already has active run {}; finish or stop it before activating run {}",
+                project_path.display(),
+                run.run_id,
+                requested_run_id
+            ));
         }
         Ok(())
     }
@@ -342,7 +355,11 @@ mod tests {
             .insert_active_with("run_a", &project, || Ok(make_run(&project, "run_a")))
             .await
             .unwrap();
-        first.handle.state().lock().await.status = RunStatus::Completed;
+        {
+            let mut state = first.handle.state().lock().await;
+            state.status = RunStatus::Completed;
+            crate::pipeline::store::save_run_state(&project, &state).unwrap();
+        }
 
         registry
             .insert_active_with("run_b", &project, || Ok(make_run(&project, "run_b")))
@@ -377,6 +394,76 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn persisted_unfinished_run_blocks_attach_after_restart() {
+        let root = TestRoot::new("persisted_attach_claim");
+        let project = root.project("project");
+        let terminal = make_run(&project, "run_terminal");
+        {
+            let mut state = terminal.handle.state().lock().await;
+            state.status = RunStatus::Completed;
+            crate::pipeline::store::save_run_state(&project, &state).unwrap();
+        }
+        let _unfinished = make_run(&project, "run_unfinished");
+        let registry = RunRegistry::new();
+
+        let error = registry
+            .attach_if_needed("run_terminal", &project, || Ok(terminal))
+            .await
+            .unwrap_err();
+
+        assert!(error.contains("already has active run run_unfinished"));
+        assert!(registry
+            .resolve_if_present("run_terminal", &project)
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn persisted_unfinished_run_blocks_resume_after_restart() {
+        let root = TestRoot::new("persisted_resume_claim");
+        let project = root.project("project");
+        let resumable = make_run(&project, "run_resumable");
+        let _unfinished = make_run(&project, "run_unfinished");
+        let registry = RunRegistry::new();
+
+        let error = registry
+            .insert_active_with("run_resumable", &project, || Ok(resumable))
+            .await
+            .err()
+            .expect("another persisted unfinished run must keep the project claim");
+
+        assert!(error.contains("already has active run run_unfinished"));
+        assert!(registry
+            .resolve_if_present("run_resumable", &project)
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn persisted_unfinished_run_blocks_reactivation() {
+        let root = TestRoot::new("persisted_reactivation_claim");
+        let project = root.project("project");
+        let terminal = make_run(&project, "run_terminal");
+        {
+            let mut state = terminal.handle.state().lock().await;
+            state.status = RunStatus::Failed;
+            crate::pipeline::store::save_run_state(&project, &state).unwrap();
+        }
+        let registry = RunRegistry::new();
+        registry.insert("run_terminal".to_string(), terminal).await;
+        let _unfinished = make_run(&project, "run_unfinished");
+
+        let error = registry
+            .with_project_activation("run_terminal", &project, |_| async { Ok(()) })
+            .await
+            .unwrap_err();
+
+        assert!(error.contains("already has active run run_unfinished"));
+    }
+
+    #[tokio::test]
     async fn terminal_run_cannot_reactivate_while_a_new_run_owns_the_project() {
         let root = TestRoot::new("reactivation_claim");
         let project = root.project("project");
@@ -385,7 +472,11 @@ mod tests {
             .insert_active_with("run_a", &project, || Ok(make_run(&project, "run_a")))
             .await
             .unwrap();
-        first.handle.state().lock().await.status = RunStatus::Failed;
+        {
+            let mut state = first.handle.state().lock().await;
+            state.status = RunStatus::Failed;
+            crate::pipeline::store::save_run_state(&project, &state).unwrap();
+        }
         registry
             .insert_active_with("run_b", &project, || Ok(make_run(&project, "run_b")))
             .await

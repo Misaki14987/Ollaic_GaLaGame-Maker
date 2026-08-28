@@ -2700,16 +2700,14 @@ pub async fn generate_batch_tts(
     // instead of the opaque "vo_batch_<id>" naming.
     let stem_map: std::collections::HashMap<String, String> =
         crate::project_lock::with_project_lock(std::path::Path::new(&project_path), || {
-            crate::assets::commands::read_asset_metadata(&project_path)
-                .map(|meta| {
-                    meta.voice_cards
-                        .into_iter()
-                        .filter(|(_, c)| !c.target_stem.trim().is_empty())
-                        .map(|(id, c)| (id, c.target_stem))
-                        .collect()
-                })
-                .unwrap_or_default()
-        });
+            crate::assets::commands::read_asset_metadata(&project_path).map(|meta| {
+                meta.voice_cards
+                    .into_iter()
+                    .filter(|(_, c)| !c.target_stem.trim().is_empty())
+                    .map(|(id, c)| (id, c.target_stem))
+                    .collect::<std::collections::HashMap<_, _>>()
+            })
+        })?;
 
     for (index, item) in items.iter().enumerate() {
         let progress_start = BatchTtsProgress {
@@ -2788,10 +2786,11 @@ pub async fn generate_batch_tts(
                 };
 
                 // Update VoiceAssetCard
-                crate::project_lock::with_project_lock(std::path::Path::new(&project_path), || {
-                    if let Ok(mut asset_meta) =
-                        crate::assets::commands::read_asset_metadata(&project_path)
-                    {
+                let metadata_update: Result<(), String> = crate::project_lock::with_project_lock(
+                    std::path::Path::new(&project_path),
+                    || {
+                        let mut asset_meta =
+                            crate::assets::commands::read_asset_metadata(&project_path)?;
                         if let Some(card) = asset_meta.voice_cards.get_mut(&item.voice_card_id) {
                             card.voice_asset = Some(asset_name.clone());
                             // Update tags
@@ -2803,13 +2802,27 @@ pub async fn generate_batch_tts(
                             tags.retain(|t| !t.starts_with("source:"));
                             tags.push("source:ai".to_string());
                             asset_meta.tags.insert(tag_key, tags);
-                            let _ = crate::assets::commands::write_asset_metadata(
+                            crate::assets::commands::write_asset_metadata(
                                 &project_path,
                                 &asset_meta,
-                            );
+                            )?;
                         }
-                    }
-                });
+                        Ok(())
+                    },
+                );
+                if let Err(error) = metadata_update {
+                    let err_progress = BatchTtsProgress {
+                        voice_card_id: item.voice_card_id.clone(),
+                        index,
+                        total,
+                        status: "error".to_string(),
+                        message: format!("更新音频素材信息失败: {error}"),
+                        asset_name: Some(asset_name),
+                    };
+                    let _ = app_handle.emit("batch-tts-progress", &err_progress);
+                    results.push(err_progress);
+                    continue;
+                }
 
                 let progress_done = BatchTtsProgress {
                     voice_card_id: item.voice_card_id.clone(),

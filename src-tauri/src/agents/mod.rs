@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::asset_queue::AssetQueue;
 use crate::characters::types::Character;
-use crate::pipeline::dsl::StepKind;
+use crate::pipeline::dsl::{StepExecutor, StepKind};
 use crate::story_plan::types::{AssetTaskPlan, BranchGraph, ChapterPlan, SceneDraft, ScenePlan};
 
 pub use asset_planner::AssetPlannerAgent;
@@ -51,7 +51,7 @@ pub struct AgentContext<'a> {
     pub allow_local_fallback: bool,
 }
 
-/// The one valid domain payload produced by an Agent or pipeline executor.
+/// The one valid domain payload produced by an Agent or Flow Step executor.
 /// Each variant owns all fields that must change together, so impossible
 /// cross-step combinations cannot be constructed.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -126,7 +126,8 @@ impl AgentOutput {
 
 #[cfg(test)]
 mod output_tests {
-    use super::{AgentOutput, AgentOutputPayload};
+    use super::{AgentOutput, AgentOutputPayload, AgentRegistry};
+    use crate::pipeline::dsl::{StepExecutor, StepKind};
 
     #[test]
     fn serialized_output_has_one_tagged_payload() {
@@ -136,6 +137,22 @@ mod output_tests {
         assert_eq!(value["type"], "synopsis");
         assert_eq!(value["data"], "A story");
         assert!(value.get("characters").is_none());
+    }
+
+    #[test]
+    fn registry_resolves_typed_step_executors() {
+        let registry = AgentRegistry::with_defaults();
+
+        assert!(registry.get(StepKind::Plan, &StepExecutor::Agent).is_some());
+        assert!(registry
+            .get(
+                StepKind::Scene,
+                &StepExecutor::NamedAgent("dialogist".to_string()),
+            )
+            .is_some());
+        assert!(registry
+            .get(StepKind::Asset, &StepExecutor::AssetQueue)
+            .is_none());
     }
 }
 
@@ -194,10 +211,13 @@ impl AgentRegistry {
         self.map.insert(key.into(), agent);
     }
 
-    pub fn get(&self, kind: StepKind, key: Option<&str>) -> Option<&dyn Agent> {
-        self.map
-            .get(key.unwrap_or_else(|| kind.as_str()))
-            .map(|boxed| boxed.as_ref())
+    pub fn get(&self, kind: StepKind, executor: &StepExecutor) -> Option<&dyn Agent> {
+        let key = match executor {
+            StepExecutor::Agent => kind.as_str(),
+            StepExecutor::NamedAgent(key) => key,
+            StepExecutor::AssetQueue => return None,
+        };
+        self.map.get(key).map(|boxed| boxed.as_ref())
     }
 }
 

@@ -104,7 +104,8 @@ pub enum RecoveryStatus {
 #[tauri::command]
 pub fn apply_ai_change_set(request: ApplyChangeSetRequest) -> ApplyChangeSetResult {
     let project_path = PathBuf::from(&request.project_path);
-    crate::project_lock::with_project_lock(&project_path, || apply_locked(request))
+    crate::project_lock::with_project_lock(&project_path, || Ok::<_, String>(apply_locked(request)))
+        .unwrap_or_else(|message| failed_without_writes("project recovery", message))
 }
 
 fn apply_locked(request: ApplyChangeSetRequest) -> ApplyChangeSetResult {

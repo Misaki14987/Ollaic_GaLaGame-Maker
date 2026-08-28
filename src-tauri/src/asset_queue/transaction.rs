@@ -32,8 +32,8 @@ enum BindingCommitError {
 }
 
 pub(crate) fn load_queue_consistent(project_path: &Path) -> Result<Option<AssetQueue>, String> {
-    crate::project_lock::with_project_lock(project_path, || {
-        recover_pending_locked(project_path)?;
+    crate::project_lock::with_project_lock_unrecovered(project_path, || {
+        crate::project_lock::recover_project_locked(project_path)?;
         queue_path(project_path)
             .is_file()
             .then(|| load_queue(project_path))
@@ -42,7 +42,9 @@ pub(crate) fn load_queue_consistent(project_path: &Path) -> Result<Option<AssetQ
 }
 
 pub(crate) fn recover_pending(project_path: &Path) -> Result<(), String> {
-    crate::project_lock::with_project_lock(project_path, || recover_pending_locked(project_path))
+    crate::project_lock::with_project_lock_unrecovered(project_path, || {
+        crate::project_lock::recover_project_locked(project_path)
+    })
 }
 
 pub(crate) fn commit_generated_binding(
@@ -50,8 +52,8 @@ pub(crate) fn commit_generated_binding(
     queue: &AssetQueue,
     task_index: usize,
 ) -> Result<AssetQueue, String> {
-    crate::project_lock::with_project_lock(project_path, || {
-        recover_pending_locked(project_path)?;
+    crate::project_lock::with_project_lock_unrecovered(project_path, || {
+        crate::project_lock::recover_project_locked(project_path)?;
         commit_generated_binding_locked_with(project_path, queue, task_index, save_queue)
     })
 }
@@ -95,8 +97,8 @@ pub(crate) fn promote_artifact(
     task_id: &str,
     attempt: u32,
 ) -> Result<AssetQueue, String> {
-    crate::project_lock::with_project_lock(project_path, || {
-        recover_pending_locked(project_path)?;
+    crate::project_lock::with_project_lock_unrecovered(project_path, || {
+        crate::project_lock::recover_project_locked(project_path)?;
         let queue = load_queue(project_path)?;
         let task_index = queue
             .tasks
@@ -134,8 +136,8 @@ pub(crate) fn delete_artifact(
     task_id: &str,
     attempt: u32,
 ) -> Result<AssetQueue, String> {
-    crate::project_lock::with_project_lock(project_path, || {
-        recover_pending_locked(project_path)?;
+    crate::project_lock::with_project_lock_unrecovered(project_path, || {
+        crate::project_lock::recover_project_locked(project_path)?;
         let queue = load_queue(project_path)?;
         delete_artifact_locked_with(project_path, queue, task_id, attempt, save_queue)
     })
@@ -307,7 +309,7 @@ fn begin_artifact_deletion_locked(
     Ok(pending)
 }
 
-fn recover_pending_locked(project_path: &Path) -> Result<(), String> {
+pub(crate) fn recover_pending_locked(project_path: &Path) -> Result<(), String> {
     let Some(pending) = read_pending(project_path)? else {
         cleanup_committed_staging(project_path)?;
         return Ok(());
@@ -545,7 +547,7 @@ mod tests {
         save_queue(&project, &queue).unwrap();
         let original_scene = std::fs::read(project.join("game/scene/start.txt")).unwrap();
 
-        let error = crate::project_lock::with_project_lock(&project, || {
+        let error = crate::project_lock::with_project_lock_unrecovered(&project, || {
             persist_binding_locked_with(&project, &queue, 0, &queue.tasks[0], |_, _| {
                 Err("injected queue save failure".to_string())
             })
@@ -590,7 +592,7 @@ mod tests {
         save_queue(&project, &queue).unwrap();
         let original_scene = std::fs::read(project.join("game/scene/start.txt")).unwrap();
 
-        crate::project_lock::with_project_lock(&project, || {
+        crate::project_lock::with_project_lock_unrecovered(&project, || {
             begin_binding_transaction_locked(&project, &queue).unwrap();
             BindingTransaction::apply_locked(&project, &queue.tasks[0])
                 .unwrap()
@@ -612,11 +614,38 @@ mod tests {
     }
 
     #[test]
+    fn project_lock_recovers_before_running_the_next_project_write() {
+        let (project, queue, _) = fixture("lock_recovery_order");
+        save_queue(&project, &queue).unwrap();
+
+        crate::project_lock::with_project_lock_unrecovered(&project, || {
+            begin_binding_transaction_locked(&project, &queue).unwrap();
+            BindingTransaction::apply_locked(&project, &queue.tasks[0])
+                .unwrap()
+                .commit();
+        });
+
+        crate::project_lock::with_project_lock(&project, || {
+            std::fs::write(project.join("game/scene/start.txt"), ":new AI edit;\n")
+                .map_err(|error| error.to_string())
+        })
+        .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(project.join("game/scene/start.txt")).unwrap(),
+            ":new AI edit;\n"
+        );
+        assert_eq!(load_queue(&project).unwrap(), queue);
+        assert!(!pending_path(&project).exists());
+        let _ = std::fs::remove_dir_all(project);
+    }
+
+    #[test]
     fn recovery_rolls_back_crash_after_artifact_was_staged() {
         let (project, queue, artifact) = fixture("delete_crash");
         save_queue(&project, &queue).unwrap();
 
-        crate::project_lock::with_project_lock(&project, || {
+        crate::project_lock::with_project_lock_unrecovered(&project, || {
             let pending = begin_artifact_deletion_locked(&project, &queue, &artifact).unwrap();
             let staged = checked_transaction_path(
                 &project,

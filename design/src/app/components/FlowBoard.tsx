@@ -37,8 +37,9 @@ import { Switch } from './ui/switch';
 import type { FlowStepView } from '../lib/flow-state';
 import { layoutFlowSteps, loadFlowPositions, saveFlowPositions } from '../lib/flow-layout';
 import { assetQueueDeleteArtifact, assetQueuePromoteArtifact } from '../lib/pipeline-ipc';
+import { isAssetQueueStep, stepExecutor } from '../lib/pipeline-types';
 import type { AssetQueueState, RunState, RunStatus, StoryPlan } from '../lib/pipeline-types';
-import { isAssetQueueStep, useFlowRunController } from '../hooks/useFlowRunController';
+import { useFlowRunController } from '../hooks/useFlowRunController';
 
 const NODE_TYPES = { step: StepNode };
 
@@ -195,6 +196,7 @@ export function FlowBoard({ projectPath, onOpenArtifact }: FlowBoardProps) {
         data: {
           id: step.id,
           kind: step.kind,
+          executor: stepExecutor(step),
           status: step.status,
           attempt: step.attempt,
           cost: step.history.some((attempt) => attempt.cost != null)

@@ -85,7 +85,7 @@ impl std::fmt::Display for PipelineError {
             PipelineError::InvalidRunTransition(id, reason) => {
                 write!(f, "invalid transition for run '{}': {}", id, reason)
             }
-            PipelineError::Recovery(error) => write!(f, "pipeline recovery error: {}", error),
+            PipelineError::Recovery(error) => write!(f, "Agent Flow recovery error: {}", error),
             PipelineError::Cleanup(error) => write!(f, "snapshot cleanup deferred: {}", error),
         }
     }

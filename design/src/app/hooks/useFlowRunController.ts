@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
-import { initialFlowState, reduceFlowEvent, type FlowStepView } from '../lib/flow-state';
+import { initialFlowState, reduceFlowEvent } from '../lib/flow-state';
 import {
   assetQueueDeleteArtifact,
   assetQueueGet,
@@ -22,11 +22,8 @@ import {
   pipelineUpdateDependencies,
   pipelineUpdateStepPrompt,
 } from '../lib/pipeline-ipc';
+import { isAssetQueueStep } from '../lib/pipeline-types';
 import type { AssetQueueState, PipelineEvent, PipelineEventRecord, RunState } from '../lib/pipeline-types';
-
-export function isAssetQueueStep(step: FlowStepView) {
-  return step.kind === 'asset' && (step.id === 'assetQueue' || step.agent === 'assetQueue');
-}
 
 function recordsFromSnapshot(snapshot: RunState): PipelineEventRecord[] {
   const events: PipelineEventRecord[] = [{
@@ -107,7 +104,7 @@ export function useFlowRunController(projectPath: string) {
         setAssetQueue(queue?.runId === runIdRef.current ? queue : null);
       }
     } catch {
-      // Queue state is supplementary; pipeline controls must remain usable.
+      // Queue state is supplementary; Agent Flow controls must remain usable.
     }
   }, [projectPath]);
 

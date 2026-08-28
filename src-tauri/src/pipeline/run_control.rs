@@ -154,7 +154,7 @@ impl RunHandle {
     }
 
     /// Reset a step and everything downstream so the scheduler re-runs a
-    /// coherent suffix of the DAG without repeating completed upstream work.
+    /// coherent Flow Dependency suffix without repeating completed upstream work.
     pub async fn retry_step(
         &self,
         project_path: &Path,

@@ -51,15 +51,6 @@ pub enum StepExecutor {
     AssetQueue,
 }
 
-impl StepExecutor {
-    pub fn agent_key(&self) -> Option<&str> {
-        match self {
-            Self::Agent | Self::AssetQueue => None,
-            Self::NamedAgent(key) => Some(key),
-        }
-    }
-}
-
 impl Serialize for StepExecutor {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where

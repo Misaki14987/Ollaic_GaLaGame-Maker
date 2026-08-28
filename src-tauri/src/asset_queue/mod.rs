@@ -2,7 +2,7 @@ pub mod binder;
 pub mod commands;
 pub mod scheduler;
 pub mod store;
-mod transaction;
+pub(crate) mod transaction;
 pub mod types;
 
 pub use scheduler::{run_queue_cancellable, AssetGenerator, GeneratedArtifact};

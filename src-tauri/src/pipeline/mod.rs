@@ -13,6 +13,7 @@ mod run_control;
 mod run_driver;
 pub mod scheduler;
 pub mod state;
+mod step_executor;
 pub mod store;
 
 // Re-exports form the module's public API; in this binary crate they are

@@ -81,7 +81,7 @@ export function reduceFlowEvent(state: FlowState, event: FlowAction): FlowState 
       steps: event.state.steps.map((step) => ({
         id: step.def.id,
         kind: step.def.kind,
-        agent: step.def.agent ?? null,
+        agent: step.def.agent,
         status: step.status,
         dependsOn: step.def.dependsOn,
         attempt: step.attempt,

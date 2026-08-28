@@ -398,7 +398,12 @@ pub(crate) fn create_project_snapshot_locked(
 
 #[tauri::command]
 pub fn list_project_snapshots(project_path: String) -> Result<Vec<SnapshotInfo>, String> {
-    let dir = snapshots_dir(&project_path);
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || list_project_snapshots_locked(&project_path))
+}
+
+fn list_project_snapshots_locked(project_path: &str) -> Result<Vec<SnapshotInfo>, String> {
+    let dir = snapshots_dir(project_path);
     if !dir.exists() {
         return Ok(Vec::new());
     }
@@ -428,8 +433,19 @@ pub fn rename_project_snapshot(
     snapshot_id: String,
     label: String,
 ) -> Result<SnapshotInfo, String> {
-    validate_snapshot_id(&snapshot_id)?;
-    let snapshot_dir = snapshots_dir(&project_path).join(&snapshot_id);
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || {
+        rename_project_snapshot_locked(&project_path, &snapshot_id, label)
+    })
+}
+
+fn rename_project_snapshot_locked(
+    project_path: &str,
+    snapshot_id: &str,
+    label: String,
+) -> Result<SnapshotInfo, String> {
+    validate_snapshot_id(snapshot_id)?;
+    let snapshot_dir = snapshots_dir(project_path).join(snapshot_id);
     if !snapshot_dir.is_dir() {
         return Err(format!("Snapshot not found: {snapshot_id}"));
     }
@@ -440,7 +456,7 @@ pub fn rename_project_snapshot(
         .map_err(|e| format!("Failed to parse {}: {e}", manifest_path.display()))?;
     info.label = normalize_snapshot_label(Some(label));
     let manifest = serde_json::to_string_pretty(&info).map_err(|e| e.to_string())?;
-    fs::write(&manifest_path, manifest)
+    crate::json_store::write_crash_safe(&manifest_path, manifest.as_bytes())
         .map_err(|e| format!("Failed to write {}: {e}", manifest_path.display()))?;
     Ok(info)
 }

@@ -31,8 +31,27 @@ export interface StepDef {
   id: string;
   kind: StepKind;
   dependsOn: string[];
-  agent?: string | null;
+  agent: string | null;
   prompt: string;
+}
+
+export type StepExecutor =
+  | { type: 'agent' }
+  | { type: 'namedAgent'; key: string }
+  | { type: 'assetQueue' };
+
+/** Normalize the legacy `agent` wire field at the IPC boundary. */
+export function stepExecutor(step: Pick<StepDef, 'id' | 'agent'>): StepExecutor {
+  if (step.agent === 'assetQueue' || (step.id === 'assetQueue' && step.agent == null)) {
+    return { type: 'assetQueue' };
+  }
+  return step.agent == null
+    ? { type: 'agent' }
+    : { type: 'namedAgent', key: step.agent };
+}
+
+export function isAssetQueueStep(step: Pick<StepDef, 'id' | 'agent'>): boolean {
+  return stepExecutor(step).type === 'assetQueue';
 }
 
 export interface StepState {
