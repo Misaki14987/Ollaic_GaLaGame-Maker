@@ -71,10 +71,8 @@ impl Orchestrator {
     /// into an unbounded run; the caller must reject the Flow start so the
     /// user fixes the config rather than starting a run with no timeout.
     pub fn validate_flow_step_capability(&self) -> Result<(), String> {
-        crate::ai::provider_capability::capability_for_config(
-            &crate::ai::config::load_config(),
-        )
-        .map(|_| ())
+        crate::ai::provider_capability::capability_for_config(&crate::ai::config::load_config())
+            .map(|_| ())
     }
 }
 

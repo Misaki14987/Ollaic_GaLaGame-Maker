@@ -63,9 +63,7 @@ impl ChatRunRegistry {
                     // A cancel arrived before this register. Drop the marker
                     // and reject — the Provider future must not start.
                     states.remove(run_id);
-                    return Err(format!(
-                        "chat run cancelled before registration: {run_id}"
-                    ));
+                    return Err(format!("chat run cancelled before registration: {run_id}"));
                 }
                 Some(RunState::Live(_)) => {
                     return Err(format!("chat run already active: {run_id}"));

@@ -75,9 +75,7 @@ pub fn capability_for_config(config: &AiConfig) -> Result<ProviderCapability, St
         "aliyun" | "volcengine" | "zhipu" | "siliconflow" | "elevenlabs" => {
             builtin(false, false, true, true, 600_000)
         }
-        "sd-webui" | "comfyui" | "edge-tts" => {
-            builtin(false, false, false, false, 900_000)
-        }
+        "sd-webui" | "comfyui" | "edge-tts" => builtin(false, false, false, false, 900_000),
         "custom" => from_custom(config.capabilities.as_ref()),
         "" => return Err("尚未选择 AI 供应商".to_string()),
         _ => return Err(format!("未知 AI 供应商：{}", config.provider.trim())),
@@ -133,7 +131,10 @@ fn validate_deadlines(capability: ProviderCapability) -> Result<(), String> {
     for (name, value) in [
         ("chat_deadline_ms", capability.chat_deadline_ms),
         ("flow_step_deadline_ms", capability.flow_step_deadline_ms),
-        ("media_fetch_deadline_ms", capability.media_fetch_deadline_ms),
+        (
+            "media_fetch_deadline_ms",
+            capability.media_fetch_deadline_ms,
+        ),
     ] {
         if value == 0 {
             return Err(format!(
@@ -220,7 +221,9 @@ mod tests {
             chat_deadline_ms: Some(0),
             ..Default::default()
         });
-        assert!(capability_for_config(&invalid).unwrap_err().contains("chat_deadline_ms"));
+        assert!(capability_for_config(&invalid)
+            .unwrap_err()
+            .contains("chat_deadline_ms"));
     }
 
     #[test]
@@ -271,10 +274,9 @@ mod tests {
     /// deadline the config describes, never a cached or singleton value.
     #[test]
     fn capability_re_reads_each_call_so_a_new_flow_sees_fresh_config() {
-        let openai_deadline =
-            capability_for_config(&config("openai", "gpt-4o-mini"))
-                .unwrap()
-                .flow_step_deadline_ms;
+        let openai_deadline = capability_for_config(&config("openai", "gpt-4o-mini"))
+            .unwrap()
+            .flow_step_deadline_ms;
         let ollama_deadline = capability_for_config(&config("ollama", "qwen2.5:7b"))
             .unwrap()
             .flow_step_deadline_ms;

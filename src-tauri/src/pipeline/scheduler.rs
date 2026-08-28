@@ -36,6 +36,10 @@ pub struct RunHandle {
     pause_after_step: AtomicBool,
     cancelled: Arc<AtomicBool>,
     asset_binding_gate: Arc<Mutex<()>>,
+    /// Per-run deadline snapshot, taken at run-creation time from the
+    /// Provider capability that was live then. Once a Run is in flight,
+    /// subsequent config edits must not change its deadline mid-flight.
+    pub step_timeout: Option<Duration>,
 }
 
 impl RunHandle {
@@ -507,6 +511,7 @@ impl Pipeline {
             pause_after_step: AtomicBool::new(false),
             cancelled: Arc::new(AtomicBool::new(false)),
             asset_binding_gate: Arc::new(Mutex::new(())),
+            step_timeout,
         }))
     }
 

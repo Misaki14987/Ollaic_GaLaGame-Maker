@@ -1526,12 +1526,8 @@ async fn spawn_static_server(
 #[tokio::test]
 async fn media_download_accepts_bounded_image_with_correct_content_type() {
     let body = b"\x89PNG\r\n\x1a\nfake-png-bytes".to_vec();
-    let (address, server) = spawn_static_server(
-        "200 OK",
-        vec![("Content-Type", "image/png")],
-        body.clone(),
-    )
-    .await;
+    let (address, server) =
+        spawn_static_server("200 OK", vec![("Content-Type", "image/png")], body.clone()).await;
     let resolver = StaticMediaResolver {
         host: "public-media.test".to_string(),
         addresses: vec![address],
@@ -1681,13 +1677,11 @@ async fn media_download_redirect_loop_terminates_after_cap() {
     let address_a = listener_a.local_addr().unwrap();
     let address_b = listener_b.local_addr().unwrap();
 
-    async fn bounce(
-        listener: TcpListener,
-        peer_host: &'static str,
-        peer_port: u16,
-    ) {
+    async fn bounce(listener: TcpListener, peer_host: &'static str, peer_port: u16) {
         loop {
-            let Ok((mut stream, _)) = listener.accept().await else { break };
+            let Ok((mut stream, _)) = listener.accept().await else {
+                break;
+            };
             let mut scratch = [0_u8; 4096];
             let _ = stream.read(&mut scratch).await;
             let response = format!(
@@ -1709,7 +1703,10 @@ async fn media_download_redirect_loop_terminates_after_cap() {
     };
     let initial = format!("http://public-media-a.test:{}/loop", address_a.port());
     let error = fetch_media_bytes_with_policy(&initial, &resolver, |url, _| {
-        matches!(url.host_str(), Some("public-media-a.test" | "public-media-b.test"))
+        matches!(
+            url.host_str(),
+            Some("public-media-a.test" | "public-media-b.test")
+        )
     })
     .await
     .unwrap_err();
@@ -1775,8 +1772,13 @@ async fn media_download_pins_dns_resolution_across_the_connection() {
         if let Ok((mut stream, _)) = listener.accept().await {
             let mut scratch = [0_u8; 4096];
             let _ = stream.read(&mut scratch).await;
-            reply_once(&mut stream, "200 OK", &[("Content-Type", "audio/mpeg")], b"ID3fake")
-                .await;
+            reply_once(
+                &mut stream,
+                "200 OK",
+                &[("Content-Type", "audio/mpeg")],
+                b"ID3fake",
+            )
+            .await;
         }
     });
     let resolver = StaticMediaResolver {
