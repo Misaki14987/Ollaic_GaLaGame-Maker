@@ -63,6 +63,7 @@ where
     }))
 }
 
+#[cfg(test)]
 async fn repair_once<T, F, Fut>(
     role: &str,
     task: &str,

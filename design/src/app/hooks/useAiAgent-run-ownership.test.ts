@@ -14,11 +14,14 @@ vi.mock('../lib/ai-ipc', () => ({
   aiChatTurn: vi.fn(),
   aiChatCancel: vi.fn(async () => true),
   appendAiAgentTrace: vi.fn(async () => {}),
-  getAiConfig: vi.fn(async () => ({
-    provider: 'openai',
-    model: 'gpt-4o-mini',
-    api_key: '',
-    base_url: '',
+  getAiProviderCapability: vi.fn(async () => ({
+    chatTools: true,
+    jsonMode: true,
+    streamingCancellation: true,
+    mediaUrlOutput: true,
+    chatDeadlineMs: 120_000,
+    flowStepDeadlineMs: 120_000,
+    mediaFetchDeadlineMs: 30_000,
   })),
 }));
 
@@ -108,7 +111,7 @@ vi.mock('../lib/editor-patch', () => ({
 }));
 
 import { useAiAgent } from './useAiAgent';
-import { aiChatTurn, aiChatCancel, appendAiAgentTrace, getAiConfig } from '../lib/ai-ipc';
+import { aiChatTurn, aiChatCancel, appendAiAgentTrace, getAiProviderCapability } from '../lib/ai-ipc';
 import type { AiTurnResult } from '../lib/ai-ipc';
 
 beforeEach(() => {
@@ -119,11 +122,14 @@ beforeEach(() => {
   if (typeof window !== 'undefined' && window.localStorage) {
     window.localStorage.clear();
   }
-  vi.mocked(getAiConfig).mockResolvedValue({
-    provider: 'openai',
-    model: 'gpt-4o-mini',
-    api_key: '',
-    base_url: '',
+  vi.mocked(getAiProviderCapability).mockResolvedValue({
+    chatTools: true,
+    jsonMode: true,
+    streamingCancellation: true,
+    mediaUrlOutput: true,
+    chatDeadlineMs: 120_000,
+    flowStepDeadlineMs: 120_000,
+    mediaFetchDeadlineMs: 30_000,
   });
   vi.mocked(appendAiAgentTrace).mockResolvedValue(undefined);
   vi.mocked(aiChatCancel).mockResolvedValue(true);

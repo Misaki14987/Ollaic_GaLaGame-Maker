@@ -6,7 +6,15 @@ import { useAiAgent } from './useAiAgent';
 vi.mock('../lib/ai-ipc', () => ({
   aiChatTurn: vi.fn(),
   appendAiAgentTrace: vi.fn(async () => {}),
-  getAiConfig: vi.fn(async () => ({ provider: 'openai', model: 'gpt-4o-mini', apiKey: '', baseUrl: '' })),
+  getAiProviderCapability: vi.fn(async () => ({
+    chatTools: true,
+    jsonMode: true,
+    streamingCancellation: true,
+    mediaUrlOutput: true,
+    chatDeadlineMs: 120_000,
+    flowStepDeadlineMs: 120_000,
+    mediaFetchDeadlineMs: 30_000,
+  })),
 }));
 
 vi.mock('../lib/ai-tools', () => ({

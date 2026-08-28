@@ -34,6 +34,7 @@ pub trait AssetGenerator: Send + Sync {
 
 /// Generate all runnable tasks with per-capability limits, then bind successful
 /// artifacts serially so scene and metadata rewrites cannot lose each other.
+#[cfg(test)]
 pub async fn run_queue(
     project_path: &Path,
     run_id: &str,

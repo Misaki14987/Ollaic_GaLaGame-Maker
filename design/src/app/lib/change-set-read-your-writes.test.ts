@@ -8,7 +8,6 @@ import {
   type StagingContext,
   type StagingDraft,
 } from './change-set';
-import type { Character } from './character-types';
 import { emptyProjectMemory } from './project-memory';
 
 const invokeMock = vi.mocked(invoke);

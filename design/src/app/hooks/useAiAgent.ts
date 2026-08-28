@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { aiChatTurn, aiChatCancel, appendAiAgentTrace, getAiConfig, type AiChatMessage } from '../lib/ai-ipc';
+import { aiChatTurn, aiChatCancel, appendAiAgentTrace, getAiProviderCapability, type AiChatMessage } from '../lib/ai-ipc';
 import {
   buildInlineUploadContext,
   buildUploadContext,
@@ -62,9 +62,8 @@ import {
   buildNumberedScriptContext,
   hasAssetContextTruncation,
   truncateContextMessages,
-  type MissingAssetIssue,
 } from '../lib/story-agent';
-import { createScene, deleteScene, getScenePath, listScenes, parseScene, readFileText, saveScene, sceneDisplayName, updateSceneHeader, type SceneHeader } from '../lib/webgal-ipc';
+import { createScene, deleteScene, getScenePath, listScenes, readFileText, saveScene, sceneDisplayName, updateSceneHeader, type SceneHeader } from '../lib/webgal-ipc';
 import type { WebGalNode } from '../lib/webgal-types';
 import { useChatSession, type AssistantStep, type ChatAttachment, type ChatMessage, type StepToolCall } from './useChatSession';
 
@@ -84,8 +83,9 @@ export interface AiErrorState {
   retryable: boolean;
 }
 
-/** Providers with reliable native function-calling support. Others fall back. */
-const FC_PROVIDERS = new Set(['openai', 'anthropic', 'gemini', 'deepseek', 'groq', 'xai', 'cohere']);
+/** Maximum number of agent turns before the loop falls back to a closing
+ *  message. Mirrors the backend default; an explicit bounded value keeps a
+ *  misconfigured Provider from running an unbounded loop on the local UI. */
 const MAX_TURNS = 6;
 
 interface AiAgentTraceTool {
@@ -258,7 +258,6 @@ export function useAiAgent(params: UseAiAgentParams) {
     sceneHeaders,
     nodes,
     scriptSource,
-    dirty,
     characters,
     setNodes,
     setScriptSource,
@@ -491,6 +490,10 @@ export function useAiAgent(params: UseAiAgentParams) {
       turns: [],
     };
     const freshAssets = projectPath ? await listAllAssets(projectPath).catch(() => assets) : assets;
+    // A Stop or run-supersede arriving during the asset refresh must NOT leak
+    // stale assets onto the next prompt's canvas, nor count them on the trace.
+    if (!ownsRun(runId)) return;
+    if (cancelledRef.current) return;
     if (freshAssets !== assets) setAssets(freshAssets);
     trace.assetCount = freshAssets.length;
     const plannedAssetKeys = new Set<string>();
@@ -783,6 +786,11 @@ export function useAiAgent(params: UseAiAgentParams) {
     const inlineUploads = projectPath && attachedUploadIds.length > 0
       ? await buildInlineUploadContext(projectPath, uploads, attachedUploadIds).catch(() => '')
       : '';
+    // Stop or run-supersede during attachment inlining must NOT continue into
+    // a Provider turn that will see stale uploads (or worse, use the inline
+    // text after Stop).
+    if (!ownsRun(runId)) return;
+    if (cancelledRef.current) return;
     const convo: AiChatMessage[] = [
       { role: 'system', content: buildLegacySystemContext(attachedUploadIds, inlineUploads) },
       ...truncateContextMessages(messages, 8),
@@ -907,12 +915,19 @@ export function useAiAgent(params: UseAiAgentParams) {
     setBusy(true);
 
     try {
-      const cfg = await getAiConfig();
-      const useFc = FC_PROVIDERS.has(cfg.provider);
-      if (useFc) await runAgentLoop(myRunId, text, assistantId, sentIds);
+      // Ask the backend for the resolved capability rather than routing off the
+      // provider string locally, so settings (custom-endpoint tools flag, JSON
+      // mode, streaming cancellation, media URL output, Flow/media deadlines)
+      // and the conversational router share one source of truth. A Stop fired
+      // between invoke and resolve must not flip a stale result into the UI.
+      const capability = await getAiProviderCapability();
+      if (!ownsRun(myRunId)) return;
+      if (cancelledRef.current) return;
+      if (capability.chatTools) await runAgentLoop(myRunId, text, assistantId, sentIds);
       else await runLegacyTurn(myRunId, text, assistantId, sentIds);
       setRetryCount(0);
     } catch (e) {
+      if (!ownsRun(myRunId)) return;
       if (!cancelledRef.current) {
         setStatus('error');
         const classified = classifyAiError(String(e));

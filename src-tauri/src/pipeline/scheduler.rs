@@ -356,6 +356,7 @@ fn local_placeholder(kind: AssetKind) -> GeneratedArtifact {
 }
 
 impl Pipeline {
+    #[cfg(test)]
     pub fn new(agents: AgentRegistry) -> Self {
         Self::with_agents_and_matting(
             agents,
@@ -363,6 +364,7 @@ impl Pipeline {
         )
     }
 
+    #[cfg(test)]
     pub fn with_default_agents() -> Self {
         Self::new(AgentRegistry::with_defaults())
     }
@@ -390,6 +392,7 @@ impl Pipeline {
 
     /// Cap each step's agent run with a timeout; on expiry the step fails and
     /// the run terminates as `RunStatus::Timeout` instead of hanging forever.
+    #[cfg(test)]
     pub fn with_step_timeout(mut self, timeout: Duration) -> Self {
         self.step_timeout = Some(timeout);
         self
@@ -416,6 +419,7 @@ impl Pipeline {
 
     /// Create + persist a run, emit `RunStarted`, return a handle set to
     /// `Running`. Ensures a StoryPlan exists. Does NOT execute.
+    #[cfg(test)]
     pub fn create_run(
         &self,
         project_path: &Path,
@@ -428,6 +432,7 @@ impl Pipeline {
         self.create_run_with_options(project_path, run_id, prompt, recipe, false, clock, sink)
     }
 
+    #[cfg(test)]
     pub fn create_run_with_options(
         &self,
         project_path: &Path,
@@ -482,6 +487,11 @@ impl Pipeline {
         let mut state = RunState::new(run_id, project_path, prompt, recipe, clock.now_ms());
         state.status = RunStatus::Running;
         state.allow_local_fallback = allow_local_fallback;
+        // Snapshot the resolved deadline onto the persisted RunState so an
+        // app restart, a resume_run, or an attach_run reads back the same
+        // value the run actually started under — not whatever the user has
+        // since edited in settings.
+        state.step_timeout_ms = step_timeout.map(|duration| duration.as_millis() as u64);
         if let Err(error) = store::save_run_state(project_path, &state) {
             if let Some(previous) = previous_plan {
                 story_plan::save_plan(project_path, &previous).map_err(PipelineError::Plan)?;
@@ -553,6 +563,15 @@ impl Pipeline {
         sink.emit(PipelineEvent::RunResumed {
             run_id: run_id.to_string(),
         });
+        // Restore the per-run deadline from the snapshot written at creation
+        // time. `step_timeout_ms: None` on an old state file (pre-field)
+        // silently falls back to the current Pipeline default, which keeps
+        // backward compatibility without re-resolving the capability (which
+        // might have changed since the run started).
+        let step_timeout = state
+            .step_timeout_ms
+            .map(std::time::Duration::from_millis)
+            .or(self.step_timeout);
         Ok(Arc::new(RunHandle {
             state: Arc::new(Mutex::new(state)),
             notify: Arc::new(Notify::new()),
@@ -560,7 +579,7 @@ impl Pipeline {
             pause_after_step: AtomicBool::new(false),
             cancelled: Arc::new(AtomicBool::new(false)),
             asset_binding_gate: Arc::new(Mutex::new(())),
-            step_timeout: self.step_timeout,
+            step_timeout,
         }))
     }
 
@@ -608,6 +627,10 @@ impl Pipeline {
                 store::save_run_state(project_path, &state).map_err(PipelineError::Store)?;
             }
         }
+        let step_timeout = state
+            .step_timeout_ms
+            .map(std::time::Duration::from_millis)
+            .or(self.step_timeout);
         Ok(Arc::new(RunHandle {
             state: Arc::new(Mutex::new(state)),
             notify: Arc::new(Notify::new()),
@@ -615,7 +638,7 @@ impl Pipeline {
             pause_after_step: AtomicBool::new(false),
             cancelled: Arc::new(AtomicBool::new(false)),
             asset_binding_gate: Arc::new(Mutex::new(())),
-            step_timeout: self.step_timeout,
+            step_timeout,
         }))
     }
 

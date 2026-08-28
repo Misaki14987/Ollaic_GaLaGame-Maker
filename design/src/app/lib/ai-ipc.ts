@@ -96,6 +96,29 @@ export async function setAiConfig(config: AiConfig): Promise<void> {
   return invoke<void>('set_ai_config', { config });
 }
 
+/// Resolved Provider capability for the saved (or supplied) AI config. Single
+/// source of truth shared by conversational routing (`chat_tools`), settings UI,
+/// Flow Step deadline (`flowStepDeadlineMs`), and the media-fetch policy
+/// (`mediaFetchDeadlineMs`). Re-read on the backend every call so a config edit
+/// applies on the next new Flow without restarting the app.
+export interface ProviderCapability {
+  chatTools: boolean;
+  jsonMode: boolean;
+  streamingCancellation: boolean;
+  mediaUrlOutput: boolean;
+  chatDeadlineMs: number;
+  flowStepDeadlineMs: number;
+  mediaFetchDeadlineMs: number;
+}
+
+export async function getAiProviderCapability(
+  config?: AiConfig,
+): Promise<ProviderCapability> {
+  return invoke<ProviderCapability>('get_ai_provider_capability', {
+    config: config ?? null,
+  });
+}
+
 export async function getAiImageConfig(): Promise<AiProviderConfig> {
   return invoke<AiProviderConfig>('get_ai_image_config');
 }

@@ -64,6 +64,18 @@ impl Orchestrator {
         .ok()?;
         Some(capability.flow_step_timeout())
     }
+
+    /// Validate that the live Provider capability can resolve to a bounded
+    /// Step deadline. A parse failure (unknown provider, zero/excessive
+    /// deadline, malformed custom declaration) must NOT silently degrade
+    /// into an unbounded run; the caller must reject the Flow start so the
+    /// user fixes the config rather than starting a run with no timeout.
+    pub fn validate_flow_step_capability(&self) -> Result<(), String> {
+        crate::ai::provider_capability::capability_for_config(
+            &crate::ai::config::load_config(),
+        )
+        .map(|_| ())
+    }
 }
 
 static RUN_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -114,6 +126,9 @@ pub async fn pipeline_start(
     if !crate::ai::commands::has_agent_chat_config() && allow_local_fallback != Some(true) {
         return Err("未配置可用的对话模型。请先配置 AI，或明确允许本地内容降级。".to_string());
     }
+    // Parse failure (unknown provider, zero/excessive deadline, malformed
+    // custom declaration) must not silently downgrade into an unbounded Run.
+    orchestrator.validate_flow_step_capability()?;
     let project_path = PathBuf::from(project_path);
     if super::scheduler::project_has_story_content(&project_path)? {
         return Err(
