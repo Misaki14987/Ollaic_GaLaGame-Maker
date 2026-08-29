@@ -1549,6 +1549,29 @@ async fn media_download_accepts_bounded_image_with_correct_content_type() {
 }
 
 #[tokio::test]
+async fn media_download_accepts_ascii_case_insensitive_content_type() {
+    let body = b"\x89PNG\r\n\x1a\nfake-png-bytes".to_vec();
+    let (address, server) =
+        spawn_static_server("200 OK", vec![("Content-Type", "Image/PNG")], body.clone()).await;
+    let resolver = StaticMediaResolver {
+        host: "public-media.test".to_string(),
+        addresses: vec![address],
+    };
+    let initial = format!("http://public-media.test:{}/image.png", address.port());
+    let received = fetch_media_bytes_with_policy(&initial, &resolver, |url, ip| {
+        url.host_str() == Some("public-media.test") || is_public_download_ip(ip)
+    })
+    .await
+    .expect("media types are ASCII case-insensitive");
+
+    assert_eq!(received, body);
+    tokio::time::timeout(Duration::from_secs(1), server)
+        .await
+        .expect("server never received the request")
+        .unwrap();
+}
+
+#[tokio::test]
 async fn media_download_rejects_response_with_unexpected_content_type() {
     let (address, server) = spawn_static_server(
         "200 OK",

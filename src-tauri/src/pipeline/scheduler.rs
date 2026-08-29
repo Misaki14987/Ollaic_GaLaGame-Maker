@@ -63,8 +63,6 @@ pub struct Pipeline {
     asset_generators: Arc<dyn AssetGeneratorFactory>,
     step_timeout: Option<Duration>,
     #[cfg(test)]
-    hanging_asset_queue_started: Option<Arc<tokio::sync::Semaphore>>,
-    #[cfg(test)]
     cancel_wait_registration_hook:
         Option<(Arc<tokio::sync::Semaphore>, Arc<tokio::sync::Semaphore>)>,
 }
@@ -112,8 +110,6 @@ impl Pipeline {
             asset_generators,
             step_timeout: Some(DEFAULT_STEP_TIMEOUT),
             #[cfg(test)]
-            hanging_asset_queue_started: None,
-            #[cfg(test)]
             cancel_wait_registration_hook: None,
         }
     }
@@ -123,15 +119,6 @@ impl Pipeline {
     #[cfg(test)]
     pub fn with_step_timeout(mut self, timeout: Duration) -> Self {
         self.step_timeout = Some(timeout);
-        self
-    }
-
-    #[cfg(test)]
-    pub(crate) fn with_hanging_asset_queue_for_test(
-        mut self,
-        started: Arc<tokio::sync::Semaphore>,
-    ) -> Self {
-        self.hanging_asset_queue_started = Some(started);
         self
     }
 
@@ -651,8 +638,6 @@ impl Pipeline {
                 plan: &plan,
                 cancelled: &handle.cancelled,
                 asset_binding_gate: &handle.asset_binding_gate,
-                #[cfg(test)]
-                hanging_asset_queue_started: self.hanging_asset_queue_started.as_ref(),
             });
             tokio::pin!(executor_run);
             if handle.cancelled.load(Ordering::SeqCst) {

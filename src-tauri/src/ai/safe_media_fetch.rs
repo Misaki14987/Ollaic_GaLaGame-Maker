@@ -81,21 +81,19 @@ impl MediaDnsResolver for SystemMediaDnsResolver {
         port: u16,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<SocketAddr>, String>> + Send + 'a>> {
         Box::pin(async move {
-            let addresses = tokio::time::timeout(
-                DNS_RESOLVE_TIMEOUT,
-                tokio::net::lookup_host((host, port)),
-            )
-            .await
-            .map_err(|_| {
-                format!(
-                    "媒体下载 DNS 解析 {host} 超时（{} 秒）。请检查网络后重试。",
-                    DNS_RESOLVE_TIMEOUT.as_secs()
-                )
-            })?
-            .map_err(|error| {
-                format!("解析媒体下载主机 {host} 失败：{error}。请检查网络后重试。")
-            })?
-            .collect::<Vec<_>>();
+            let addresses =
+                tokio::time::timeout(DNS_RESOLVE_TIMEOUT, tokio::net::lookup_host((host, port)))
+                    .await
+                    .map_err(|_| {
+                        format!(
+                            "媒体下载 DNS 解析 {host} 超时（{} 秒）。请检查网络后重试。",
+                            DNS_RESOLVE_TIMEOUT.as_secs()
+                        )
+                    })?
+                    .map_err(|error| {
+                        format!("解析媒体下载主机 {host} 失败：{error}。请检查网络后重试。")
+                    })?
+                    .collect::<Vec<_>>();
             if addresses.is_empty() {
                 return Err(format!("媒体下载主机 {host} 没有可用地址，请稍后重试。"));
             }
@@ -131,8 +129,8 @@ async fn fetch_media_inner(
     resolver: &dyn MediaDnsResolver,
     policy: &FetchPolicy,
 ) -> Result<Vec<u8>, String> {
-    let mut current = reqwest::Url::parse(initial_url)
-        .map_err(|error| format!("无效的下载 URL: {error}"))?;
+    let mut current =
+        reqwest::Url::parse(initial_url).map_err(|error| format!("无效的下载 URL: {error}"))?;
 
     for redirect_count in 0..=MAX_MEDIA_REDIRECTS {
         validate_download_url(&current)?;
@@ -224,10 +222,7 @@ pub async fn collect_media_response(
     collect_body(response, kind).await
 }
 
-async fn collect_body(
-    response: reqwest::Response,
-    kind: MediaKind,
-) -> Result<Vec<u8>, String> {
+async fn collect_body(response: reqwest::Response, kind: MediaKind) -> Result<Vec<u8>, String> {
     // Reject missing/invalid Content-Type before allocating the buffer.
     // We must know what the endpoint actually returned — a `text/html` or
     // `application/json` response would otherwise be base64-embedded as a
@@ -238,7 +233,7 @@ async fn collect_body(
         .and_then(|value| value.to_str().ok())
         .ok_or_else(|| "媒体下载响应缺少 Content-Type 头部".to_string())?;
     let mime = content_type.split(';').next().unwrap_or("").trim();
-    if !mime.starts_with(kind.allowed_prefix()) {
+    if !mime.to_ascii_lowercase().starts_with(kind.allowed_prefix()) {
         return Err(format!(
             "媒体下载 Content-Type {mime} 不被接受（需要 {}*）",
             kind.allowed_prefix()
@@ -267,9 +262,7 @@ async fn collect_body(
         }
         received = received.saturating_add(chunk.len() as u64);
         if received > MAX_MEDIA_BYTES {
-            return Err(format!(
-                "媒体下载实际大小超过上限 {MAX_MEDIA_BYTES} 字节"
-            ));
+            return Err(format!("媒体下载实际大小超过上限 {MAX_MEDIA_BYTES} 字节"));
         }
         collected.extend_from_slice(&chunk);
     }

@@ -7,8 +7,13 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::sync::{Mutex, Notify};
+use tokio::time::Instant;
+
+const CANCELLED_MARKER_TTL: Duration = Duration::from_secs(5 * 60);
+const MAX_CANCELLED_MARKERS: usize = 1024;
 
 #[derive(Clone)]
 struct ChatRunHandle {
@@ -31,7 +36,7 @@ impl ChatRunHandle {
 /// future (closing the cancel-before-register race).
 enum RunState {
     Live(ChatRunHandle),
-    Cancelled,
+    Cancelled { inserted_at: Instant },
 }
 
 /// Frontend → backend chat-turn ownership. Caller cancels through
@@ -58,8 +63,9 @@ impl ChatRunRegistry {
     ) -> Result<T, String> {
         let handle = {
             let mut states = self.states.lock().await;
+            Self::prune_cancelled_markers(&mut states, Instant::now());
             match states.get(run_id) {
-                Some(RunState::Cancelled) => {
+                Some(RunState::Cancelled { .. }) => {
                     // A cancel arrived before this register. Drop the marker
                     // and reject — the Provider future must not start.
                     states.remove(run_id);
@@ -100,6 +106,8 @@ impl ChatRunRegistry {
     /// repeatedly.
     pub async fn cancel(&self, run_id: &str) -> bool {
         let mut states = self.states.lock().await;
+        let now = Instant::now();
+        Self::prune_cancelled_markers(&mut states, now);
         match states.remove(run_id) {
             Some(RunState::Live(handle)) => {
                 if !handle.cancelled.swap(true, Ordering::SeqCst) {
@@ -107,18 +115,51 @@ impl ChatRunRegistry {
                 }
                 true
             }
-            Some(RunState::Cancelled) => {
+            Some(RunState::Cancelled { inserted_at }) => {
                 // Re-insert the marker so the poison remains sticky across
                 // repeated cancels, and return false (no live run to signal).
-                states.insert(run_id.to_string(), RunState::Cancelled);
+                states.insert(run_id.to_string(), RunState::Cancelled { inserted_at });
                 false
             }
             None => {
                 // No run registered yet. Mark the id so a later
                 // `run_cancellable` rejects instead of starting a Provider
                 // future after Stop.
-                states.insert(run_id.to_string(), RunState::Cancelled);
+                states.insert(run_id.to_string(), RunState::Cancelled { inserted_at: now });
+                Self::enforce_cancelled_marker_limit(&mut states);
                 false
+            }
+        }
+    }
+
+    fn prune_cancelled_markers(states: &mut HashMap<String, RunState>, now: Instant) {
+        states.retain(|_, state| match state {
+            RunState::Live(_) => true,
+            RunState::Cancelled { inserted_at } => {
+                now.saturating_duration_since(*inserted_at) < CANCELLED_MARKER_TTL
+            }
+        });
+    }
+
+    fn enforce_cancelled_marker_limit(states: &mut HashMap<String, RunState>) {
+        while states
+            .values()
+            .filter(|state| matches!(state, RunState::Cancelled { .. }))
+            .count()
+            > MAX_CANCELLED_MARKERS
+        {
+            let oldest = states
+                .iter()
+                .filter_map(|(run_id, state)| match state {
+                    RunState::Cancelled { inserted_at } => Some((run_id.clone(), *inserted_at)),
+                    RunState::Live(_) => None,
+                })
+                .min_by_key(|(_, inserted_at)| *inserted_at)
+                .map(|(run_id, _)| run_id);
+            if let Some(run_id) = oldest {
+                states.remove(&run_id);
+            } else {
+                break;
             }
         }
     }
@@ -129,6 +170,16 @@ impl ChatRunRegistry {
     pub async fn is_active(&self, run_id: &str) -> bool {
         let states = self.states.lock().await;
         matches!(states.get(run_id), Some(RunState::Live(_)))
+    }
+
+    #[cfg(test)]
+    async fn cancelled_marker_count(&self) -> usize {
+        self.states
+            .lock()
+            .await
+            .values()
+            .filter(|state| matches!(state, RunState::Cancelled { .. }))
+            .count()
     }
 }
 
@@ -259,5 +310,55 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.contains("cancelled before registration"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cancelled_markers_expire_without_weakening_the_registration_race_window() {
+        let registry = ChatRunRegistry::new();
+        assert!(!registry.cancel("expiring").await);
+        tokio::time::advance(CANCELLED_MARKER_TTL - Duration::from_millis(1)).await;
+        assert!(registry
+            .run_cancellable("expiring", async { Ok::<_, String>(()) })
+            .await
+            .unwrap_err()
+            .contains("cancelled before registration"));
+
+        assert!(!registry.cancel("expired").await);
+        tokio::time::advance(CANCELLED_MARKER_TTL).await;
+        assert_eq!(
+            registry
+                .run_cancellable("expired", async { Ok::<_, String>(7) })
+                .await
+                .unwrap(),
+            7
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cancelled_marker_storage_is_bounded_and_keeps_recent_cancellations() {
+        let registry = ChatRunRegistry::new();
+        for index in 0..=MAX_CANCELLED_MARKERS {
+            assert!(!registry.cancel(&format!("cancelled-{index}")).await);
+            tokio::time::advance(Duration::from_millis(1)).await;
+        }
+
+        assert_eq!(
+            registry.cancelled_marker_count().await,
+            MAX_CANCELLED_MARKERS
+        );
+        assert!(registry
+            .run_cancellable(&format!("cancelled-{MAX_CANCELLED_MARKERS}"), async {
+                Ok::<_, String>(())
+            },)
+            .await
+            .unwrap_err()
+            .contains("cancelled before registration"));
+        assert_eq!(
+            registry
+                .run_cancellable("cancelled-0", async { Ok::<_, String>(9) })
+                .await
+                .unwrap(),
+            9
+        );
     }
 }
