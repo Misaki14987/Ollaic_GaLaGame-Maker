@@ -2279,9 +2279,10 @@ where
             .and_then(|value| value.to_str().ok())
         {
             let mime = content_type.split(';').next().unwrap_or("").trim();
+            let normalized_mime = mime.to_ascii_lowercase();
             if !MEDIA_ALLOWED_PREFIXES
                 .iter()
-                .any(|prefix| mime.starts_with(prefix))
+                .any(|prefix| normalized_mime.starts_with(prefix))
             {
                 return Err(format!("媒体下载 Content-Type 不被接受: {mime}"));
             }
