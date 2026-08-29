@@ -28,7 +28,7 @@ vi.mock('../lib/webgal-ipc', () => ({
   deleteScene: vi.fn(), updateSceneHeader: vi.fn(), sceneDisplayName: (file: string) => file,
 }));
 
-import { aiChatCancel, aiChatTurn, getAiProviderCapability } from '../lib/ai-ipc';
+import { aiChatCancel, aiChatTurn, appendAiAgentTrace, getAiProviderCapability } from '../lib/ai-ipc';
 import { getTool } from '../lib/ai-tools';
 import { stageSceneEdit } from '../lib/change-set';
 
@@ -67,6 +67,7 @@ describe('conversational run ownership', () => {
     vi.mocked(getAiProviderCapability).mockReset().mockResolvedValue(capability(true));
     vi.mocked(getTool).mockReset();
     vi.mocked(stageSceneEdit).mockReset();
+    vi.mocked(appendAiAgentTrace).mockClear();
     localStorage.clear();
   });
 
@@ -78,10 +79,10 @@ describe('conversational run ownership', () => {
     let request!: Promise<void>;
     act(() => { request = result.current.sendPrompt('run A'); });
     await waitFor(() => expect(aiChatTurn).toHaveBeenCalledTimes(1));
-    const runA = vi.mocked(aiChatTurn).mock.calls[0][0];
+    const [projectA, runA] = vi.mocked(aiChatTurn).mock.calls[0];
 
     act(() => result.current.stop());
-    expect(aiChatCancel).toHaveBeenCalledWith(runA);
+    expect(aiChatCancel).toHaveBeenCalledWith(projectA, runA);
     await waitFor(() => expect(result.current.busy).toBe(false));
     act(() => turn.resolve({ text: '', toolCalls: [{ id: 'late', name: 'edit_scene', arguments: {} }] }));
     await act(async () => { await request; });
@@ -115,10 +116,10 @@ describe('conversational run ownership', () => {
     let request!: Promise<void>;
     act(() => { request = result.current.sendPrompt('run A'); });
     await waitFor(() => expect(aiChatTurn).toHaveBeenCalledTimes(1));
-    const runA = vi.mocked(aiChatTurn).mock.calls[0][0];
+    const [projectA, runA] = vi.mocked(aiChatTurn).mock.calls[0];
 
     rerender({ projectPath: '/tmp/project-b' });
-    await waitFor(() => expect(aiChatCancel).toHaveBeenCalledWith(runA));
+    await waitFor(() => expect(aiChatCancel).toHaveBeenCalledWith(projectA, runA));
 
     act(() => turn.resolve({ text: '', toolCalls: [{ id: 'late', name: 'edit_scene', arguments: {} }] }));
     await act(async () => { await request; });
@@ -145,7 +146,7 @@ describe('conversational run ownership', () => {
     let request!: Promise<void>;
     act(() => { request = result.current.sendPrompt('legacy edit'); });
     await waitFor(() => expect(aiChatTurn).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(aiChatTurn).mock.calls[0][2]).toEqual([]);
+    expect(vi.mocked(aiChatTurn).mock.calls[0][3]).toEqual([]);
     await waitFor(() => expect(stageSceneEdit).toHaveBeenCalledTimes(1));
 
     rerender({ projectPath: '/tmp/project-b' });
@@ -156,5 +157,23 @@ describe('conversational run ownership', () => {
     expect(result.current.status).toBe('idle');
     expect(result.current.error).toBeNull();
     expect(result.current.pendingChangeSet).toBeNull();
+  });
+
+  it('does not persist a rejected provider trace after stop revokes the run', async () => {
+    const turn = deferred<{ text: string; toolCalls: [] }>();
+    vi.mocked(aiChatTurn).mockReturnValueOnce(turn.promise);
+    const { result } = renderHook(() => useAiAgent(params()), { wrapper: MemoryRouter });
+
+    let request!: Promise<void>;
+    act(() => { request = result.current.sendPrompt('run'); });
+    await waitFor(() => expect(aiChatTurn).toHaveBeenCalledTimes(1));
+
+    act(() => result.current.stop());
+    act(() => turn.reject(new Error('chat run cancelled')));
+    await act(async () => { await request; });
+
+    expect(appendAiAgentTrace).not.toHaveBeenCalled();
+    expect(result.current.error).toBeNull();
+    expect(result.current.busy).toBe(false);
   });
 });

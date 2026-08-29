@@ -334,6 +334,7 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
                     />
                     {config.provider === 'custom' && (
                       <CustomCapabilityFields
+                        mode="chat"
                         value={config.capabilities ?? defaultCustomCapabilities()}
                         onChange={(capabilities) => updateChat({ capabilities })}
                       />
@@ -435,9 +436,11 @@ function defaultCustomCapabilities(): ProviderCapabilityDeclaration {
 }
 
 function CustomCapabilityFields({
+  mode,
   value,
   onChange,
 }: {
+  mode: 'chat' | 'media';
   value: ProviderCapabilityDeclaration;
   onChange: (value: ProviderCapabilityDeclaration) => void;
 }) {
@@ -451,7 +454,9 @@ function CustomCapabilityFields({
         ['json_mode', 'JSON 模式'],
         ['streaming_cancellation', '可取消流式请求'],
         ['media_url_output', '返回媒体下载 URL'],
-      ] as const).map(([key, label]) => (
+      ] as const)
+        .filter(([key]) => mode === 'chat' ? key !== 'media_url_output' : key === 'media_url_output')
+        .map(([key, label]) => (
         <label key={key} className="flex items-center justify-between gap-4 text-sm">
           <span>{label}</span>
           <input
@@ -463,7 +468,57 @@ function CustomCapabilityFields({
           />
         </label>
       ))}
+      <div className="grid gap-3 sm:grid-cols-2">
+        {mode === 'chat' && (
+          <DeadlineField
+            label="聊天请求时限"
+            valueMs={value.chat_deadline_ms}
+            onChange={(chat_deadline_ms) => onChange({ ...value, chat_deadline_ms })}
+          />
+        )}
+        <DeadlineField
+          label="Agent Flow 步骤时限"
+          valueMs={value.flow_step_deadline_ms}
+          onChange={(flow_step_deadline_ms) => onChange({ ...value, flow_step_deadline_ms })}
+        />
+        {mode === 'media' && (
+          <DeadlineField
+            label="媒体下载时限"
+            valueMs={value.media_fetch_deadline_ms}
+            onChange={(media_fetch_deadline_ms) => onChange({ ...value, media_fetch_deadline_ms })}
+          />
+        )}
+      </div>
     </fieldset>
+  );
+}
+
+function DeadlineField({
+  label,
+  valueMs,
+  onChange,
+}: {
+  label: string;
+  valueMs?: number | null;
+  onChange: (valueMs: number | null) => void;
+}) {
+  return (
+    <label className="space-y-1 text-sm">
+      <span className="block text-xs text-muted-foreground">{label}（秒）</span>
+      <input
+        type="number"
+        min={1}
+        max={3600}
+        step={1}
+        value={valueMs == null ? '' : valueMs / 1000}
+        onChange={(event) => {
+          const seconds = Number(event.target.value);
+          onChange(Number.isFinite(seconds) && seconds > 0 ? Math.round(seconds * 1000) : null);
+        }}
+        aria-label={`${label}（秒）`}
+        className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+      />
+    </label>
   );
 }
 
@@ -526,22 +581,11 @@ function ProviderConfigPanel({
         baseUrlHint={config.provider === 'custom' ? '按目标服务填写图片或音频接口端点' : '留空使用供应商默认地址'}
       />
       {config.provider === 'custom' && (
-        <label className="flex items-center justify-between gap-4 border-t border-border pt-4 text-sm">
-          <span>接口可能返回媒体下载 URL</span>
-          <input
-            type="checkbox"
-            checked={Boolean(config.capabilities?.media_url_output)}
-            onChange={() => onUpdate({
-              capabilities: {
-                ...defaultCustomCapabilities(),
-                ...config.capabilities,
-                media_url_output: !config.capabilities?.media_url_output,
-              },
-            })}
-            aria-label="返回媒体下载 URL"
-            className="h-4 w-4"
-          />
-        </label>
+        <CustomCapabilityFields
+          mode="media"
+          value={{ ...defaultCustomCapabilities(), ...config.capabilities }}
+          onChange={(capabilities) => onUpdate({ capabilities })}
+        />
       )}
     </div>
   );

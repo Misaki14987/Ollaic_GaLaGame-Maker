@@ -150,6 +150,8 @@ pub struct RunState {
     pub allow_local_fallback: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub step_timeout_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset_queue_timeout_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_snapshot_cleanup: Vec<String>,
 }
@@ -177,6 +179,7 @@ impl RunState {
             pinned: false,
             allow_local_fallback: false,
             step_timeout_ms: None,
+            asset_queue_timeout_ms: None,
             pending_snapshot_cleanup: Vec::new(),
         }
     }

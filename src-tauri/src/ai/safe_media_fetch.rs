@@ -1,5 +1,7 @@
 use std::collections::HashSet;
+use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::pin::Pin;
 use std::time::Duration;
 
 use futures_util::StreamExt;
@@ -32,7 +34,12 @@ impl ExpectedMedia {
     }
 
     fn accepts(self, content_type: &str) -> bool {
-        let mime = content_type.split(';').next().unwrap_or("").trim();
+        let mime = content_type
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
         match self {
             Self::Image => mime.starts_with("image/"),
             Self::Audio => mime.starts_with("audio/"),
@@ -58,6 +65,51 @@ async fn with_deadline<T>(
 }
 
 async fn fetch_inner(url: &str, expected: ExpectedMedia) -> Result<Vec<u8>, String> {
+    fetch_inner_with(url, expected, &SystemHostResolver, &PinnedClientFactory).await
+}
+
+type ResolveFuture<'a> = Pin<Box<dyn Future<Output = Result<Vec<SocketAddr>, String>> + Send + 'a>>;
+
+trait HostResolver: Sync {
+    fn resolve<'a>(&'a self, host: &'a str, port: u16) -> ResolveFuture<'a>;
+}
+
+struct SystemHostResolver;
+
+impl HostResolver for SystemHostResolver {
+    fn resolve<'a>(&'a self, host: &'a str, port: u16) -> ResolveFuture<'a> {
+        Box::pin(async move {
+            tokio::net::lookup_host((host, port))
+                .await
+                .map(|addresses| addresses.collect())
+                .map_err(|error| format!("解析媒体下载主机失败: {error}"))
+        })
+    }
+}
+
+trait ClientFactory: Sync {
+    fn build(&self, host: &str, addresses: &[SocketAddr]) -> Result<reqwest::Client, String>;
+}
+
+struct PinnedClientFactory;
+
+impl ClientFactory for PinnedClientFactory {
+    fn build(&self, host: &str, addresses: &[SocketAddr]) -> Result<reqwest::Client, String> {
+        reqwest::Client::builder()
+            .redirect(RedirectPolicy::none())
+            .no_proxy()
+            .resolve_to_addrs(host, addresses)
+            .build()
+            .map_err(|error| format!("创建安全下载客户端失败: {error}"))
+    }
+}
+
+async fn fetch_inner_with(
+    url: &str,
+    expected: ExpectedMedia,
+    resolver: &dyn HostResolver,
+    client_factory: &dyn ClientFactory,
+) -> Result<Vec<u8>, String> {
     let mut current = validate_media_download_url(url)?;
     let mut visited = HashSet::new();
 
@@ -72,15 +124,8 @@ async fn fetch_inner(url: &str, expected: ExpectedMedia) -> Result<Vec<u8>, Stri
         let port = current
             .port_or_known_default()
             .ok_or_else(|| "下载 URL 缺少有效端口".to_string())?;
-        let addresses = resolve_public_addresses(&host, port).await?;
-        let client = reqwest::Client::builder()
-            .redirect(RedirectPolicy::none())
-            // A configured system proxy could route a validated public name to
-            // an internal destination, so generated-media fetches never trust it.
-            .no_proxy()
-            .resolve_to_addrs(&host, &addresses)
-            .build()
-            .map_err(|error| format!("创建安全下载客户端失败: {error}"))?;
+        let addresses = resolve_public_addresses(resolver, &host, port).await?;
+        let client = client_factory.build(&host, &addresses)?;
         let response = client
             .get(current.clone())
             .send()
@@ -192,11 +237,12 @@ fn validate_host_name(host: &str) -> Result<(), String> {
     Ok(())
 }
 
-async fn resolve_public_addresses(host: &str, port: u16) -> Result<Vec<SocketAddr>, String> {
-    let addresses: Vec<_> = tokio::net::lookup_host((host, port))
-        .await
-        .map_err(|error| format!("解析媒体下载主机失败: {error}"))?
-        .collect();
+async fn resolve_public_addresses(
+    resolver: &dyn HostResolver,
+    host: &str,
+    port: u16,
+) -> Result<Vec<SocketAddr>, String> {
+    let addresses = resolver.resolve(host, port).await?;
     validate_resolved_addresses(host, &addresses)?;
     Ok(addresses)
 }
@@ -259,6 +305,56 @@ fn forbidden_v6(ip: Ipv6Addr) -> bool {
 mod tests {
     use super::*;
     use futures_util::stream;
+    use std::collections::HashMap;
+    use std::sync::Mutex as StdMutex;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    struct StaticResolver {
+        answers: HashMap<String, Vec<SocketAddr>>,
+    }
+
+    impl HostResolver for StaticResolver {
+        fn resolve<'a>(&'a self, host: &'a str, _port: u16) -> ResolveFuture<'a> {
+            Box::pin(async move {
+                self.answers
+                    .get(host)
+                    .cloned()
+                    .ok_or_else(|| format!("missing DNS fixture for {host}"))
+            })
+        }
+    }
+
+    struct LocalFixtureClientFactory {
+        local_address: SocketAddr,
+        pinned: StdMutex<Vec<Vec<SocketAddr>>>,
+    }
+
+    impl ClientFactory for LocalFixtureClientFactory {
+        fn build(&self, host: &str, addresses: &[SocketAddr]) -> Result<reqwest::Client, String> {
+            self.pinned.lock().unwrap().push(addresses.to_vec());
+            reqwest::Client::builder()
+                .redirect(RedirectPolicy::none())
+                .no_proxy()
+                .resolve(host, self.local_address)
+                .build()
+                .map_err(|error| error.to_string())
+        }
+    }
+
+    async fn serve_http_responses(responses: Vec<String>) -> SocketAddr {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            for response in responses {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = vec![0_u8; 4096];
+                let _ = socket.read(&mut request).await.unwrap();
+                socket.write_all(response.as_bytes()).await.unwrap();
+            }
+        });
+        address
+    }
 
     #[test]
     fn media_fetch_rejects_private_multicast_local_and_redirect_targets() {
@@ -312,8 +408,67 @@ mod tests {
     #[test]
     fn media_fetch_content_type_is_capability_specific() {
         assert!(ExpectedMedia::Image.accepts("image/png; charset=binary"));
+        assert!(ExpectedMedia::Image.accepts("Image/PNG"));
         assert!(!ExpectedMedia::Image.accepts("audio/mpeg"));
         assert!(ExpectedMedia::Audio.accepts("audio/wav"));
         assert!(!ExpectedMedia::Audio.accepts("text/html"));
+    }
+
+    #[tokio::test]
+    async fn media_fetch_follows_a_real_redirect_and_pins_the_validated_dns_answer() {
+        let local_address = serve_http_responses(vec![
+            "HTTP/1.1 302 Found\r\nLocation: /media.png\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string(),
+            "HTTP/1.1 200 OK\r\nContent-Type: Image/PNG\r\nContent-Length: 3\r\nConnection: close\r\n\r\npng".to_string(),
+        ])
+        .await;
+        let public_address =
+            SocketAddr::new("93.184.216.34".parse().unwrap(), local_address.port());
+        let resolver = StaticResolver {
+            answers: HashMap::from([("media.example".to_string(), vec![public_address])]),
+        };
+        let factory = LocalFixtureClientFactory {
+            local_address,
+            pinned: StdMutex::new(Vec::new()),
+        };
+        let url = format!("http://media.example:{}/start", local_address.port());
+
+        let bytes = fetch_inner_with(&url, ExpectedMedia::Image, &resolver, &factory)
+            .await
+            .unwrap();
+
+        assert_eq!(bytes, b"png");
+        assert_eq!(
+            factory.pinned.lock().unwrap().as_slice(),
+            &[vec![public_address], vec![public_address]]
+        );
+    }
+
+    #[tokio::test]
+    async fn media_fetch_rejects_a_redirect_dns_answer_before_connecting() {
+        let local_address = serve_http_responses(vec![
+            "HTTP/1.1 302 Found\r\nLocation: http://private.example/media.png\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string(),
+        ])
+        .await;
+        let public_address =
+            SocketAddr::new("93.184.216.34".parse().unwrap(), local_address.port());
+        let private_address = SocketAddr::new("10.0.0.8".parse().unwrap(), local_address.port());
+        let resolver = StaticResolver {
+            answers: HashMap::from([
+                ("media.example".to_string(), vec![public_address]),
+                ("private.example".to_string(), vec![private_address]),
+            ]),
+        };
+        let factory = LocalFixtureClientFactory {
+            local_address,
+            pinned: StdMutex::new(Vec::new()),
+        };
+        let url = format!("http://media.example:{}/start", local_address.port());
+
+        let error = fetch_inner_with(&url, ExpectedMedia::Image, &resolver, &factory)
+            .await
+            .unwrap_err();
+
+        assert!(error.contains("内部/保留地址"), "unexpected error: {error}");
+        assert_eq!(factory.pinned.lock().unwrap().len(), 1);
     }
 }

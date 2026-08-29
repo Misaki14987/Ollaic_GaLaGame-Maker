@@ -245,6 +245,7 @@ export async function listenBatchTtsProgress(
  * model and returns either tool calls (to execute) or final text.
  */
 export async function aiChatTurn(
+  projectPath: string,
   runId: string,
   messages: AiChatMessage[],
   tools: ToolDef[],
@@ -257,6 +258,7 @@ export async function aiChatTurn(
     tool_call_id: m.toolCallId ?? null,
   }));
   return invoke<AiTurnResult>('ai_chat_turn_owned', {
+    projectPath,
     runId,
     messages: wireMessages,
     tools,
@@ -264,6 +266,6 @@ export async function aiChatTurn(
   });
 }
 
-export async function aiChatCancel(runId: string): Promise<boolean> {
-  return invoke<boolean>('ai_chat_cancel', { runId });
+export async function aiChatCancel(projectPath: string, runId: string): Promise<boolean> {
+  return invoke<boolean>('ai_chat_cancel', { projectPath, runId });
 }

@@ -128,6 +128,7 @@ interface AiAgentTrace {
 
 interface ConversationalRun {
   id: string;
+  projectPath: string;
   revoked: boolean;
 }
 
@@ -372,7 +373,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     activeRunRef.current = null;
     if (staleRun) {
       staleRun.revoked = true;
-      void aiChatCancel(staleRun.id).catch(() => false);
+      void aiChatCancel(staleRun.projectPath, staleRun.id).catch(() => false);
     }
     streamingIdRef.current = null;
     setBusy(false);
@@ -651,12 +652,16 @@ export function useAiAgent(params: UseAiAgentParams) {
       if (!ownsRun(run)) return;
       setStatus(turn === 0 ? 'generating' : 'tooling');
       setStepLabel(turn === 0 ? '思考中…' : '继续分析…');
-      const res = await aiChatTurn(run.id, convo, toolDefs()).catch((e) => {
+      let res;
+      try {
+        res = await aiChatTurn(run.projectPath, run.id, convo, toolDefs());
+      } catch (e) {
+        if (!ownsRun(run)) return;
         trace.outcome = 'error';
         trace.error = String(e);
         void writeAgentTrace(trace);
         throw e;
-      });
+      }
       if (!ownsRun(run)) return;
       const turnText = res.text ?? '';
       const turnTrace: AiAgentTraceTurn = {
@@ -804,12 +809,16 @@ export function useAiAgent(params: UseAiAgentParams) {
       ...truncateContextMessages(messages, 8),
       { role: 'user', content: text },
     ];
-    const res = await aiChatTurn(run.id, convo, []).catch((e) => {
+    let res;
+    try {
+      res = await aiChatTurn(run.projectPath, run.id, convo, []);
+    } catch (e) {
+      if (!ownsRun(run)) return;
       trace.outcome = 'error';
       trace.error = String(e);
       void writeAgentTrace(trace);
       throw e;
-    });
+    }
     if (!ownsRun(run)) return;
     setStepLabel('');
     trace.turns.push({ turn: 0, modelText: res.text ?? '', toolCalls: [] });
@@ -866,13 +875,21 @@ export function useAiAgent(params: UseAiAgentParams) {
   const sendPrompt = useCallback(async (prompt: string, retryAttachmentIds?: string[]) => {
     const text = prompt.trim();
     if (!text || activeRunRef.current) return;
+    if (!projectPath) {
+      setError({ kind: 'other', retryable: false, message: '当前没有打开的项目，无法启动 AI 对话。' });
+      return;
+    }
     if (pendingChangeSet?.status === 'pending') {
       setError({ kind: 'other', retryable: false, message: '当前还有 AI 修改方案待确认。请先同意或拒绝后再继续对话。' });
       return;
     }
     const myToken = requestTokenRef.current + 1;
     requestTokenRef.current = myToken;
-    const run: ConversationalRun = { id: `chat-${Date.now()}-${myToken}`, revoked: false };
+    const run: ConversationalRun = {
+      id: `chat-${Date.now()}-${myToken}`,
+      projectPath,
+      revoked: false,
+    };
     activeRunRef.current = run;
     setError(null);
     setPendingChangeSet(null);
@@ -1276,7 +1293,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     if (!stoppedRun) return;
     stoppedRun.revoked = true;
     activeRunRef.current = null;
-    void aiChatCancel(stoppedRun.id).catch(() => false);
+    void aiChatCancel(stoppedRun.projectPath, stoppedRun.id).catch(() => false);
     const stoppedId = streamingIdRef.current;
     streamingIdRef.current = null;
     if (stoppedId) {

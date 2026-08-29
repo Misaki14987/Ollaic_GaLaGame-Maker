@@ -1,6 +1,8 @@
 use super::chat_runs::ChatRunRegistry;
 use super::config::{self, AiConfig, AiProviderConfig};
-use super::provider_capability::{capability_for_config, ProviderCapability, RequiredCapability};
+use super::provider_capability::{
+    capability_for_config, capability_for_provider_config, ProviderCapability, RequiredCapability,
+};
 use super::safe_media_fetch::{self, ExpectedMedia};
 use base64::Engine;
 use futures::{SinkExt, StreamExt};
@@ -278,6 +280,7 @@ pub fn get_ai_image_config() -> AiProviderConfig {
 
 #[tauri::command]
 pub fn set_ai_image_config(config: AiProviderConfig) -> Result<(), String> {
+    capability_for_provider_config(&config)?;
     config::save_image_config(&config)
 }
 
@@ -288,6 +291,7 @@ pub fn get_ai_tts_config() -> AiProviderConfig {
 
 #[tauri::command]
 pub fn set_ai_tts_config(config: AiProviderConfig) -> Result<(), String> {
+    capability_for_provider_config(&config)?;
     config::save_tts_config(&config)
 }
 
@@ -298,6 +302,7 @@ pub fn get_ai_music_config() -> AiProviderConfig {
 
 #[tauri::command]
 pub fn set_ai_music_config(config: AiProviderConfig) -> Result<(), String> {
+    capability_for_provider_config(&config)?;
     config::save_music_config(&config)
 }
 
@@ -660,15 +665,18 @@ fn find_audio_url(v: &serde_json::Value) -> Option<String> {
 #[tauri::command]
 pub async fn validate_ai_config(config: AiConfig) -> Result<AiValidationResult, String> {
     validate_config_basics(&config)?;
+    let capability = capability_for_config(&config)?;
 
     let endpoint = effective_endpoint(&config);
     let request = ChatRequest::new(vec![ChatMessage::user("Reply with exactly OK.")]);
     let client = build_client(&config);
 
     let options = chat_debug_options();
-    match client
-        .exec_chat(&config.model, request, Some(&options))
-        .await
+    match with_provider_deadline(
+        capability.chat_deadline_ms,
+        client.exec_chat(&config.model, request, Some(&options)),
+    )
+    .await
     {
         Ok(response) => {
             let message = response
@@ -684,8 +692,7 @@ pub async fn validate_ai_config(config: AiConfig) -> Result<AiValidationResult, 
                 message,
             })
         }
-        Err(err) => {
-            let message = err.to_string();
+        Err(message) => {
             log_ai_event("validate", &config, &endpoint, false, &message);
             Err(message)
         }
@@ -767,7 +774,12 @@ pub(crate) async fn ai_chat_turn(
     let endpoint = effective_endpoint(&cfg);
 
     let options = chat_debug_options();
-    match client.exec_chat(&cfg.model, request, Some(&options)).await {
+    match with_provider_deadline(
+        capability.chat_deadline_ms,
+        client.exec_chat(&cfg.model, request, Some(&options)),
+    )
+    .await
+    {
         Ok(response) => {
             let text = response.first_text().map(|t| t.to_string());
             let tool_calls = response
@@ -782,8 +794,7 @@ pub(crate) async fn ai_chat_turn(
             log_ai_event("chat_turn", &cfg, &endpoint, true, "turn completed");
             Ok(AiTurnResult { text, tool_calls })
         }
-        Err(err) => {
-            let message = err.to_string();
+        Err(message) => {
             log_ai_event("chat_turn", &cfg, &endpoint, false, &message);
             Err(message)
         }
@@ -793,21 +804,28 @@ pub(crate) async fn ai_chat_turn(
 #[tauri::command]
 pub async fn ai_chat_turn_owned(
     runs: tauri::State<'_, ChatRunRegistry>,
+    project_path: String,
     run_id: String,
     messages: Vec<AiMessageInput>,
     tools: Vec<ToolDef>,
     character_context: Option<String>,
 ) -> Result<AiTurnResult, String> {
-    runs.run_cancellable(&run_id, ai_chat_turn(messages, tools, character_context))
-        .await
+    runs.run_cancellable(
+        std::path::Path::new(&project_path),
+        &run_id,
+        ai_chat_turn(messages, tools, character_context),
+    )
+    .await
 }
 
 #[tauri::command]
 pub async fn ai_chat_cancel(
     runs: tauri::State<'_, ChatRunRegistry>,
+    project_path: String,
     run_id: String,
 ) -> Result<bool, String> {
-    Ok(runs.cancel(&run_id).await)
+    runs.cancel(std::path::Path::new(&project_path), &run_id)
+        .await
 }
 
 /// Pipeline Agent entry point. `None` means no usable chat model is configured,
@@ -832,9 +850,11 @@ pub(crate) async fn complete_agent_text(
     } else {
         chat_debug_options()
     };
-    match build_client(&cfg)
-        .exec_chat(&cfg.model, request, Some(&options))
-        .await
+    match with_provider_deadline(
+        capability.chat_deadline_ms,
+        build_client(&cfg).exec_chat(&cfg.model, request, Some(&options)),
+    )
+    .await
     {
         Ok(response) => {
             let text = response
@@ -861,12 +881,28 @@ pub(crate) async fn complete_agent_text(
                     .and_then(|value| u32::try_from(value).ok()),
             )))
         }
-        Err(error) => {
-            let message = error.to_string();
+        Err(message) => {
             log_ai_event("pipeline_agent", &cfg, &endpoint, false, &message);
             Err(message)
         }
     }
+}
+
+async fn with_provider_deadline<T, E>(
+    deadline_ms: u64,
+    future: impl std::future::Future<Output = Result<T, E>>,
+) -> Result<T, String>
+where
+    E: std::fmt::Display,
+{
+    tokio::time::timeout(Duration::from_millis(deadline_ms), future)
+        .await
+        .map_err(|_| {
+            format!(
+                "AI 供应商请求超时 [provider_timeout]（{deadline_ms} 毫秒）；请检查网络或调整供应商时限"
+            )
+        })?
+        .map_err(|error| error.to_string())
 }
 
 fn build_client(cfg: &AiConfig) -> Client {
@@ -1031,6 +1067,9 @@ async fn generate_openai_compatible_image(
     prompt: &str,
     reference: Option<&(String, String)>,
 ) -> Result<GeneratedMedia, String> {
+    if is_seedream_model(model) {
+        capability_for_provider_config(cfg)?.require(RequiredCapability::MediaUrlOutput)?;
+    }
     let endpoint = media_endpoint(cfg, "images/generations");
     let body = if is_seedream_model(model) {
         let mut body = serde_json::json!({
@@ -1964,14 +2003,9 @@ async fn download_generated_media(
     extension: &str,
     action: &str,
 ) -> Result<GeneratedMedia, String> {
-    let chat_config = AiConfig {
-        provider: cfg.provider.clone(),
-        model: model.to_string(),
-        api_key: cfg.api_key.clone(),
-        base_url: cfg.base_url.clone(),
-        capabilities: cfg.capabilities.clone(),
-    };
-    let capability = capability_for_config(&chat_config)?;
+    let mut capability_config = cfg.clone();
+    capability_config.model = model.to_string();
+    let capability = capability_for_provider_config(&capability_config)?;
     capability.require(RequiredCapability::MediaUrlOutput)?;
     let bytes = safe_media_fetch::fetch_generated_media(
         url,

@@ -15,6 +15,7 @@ use crate::pipeline::events::{EventSink, PipelineEvent};
 use crate::pipeline::registry::{ManagedRun, RunRegistry};
 use crate::pipeline::scheduler::{
     cleanup_rollback_snapshots, queue_rollback_snapshot_cleanup, rollback_snapshot_ids, Pipeline,
+    StepDeadlines,
 };
 use crate::pipeline::state::{Clock, RunState, RunStatus, StepStatus, SystemClock};
 use crate::pipeline::store;
@@ -52,20 +53,31 @@ impl Orchestrator {
         }
     }
 
-    fn flow_step_timeout_for_new_run(
+    fn flow_step_deadlines_for_new_run(
         &self,
         allow_local_fallback: bool,
-    ) -> Result<std::time::Duration, String> {
+    ) -> Result<StepDeadlines, String> {
         let config = crate::ai::config::load_config();
-        match crate::ai::provider_capability::capability_for_config(&config) {
-            Ok(capability) => Ok(std::time::Duration::from_millis(
-                capability.flow_step_deadline_ms,
-            )),
+        let agent = match crate::ai::provider_capability::capability_for_config(&config) {
+            Ok(capability) => std::time::Duration::from_millis(capability.flow_step_deadline_ms),
             Err(_) if allow_local_fallback && !crate::ai::commands::has_agent_chat_config() => {
-                Ok(std::time::Duration::from_secs(180))
+                std::time::Duration::from_secs(180)
             }
-            Err(error) => Err(error),
-        }
+            Err(error) => return Err(error),
+        };
+        let asset_queue = if allow_local_fallback {
+            std::time::Duration::from_secs(180)
+        } else {
+            let configs = [
+                crate::ai::config::load_image_config(),
+                crate::ai::config::load_tts_config(),
+                crate::ai::config::load_music_config(),
+            ];
+            std::time::Duration::from_millis(
+                crate::ai::provider_capability::media_flow_step_deadline_ms(&configs)?,
+            )
+        };
+        Ok(StepDeadlines { agent, asset_queue })
     }
 }
 
@@ -127,17 +139,17 @@ pub async fn pipeline_start(
     let run_id = new_run_id();
     let recipe = default_recipe();
     let sink = make_sink(&app);
-    let step_timeout =
-        orchestrator.flow_step_timeout_for_new_run(allow_local_fallback == Some(true))?;
+    let deadlines =
+        orchestrator.flow_step_deadlines_for_new_run(allow_local_fallback == Some(true))?;
     let handle = orchestrator
         .pipeline
-        .create_run_with_timeout(
+        .create_run_with_deadlines(
             &project_path,
             &run_id,
             &prompt,
             &recipe,
             allow_local_fallback == Some(true),
-            step_timeout,
+            deadlines,
             &SystemClock,
             &sink,
         )

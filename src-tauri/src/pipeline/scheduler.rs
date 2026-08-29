@@ -33,6 +33,13 @@ pub struct RunHandle {
     cancelled: Arc<AtomicBool>,
     asset_binding_gate: Arc<Mutex<()>>,
     step_timeout: Duration,
+    asset_queue_timeout: Duration,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct StepDeadlines {
+    pub(crate) agent: Duration,
+    pub(crate) asset_queue: Duration,
 }
 
 impl RunHandle {
@@ -125,6 +132,20 @@ fn restored_step_timeout(
             Ok(timeout)
         }
         None => Ok(legacy_default),
+    }
+}
+
+fn restored_asset_queue_timeout(
+    state: &RunState,
+    step_timeout: Duration,
+) -> Result<Duration, PipelineError> {
+    match state.asset_queue_timeout_ms {
+        Some(millis) => {
+            let timeout = Duration::from_millis(millis);
+            validated_step_timeout_ms(timeout)?;
+            Ok(timeout)
+        }
+        None => Ok(step_timeout),
     }
 }
 
@@ -466,7 +487,34 @@ impl Pipeline {
         clock: &dyn Clock,
         sink: &dyn EventSink,
     ) -> Result<Arc<RunHandle>, PipelineError> {
-        let step_timeout_ms = validated_step_timeout_ms(step_timeout)?;
+        self.create_run_with_deadlines(
+            project_path,
+            run_id,
+            prompt,
+            recipe,
+            allow_local_fallback,
+            StepDeadlines {
+                agent: step_timeout,
+                asset_queue: step_timeout,
+            },
+            clock,
+            sink,
+        )
+    }
+
+    pub(crate) fn create_run_with_deadlines(
+        &self,
+        project_path: &Path,
+        run_id: &str,
+        prompt: &str,
+        recipe: &FlowRecipe,
+        allow_local_fallback: bool,
+        deadlines: StepDeadlines,
+        clock: &dyn Clock,
+        sink: &dyn EventSink,
+    ) -> Result<Arc<RunHandle>, PipelineError> {
+        let step_timeout_ms = validated_step_timeout_ms(deadlines.agent)?;
+        let asset_queue_timeout_ms = validated_step_timeout_ms(deadlines.asset_queue)?;
         recipe.validate().map_err(PipelineError::RecipeInvalid)?;
         // Validate or create the IR before writing any run state. An invalid
         // plan must not leave an orphan run that later bypasses validation.
@@ -485,6 +533,7 @@ impl Pipeline {
         state.status = RunStatus::Running;
         state.allow_local_fallback = allow_local_fallback;
         state.step_timeout_ms = Some(step_timeout_ms);
+        state.asset_queue_timeout_ms = Some(asset_queue_timeout_ms);
         if let Err(error) = store::save_run_state(project_path, &state) {
             if let Some(previous) = previous_plan {
                 story_plan::save_plan(project_path, &previous).map_err(PipelineError::Plan)?;
@@ -504,7 +553,8 @@ impl Pipeline {
             pause_after_step: AtomicBool::new(false),
             cancelled: Arc::new(AtomicBool::new(false)),
             asset_binding_gate: Arc::new(Mutex::new(())),
-            step_timeout,
+            step_timeout: deadlines.agent,
+            asset_queue_timeout: deadlines.asset_queue,
         }))
     }
 
@@ -528,6 +578,7 @@ impl Pipeline {
             .map_err(PipelineError::Store)?
             .ok_or(PipelineError::RunNotFound(run_id.to_string()))?;
         let step_timeout = restored_step_timeout(&state, self.step_timeout)?;
+        let asset_queue_timeout = restored_asset_queue_timeout(&state, step_timeout)?;
         if state.status.is_terminal() {
             return Err(PipelineError::InvalidRunTransition(
                 run_id.to_string(),
@@ -565,6 +616,7 @@ impl Pipeline {
             cancelled: Arc::new(AtomicBool::new(false)),
             asset_binding_gate: Arc::new(Mutex::new(())),
             step_timeout,
+            asset_queue_timeout,
         }))
     }
 
@@ -586,6 +638,7 @@ impl Pipeline {
             .map_err(PipelineError::Store)?
             .ok_or(PipelineError::RunNotFound(run_id.to_string()))?;
         let step_timeout = restored_step_timeout(&state, self.step_timeout)?;
+        let asset_queue_timeout = restored_asset_queue_timeout(&state, step_timeout)?;
         let mut changed = false;
         if !state.status.is_terminal() {
             restore_interrupted_outputs(project_path, &state)?;
@@ -621,6 +674,7 @@ impl Pipeline {
             cancelled: Arc::new(AtomicBool::new(false)),
             asset_binding_gate: Arc::new(Mutex::new(())),
             step_timeout,
+            asset_queue_timeout,
         }))
     }
 
@@ -962,7 +1016,7 @@ impl Pipeline {
             if handle.cancelled.load(Ordering::SeqCst) {
                 return;
             }
-            let timeout_sleep = tokio::time::sleep(handle.step_timeout);
+            let timeout_sleep = tokio::time::sleep(handle.asset_queue_timeout);
             tokio::pin!(timeout_sleep);
             let queue_result = tokio::select! {
                 biased;
@@ -975,7 +1029,7 @@ impl Pipeline {
                         sink,
                         clock,
                         id,
-                        handle.step_timeout,
+                        handle.asset_queue_timeout,
                     )
                     .await;
                     return;

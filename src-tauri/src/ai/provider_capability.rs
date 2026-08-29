@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use super::config::{AiConfig, ProviderCapabilityDeclaration};
+use super::config::{AiConfig, AiProviderConfig, ProviderCapabilityDeclaration};
 
 const DEFAULT_CHAT_DEADLINE_MS: u64 = 120_000;
 const DEFAULT_FLOW_DEADLINE_MS: u64 = 180_000;
@@ -49,9 +49,7 @@ pub fn capability_for_config(config: &AiConfig) -> Result<ProviderCapability, St
         "aliyun" | "volcengine" | "zhipu" | "siliconflow" | "elevenlabs" => {
             builtin(false, false, true, true, 600_000)
         }
-        "sd-webui" | "comfyui" | "edge-tts" => {
-            builtin(false, false, false, false, 900_000)
-        }
+        "sd-webui" | "comfyui" | "edge-tts" => builtin(false, false, false, false, 900_000),
         "custom" => from_custom(config.capabilities.as_ref()),
         "" => return Err("尚未选择 AI 供应商".to_string()),
         _ => return Err(format!("未知 AI 供应商：{}", config.provider.trim())),
@@ -64,6 +62,29 @@ pub fn capability_for_config(config: &AiConfig) -> Result<ProviderCapability, St
     }
     validate_deadlines(capability)?;
     Ok(capability)
+}
+
+pub fn capability_for_provider_config(
+    config: &AiProviderConfig,
+) -> Result<ProviderCapability, String> {
+    capability_for_config(&AiConfig {
+        provider: config.provider.clone(),
+        model: config.model.clone(),
+        api_key: config.api_key.clone(),
+        base_url: config.base_url.clone(),
+        capabilities: config.capabilities.clone(),
+    })
+}
+
+pub fn media_flow_step_deadline_ms(configs: &[AiProviderConfig]) -> Result<u64, String> {
+    configs
+        .iter()
+        .map(capability_for_provider_config)
+        .map(|capability| capability.map(|value| value.flow_step_deadline_ms))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .max()
+        .ok_or_else(|| "没有可用于媒体步骤的供应商配置".to_string())
 }
 
 fn builtin(
@@ -107,7 +128,10 @@ fn validate_deadlines(capability: ProviderCapability) -> Result<(), String> {
     for (name, value) in [
         ("chat_deadline_ms", capability.chat_deadline_ms),
         ("flow_step_deadline_ms", capability.flow_step_deadline_ms),
-        ("media_fetch_deadline_ms", capability.media_fetch_deadline_ms),
+        (
+            "media_fetch_deadline_ms",
+            capability.media_fetch_deadline_ms,
+        ),
     ] {
         if value == 0 || value > 3_600_000 {
             return Err(format!("{name} 必须在 1 到 3600000 毫秒之间"));
@@ -189,7 +213,9 @@ mod tests {
             chat_deadline_ms: Some(0),
             ..Default::default()
         });
-        assert!(capability_for_config(&invalid).unwrap_err().contains("chat_deadline_ms"));
+        assert!(capability_for_config(&invalid)
+            .unwrap_err()
+            .contains("chat_deadline_ms"));
     }
 
     #[test]
@@ -199,5 +225,44 @@ mod tests {
             .require(RequiredCapability::ChatTools)
             .unwrap_err()
             .contains("工具调用"));
+    }
+
+    #[test]
+    fn media_provider_config_uses_the_same_capability_contract() {
+        let config = AiProviderConfig {
+            provider: "custom".to_string(),
+            model: "image-model".to_string(),
+            api_key: String::new(),
+            base_url: "https://example.test/v1".to_string(),
+            capabilities: Some(ProviderCapabilityDeclaration {
+                media_url_output: true,
+                flow_step_deadline_ms: Some(720_000),
+                ..Default::default()
+            }),
+        };
+        let capability = capability_for_provider_config(&config).unwrap();
+        assert!(capability.media_url_output);
+        assert_eq!(capability.flow_step_deadline_ms, 720_000);
+    }
+
+    #[test]
+    fn asset_queue_uses_the_longest_declared_media_deadline() {
+        let config_with_deadline = |deadline| AiProviderConfig {
+            provider: "custom".to_string(),
+            model: "media-model".to_string(),
+            api_key: String::new(),
+            base_url: "https://example.test/v1".to_string(),
+            capabilities: Some(ProviderCapabilityDeclaration {
+                flow_step_deadline_ms: Some(deadline),
+                ..Default::default()
+            }),
+        };
+        let deadline = media_flow_step_deadline_ms(&[
+            config_with_deadline(240_000),
+            config_with_deadline(900_000),
+            config_with_deadline(600_000),
+        ])
+        .unwrap();
+        assert_eq!(deadline, 900_000);
     }
 }

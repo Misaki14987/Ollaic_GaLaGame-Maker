@@ -878,6 +878,59 @@ async fn a_new_run_can_snapshot_a_fresh_provider_deadline() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn asset_queue_uses_its_own_deadline_snapshot() {
+    let project = fresh_project("asset_queue_capability_deadline");
+    let sink = Arc::new(RecordingSink::new());
+    let clock = StepClock::new();
+    let started = Arc::new(Semaphore::new(0));
+    let pipeline = Arc::new(
+        Pipeline::with_default_agents().with_hanging_asset_queue_for_test(started.clone()),
+    );
+    let recipe =
+        FlowRecipe::new().step(StepDef::new("assetQueue", StepKind::Asset).agent("assetQueue"));
+    let handle = pipeline
+        .create_run_with_deadlines(
+            &project,
+            "run_asset_queue_capability_deadline",
+            "brief",
+            &recipe,
+            false,
+            super::scheduler::StepDeadlines {
+                agent: Duration::from_secs(30),
+                asset_queue: Duration::from_secs(90),
+            },
+            &clock,
+            sink.as_ref(),
+        )
+        .unwrap();
+    let task = {
+        let pipeline = pipeline.clone();
+        let project = project.clone();
+        let handle = handle.clone();
+        let sink = sink.clone();
+        tokio::spawn(async move {
+            pipeline
+                .execute(&project, handle, sink.as_ref(), &SystemClock)
+                .await;
+        })
+    };
+
+    started.acquire().await.unwrap().forget();
+    tokio::time::advance(Duration::from_secs(30)).await;
+    assert_eq!(handle.state().lock().await.status, RunStatus::Running);
+    tokio::time::advance(Duration::from_secs(60)).await;
+    task.await.unwrap();
+    assert_eq!(handle.state().lock().await.status, RunStatus::Timeout);
+
+    let persisted =
+        crate::pipeline::load_run_state(&project, "run_asset_queue_capability_deadline")
+            .unwrap()
+            .unwrap();
+    assert_eq!(persisted.step_timeout_ms, Some(30_000));
+    assert_eq!(persisted.asset_queue_timeout_ms, Some(90_000));
+}
+
+#[tokio::test(start_paused = true)]
 async fn crash_resume_preserves_the_run_provider_deadline_snapshot() {
     let project = fresh_project("resume_provider_deadline");
     let sink = Arc::new(RecordingSink::new());
