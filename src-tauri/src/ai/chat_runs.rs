@@ -56,8 +56,7 @@ impl ChatRunRegistry {
                     project_path: owner,
                     ..
                 }) if owner == project_path => {
-                    states.remove(run_id);
-                    return Err(format!("chat run cancelled before registration: {run_id}"));
+                    return Err(format!("chat run has been cancelled: {run_id}"));
                 }
                 Some(ChatRunState::Cancelled {
                     project_path: owner,
@@ -88,7 +87,18 @@ impl ChatRunRegistry {
             matches!(current, ChatRunState::Live(current) if Arc::ptr_eq(&current.cancelled, &handle.cancelled))
         })
         {
-            states.remove(run_id);
+            if handle.cancelled.load(Ordering::SeqCst) {
+                states.insert(
+                    run_id.to_string(),
+                    ChatRunState::Cancelled {
+                        project_path: handle.project_path.clone(),
+                        inserted_at: Instant::now(),
+                    },
+                );
+                Self::enforce_cancelled_marker_limit(&mut states);
+            } else {
+                states.remove(run_id);
+            }
         }
         result
     }
@@ -210,6 +220,17 @@ mod tests {
             .unwrap()
             .unwrap_err();
         assert!(error.contains("cancelled"));
+        assert!(!registry
+            .cancel(Path::new("/project/a"), "run-a")
+            .await
+            .unwrap());
+        assert!(registry
+            .run_cancellable(Path::new("/project/a"), "run-a", async {
+                Ok::<_, String>(())
+            })
+            .await
+            .unwrap_err()
+            .contains("has been cancelled"));
     }
 
     #[tokio::test]
@@ -295,7 +316,14 @@ mod tests {
             })
             .await
             .unwrap_err();
-        assert!(error.contains("cancelled before registration"));
+        assert!(error.contains("has been cancelled"));
+        assert!(registry
+            .run_cancellable(Path::new("/project/a"), "late", async {
+                Ok::<_, String>(())
+            })
+            .await
+            .unwrap_err()
+            .contains("has been cancelled"));
     }
 
     #[tokio::test]
@@ -318,7 +346,7 @@ mod tests {
             })
             .await
             .unwrap_err()
-            .contains("cancelled before registration"));
+            .contains("has been cancelled"));
     }
 
     #[tokio::test(start_paused = true)]
@@ -349,7 +377,7 @@ mod tests {
             )
             .await
             .unwrap_err()
-            .contains("cancelled before registration"));
+            .contains("has been cancelled"));
 
         assert!(!registry
             .cancel(Path::new("/project/a"), "expires")
