@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -24,12 +24,14 @@ enum ChatRunState {
     Cancelled {
         project_path: PathBuf,
         inserted_at: Instant,
+        sequence: u64,
     },
 }
 
 #[derive(Default)]
 pub struct ChatRunRegistry {
     states: Mutex<HashMap<String, ChatRunState>>,
+    next_cancelled_sequence: AtomicU64,
 }
 
 impl ChatRunRegistry {
@@ -90,10 +92,7 @@ impl ChatRunRegistry {
             if handle.cancelled.load(Ordering::SeqCst) {
                 states.insert(
                     run_id.to_string(),
-                    ChatRunState::Cancelled {
-                        project_path: handle.project_path.clone(),
-                        inserted_at: Instant::now(),
-                    },
+                    self.cancelled_state(handle.project_path.clone(), Instant::now()),
                 );
                 Self::enforce_cancelled_marker_limit(&mut states);
             } else {
@@ -134,10 +133,7 @@ impl ChatRunRegistry {
             None => {
                 states.insert(
                     run_id.to_string(),
-                    ChatRunState::Cancelled {
-                        project_path: project_path.to_path_buf(),
-                        inserted_at: now,
-                    },
+                    self.cancelled_state(project_path.to_path_buf(), now),
                 );
                 Self::enforce_cancelled_marker_limit(&mut states);
                 Ok(false)
@@ -151,6 +147,14 @@ impl ChatRunRegistry {
             owner.display(),
             caller.display()
         )
+    }
+
+    fn cancelled_state(&self, project_path: PathBuf, inserted_at: Instant) -> ChatRunState {
+        ChatRunState::Cancelled {
+            project_path,
+            inserted_at,
+            sequence: self.next_cancelled_sequence.fetch_add(1, Ordering::Relaxed),
+        }
     }
 
     fn prune_cancelled_markers(states: &mut HashMap<String, ChatRunState>, now: Instant) {
@@ -172,12 +176,10 @@ impl ChatRunRegistry {
             let oldest = states
                 .iter()
                 .filter_map(|(run_id, state)| match state {
-                    ChatRunState::Cancelled { inserted_at, .. } => {
-                        Some((run_id.clone(), *inserted_at))
-                    }
+                    ChatRunState::Cancelled { sequence, .. } => Some((run_id.clone(), *sequence)),
                     ChatRunState::Live(_) => None,
                 })
-                .min_by_key(|(_, inserted_at)| *inserted_at)
+                .min_by_key(|(_, sequence)| *sequence)
                 .map(|(run_id, _)| run_id);
             if let Some(run_id) = oldest {
                 states.remove(&run_id);
@@ -357,7 +359,6 @@ mod tests {
                 .cancel(Path::new("/project/a"), &format!("late-{index}"))
                 .await
                 .unwrap());
-            tokio::time::advance(Duration::from_millis(1)).await;
         }
         assert_eq!(
             registry
@@ -378,6 +379,15 @@ mod tests {
             .await
             .unwrap_err()
             .contains("has been cancelled"));
+        assert_eq!(
+            registry
+                .run_cancellable(Path::new("/project/a"), "late-0", async {
+                    Ok::<_, String>(7)
+                })
+                .await
+                .unwrap(),
+            7
+        );
 
         assert!(!registry
             .cancel(Path::new("/project/a"), "expires")
