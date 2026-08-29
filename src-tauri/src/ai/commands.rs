@@ -6,8 +6,7 @@ use base64::Engine;
 use futures::{SinkExt, StreamExt};
 use genai::adapter::AdapterKind;
 use genai::chat::{
-    ChatMessage, ChatOptions, ChatRequest, ChatResponseFormat, ChatStreamEvent, StreamChunk, Tool,
-    ToolCall, ToolResponse,
+    ChatMessage, ChatOptions, ChatRequest, ChatResponseFormat, Tool, ToolCall, ToolResponse,
 };
 use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
 use genai::{Client, ModelIden, ServiceTarget};
@@ -22,6 +21,7 @@ const DEFAULT_LOG_LIMIT: usize = 100;
 const MAX_LOG_FIELD_CHARS: usize = 50_000;
 const MAX_TRACE_FIELD_CHARS: usize = 50_000;
 const HTTP_REQUEST_TIMEOUT_SECS: u64 = 180;
+const MAX_PROVIDER_ERROR_BYTES: usize = 64 * 1024;
 
 /// A reqwest client with the standard request timeout applied. Using this
 /// everywhere prevents media/TTS HTTP calls from hanging forever when a
@@ -75,15 +75,6 @@ pub struct AiToolCall {
 pub struct AiTurnResult {
     pub text: Option<String>,
     pub tool_calls: Vec<AiToolCall>,
-}
-
-#[derive(Debug, Serialize, Clone)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum AiStreamEvent {
-    Start,
-    Chunk { content: String },
-    Done,
-    Error { message: String },
 }
 
 #[derive(Debug, Serialize)]
@@ -525,7 +516,8 @@ async fn generate_openai_compatible_music(
         .to_ascii_lowercase();
 
     if !status.is_success() {
-        let text = response.text().await.unwrap_or_default();
+        let bytes = safe_media_fetch::read_bounded_body(response, MAX_PROVIDER_ERROR_BYTES).await?;
+        let text = String::from_utf8_lossy(&bytes);
         log_provider_event("music_generate", cfg, model, &endpoint, false, &text);
         return Err(format!("音乐生成失败 ({status}): {text}"));
     }
@@ -537,10 +529,9 @@ async fn generate_openai_compatible_music(
         || mime.starts_with("binary/")
     {
         let ext = extension_from_mime(mime, response_format);
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|e| format!("读取音乐生成响应失败: {e}"))?;
+        let bytes =
+            safe_media_fetch::read_bounded_body(response, safe_media_fetch::MAX_AUDIO_BYTES)
+                .await?;
         log_provider_event(
             "music_generate",
             cfg,
@@ -558,10 +549,10 @@ async fn generate_openai_compatible_music(
     // Otherwise treat as JSON/text and extract base64 or a downloadable URL so
     // gateways that return JSON still produce a valid, playable file (instead of
     // silently saving the JSON body as a broken audio file).
-    let text = response
-        .text()
-        .await
-        .map_err(|e| format!("读取音乐生成响应失败: {e}"))?;
+    let bytes =
+        safe_media_fetch::read_bounded_body(response, safe_media_fetch::MAX_AUDIO_BYTES).await?;
+    let text =
+        String::from_utf8(bytes).map_err(|e| format!("音乐生成响应不是有效 UTF-8 文本: {e}"))?;
     parse_music_json_response(cfg, model, &endpoint, &text, response_format).await
 }
 
@@ -701,88 +692,6 @@ pub async fn validate_ai_config(config: AiConfig) -> Result<AiValidationResult, 
     }
 }
 
-#[tauri::command]
-pub async fn ai_chat_stream(
-    app: AppHandle,
-    request_id: String,
-    messages: Vec<AiMessageInput>,
-    character_context: Option<String>,
-) -> Result<(), String> {
-    let cfg = config::load_config();
-    validate_config_basics(&cfg)?;
-    capability_for_config(&cfg)?;
-
-    let mut chat_messages: Vec<ChatMessage> = Vec::new();
-    let mut sys_text = config::default_system_prompt();
-
-    if let Some(ref ctx) = character_context {
-        if !ctx.is_empty() {
-            if !sys_text.is_empty() {
-                sys_text.push_str("\n\n");
-            }
-            sys_text.push_str("## 当前项目的角色设定\n");
-            sys_text.push_str(ctx);
-        }
-    }
-
-    if !sys_text.is_empty() {
-        chat_messages.push(ChatMessage::system(&sys_text));
-    }
-    for m in messages {
-        let msg = match m.role.as_str() {
-            "user" => ChatMessage::user(m.content),
-            "assistant" => ChatMessage::assistant(m.content),
-            "system" => ChatMessage::system(m.content),
-            _ => ChatMessage::user(m.content),
-        };
-        chat_messages.push(msg);
-    }
-
-    let request = ChatRequest::new(chat_messages);
-    let client = build_client(&cfg);
-    let model = cfg.model.clone();
-    let endpoint = effective_endpoint(&cfg);
-    let event_name = format!("ai-chat-{request_id}");
-
-    let app_handle = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let _ = app_handle.emit(&event_name, AiStreamEvent::Start);
-        let options = chat_debug_options();
-        match client
-            .exec_chat_stream(&model, request, Some(&options))
-            .await
-        {
-            Ok(chat_res) => {
-                let mut stream = chat_res.stream;
-                while let Some(event) = stream.next().await {
-                    match event {
-                        Ok(ChatStreamEvent::Chunk(StreamChunk { content })) => {
-                            let _ = app_handle.emit(&event_name, AiStreamEvent::Chunk { content });
-                        }
-                        Ok(ChatStreamEvent::End(_)) => break,
-                        Ok(_) => {}
-                        Err(e) => {
-                            let message = e.to_string();
-                            log_ai_event("chat_stream", &cfg, &endpoint, false, &message);
-                            let _ = app_handle.emit(&event_name, AiStreamEvent::Error { message });
-                            return;
-                        }
-                    }
-                }
-                log_ai_event("chat_stream", &cfg, &endpoint, true, "stream completed");
-                let _ = app_handle.emit(&event_name, AiStreamEvent::Done);
-            }
-            Err(e) => {
-                let message = e.to_string();
-                log_ai_event("chat_stream", &cfg, &endpoint, false, &message);
-                let _ = app_handle.emit(&event_name, AiStreamEvent::Error { message });
-            }
-        }
-    });
-
-    Ok(())
-}
-
 /// Convert frontend message inputs into genai chat messages, replaying tool
 /// calls (assistant) and tool responses (tool role) so multi-step loops keep
 /// full provider-side context.
@@ -821,8 +730,7 @@ fn to_chat_messages(messages: Vec<AiMessageInput>) -> Vec<ChatMessage> {
 
 /// Single non-streaming turn used by the multi-step agent loop. Returns either
 /// the model's tool calls (to be executed by the frontend) or its final text.
-#[tauri::command]
-pub async fn ai_chat_turn(
+pub(crate) async fn ai_chat_turn(
     messages: Vec<AiMessageInput>,
     tools: Vec<ToolDef>,
     character_context: Option<String>,

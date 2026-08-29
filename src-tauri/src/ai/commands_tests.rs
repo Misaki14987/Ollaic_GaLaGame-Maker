@@ -1,5 +1,97 @@
 use super::*;
 use std::{collections::BTreeSet, fs};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
+
+async fn serve_one_http_response(
+    status: &str,
+    content_type: &str,
+    content_length: usize,
+) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let status = status.to_string();
+    let content_type = content_type.to_string();
+    tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut request = vec![0_u8; 4096];
+        let _ = socket.read(&mut request).await.unwrap();
+        let response = format!(
+            "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {content_length}\r\nConnection: close\r\n\r\n"
+        );
+        socket.write_all(response.as_bytes()).await.unwrap();
+    });
+    format!("http://{address}")
+}
+
+#[tokio::test]
+async fn music_generation_rejects_oversized_raw_audio_response() {
+    let base_url = serve_one_http_response(
+        "200 OK",
+        "audio/mpeg",
+        safe_media_fetch::MAX_AUDIO_BYTES.saturating_add(1),
+    )
+    .await;
+    let cfg = AiProviderConfig {
+        provider: "custom".to_string(),
+        model: "music-test".to_string(),
+        api_key: String::new(),
+        base_url,
+        capabilities: None,
+    };
+
+    let error = generate_openai_compatible_music(&cfg, "music-test", "test", "mp3")
+        .await
+        .expect_err("oversized audio response must be rejected");
+
+    assert!(error.contains("超过大小限制"), "unexpected error: {error}");
+}
+
+#[tokio::test]
+async fn music_generation_rejects_oversized_json_response() {
+    let base_url = serve_one_http_response(
+        "200 OK",
+        "application/json",
+        safe_media_fetch::MAX_AUDIO_BYTES.saturating_add(1),
+    )
+    .await;
+    let cfg = AiProviderConfig {
+        provider: "custom".to_string(),
+        model: "music-test".to_string(),
+        api_key: String::new(),
+        base_url,
+        capabilities: None,
+    };
+
+    let error = generate_openai_compatible_music(&cfg, "music-test", "test", "mp3")
+        .await
+        .expect_err("oversized JSON response must be rejected");
+
+    assert!(error.contains("超过大小限制"), "unexpected error: {error}");
+}
+
+#[tokio::test]
+async fn music_generation_rejects_oversized_error_response() {
+    let base_url = serve_one_http_response(
+        "500 Internal Server Error",
+        "text/plain",
+        MAX_PROVIDER_ERROR_BYTES.saturating_add(1),
+    )
+    .await;
+    let cfg = AiProviderConfig {
+        provider: "custom".to_string(),
+        model: "music-test".to_string(),
+        api_key: String::new(),
+        base_url,
+        capabilities: None,
+    };
+
+    let error = generate_openai_compatible_music(&cfg, "music-test", "test", "mp3")
+        .await
+        .expect_err("oversized provider error must be rejected");
+
+    assert!(error.contains("超过大小限制"), "unexpected error: {error}");
+}
 
 #[test]
 fn normalize_cosyvoice_voice_appends_v2_for_v2_model() {
@@ -1277,8 +1369,8 @@ fn media_download_url_rejects_ssrf_targets() {
     assert!(validate_media_download_url("http://[::1]/x.png").is_err());
     // Public endpoints pass.
     assert!(validate_media_download_url("https://example.com/image.png").is_ok());
-    assert!(validate_media_download_url(
-        "https://oaidalleapiprodscus.blob.core.windows.net/x.png"
-    )
-    .is_ok());
+    assert!(
+        validate_media_download_url("https://oaidalleapiprodscus.blob.core.windows.net/x.png")
+            .is_ok()
+    );
 }

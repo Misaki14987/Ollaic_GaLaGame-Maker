@@ -351,6 +351,7 @@ export function useAiAgent(params: UseAiAgentParams) {
   const requestTokenRef = useRef(0);
   const currentSceneNameRef = useRef(currentSceneName);
   const projectPathRef = useRef(projectPath);
+  const previousProjectPathRef = useRef(projectPath);
   projectPathRef.current = projectPath;
 
   // Sessions are shared across scenes, and a pending change set is cross-scene
@@ -362,6 +363,24 @@ export function useAiAgent(params: UseAiAgentParams) {
   useLayoutEffect(() => {
     currentSceneNameRef.current = currentSceneName;
   }, [currentSceneName]);
+
+  useLayoutEffect(() => {
+    if (previousProjectPathRef.current === projectPath) return;
+    previousProjectPathRef.current = projectPath;
+    requestTokenRef.current += 1;
+    const staleRun = activeRunRef.current;
+    activeRunRef.current = null;
+    if (staleRun) {
+      staleRun.revoked = true;
+      void aiChatCancel(staleRun.id).catch(() => false);
+    }
+    streamingIdRef.current = null;
+    setBusy(false);
+    setStatus('idle');
+    setStepLabel('');
+    setError(null);
+    setPendingChangeSet(null);
+  }, [projectPath]);
 
   useLayoutEffect(() => {
     setUploads([]);
@@ -834,6 +853,7 @@ export function useAiAgent(params: UseAiAgentParams) {
         void writeAgentTrace(trace);
       }
     } catch (e) {
+      if (!ownsRun(run)) return;
       const msg = isStageError(e) ? e.message : String(e);
       trace.outcome = 'stage_error';
       trace.error = msg;

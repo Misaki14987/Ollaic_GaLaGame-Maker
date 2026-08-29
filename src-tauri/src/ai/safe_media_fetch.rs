@@ -120,7 +120,10 @@ pub async fn read_bounded_response(
     if !expected.accepts(content_type) {
         return Err(format!("媒体响应类型不匹配: {content_type}"));
     }
-    let max_bytes = expected.max_bytes();
+    read_bounded_body(response, expected.max_bytes()).await
+}
+
+pub async fn read_bounded_body(response: Response, max_bytes: usize) -> Result<Vec<u8>, String> {
     if let Some(length) = response
         .headers()
         .get(CONTENT_LENGTH)

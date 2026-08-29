@@ -11,9 +11,14 @@ vi.mock('../lib/ai-ipc', () => ({
   getAiProviderCapability: vi.fn(async () => ({ chatTools: true, streamingCancellation: true })),
 }));
 vi.mock('../lib/ai-tools', () => ({ getTool: vi.fn(), toolDefs: vi.fn(() => [{ name: 'edit_scene' }]) }));
+vi.mock('../lib/change-set', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/change-set')>();
+  return { ...actual, stageSceneEdit: vi.fn(actual.stageSceneEdit) };
+});
 vi.mock('../lib/assets-ipc', () => ({ listAllAssets: vi.fn(async () => []) }));
 vi.mock('../lib/project-memory', () => ({
   emptyProjectMemory: () => ({ worldSetting: '', writingStyle: '', userPreferences: '', updatedAt: '' }),
+  buildMemoryContext: vi.fn(() => ''),
   readProjectMemory: vi.fn(async () => null), saveProjectMemory: vi.fn(async () => {}),
 }));
 vi.mock('../lib/character-ipc', () => ({ createCharacter: vi.fn(), updateCharacter: vi.fn(), deleteCharacter: vi.fn() }));
@@ -23,13 +28,27 @@ vi.mock('../lib/webgal-ipc', () => ({
   deleteScene: vi.fn(), updateSceneHeader: vi.fn(), sceneDisplayName: (file: string) => file,
 }));
 
-import { aiChatCancel, aiChatTurn } from '../lib/ai-ipc';
+import { aiChatCancel, aiChatTurn, getAiProviderCapability } from '../lib/ai-ipc';
 import { getTool } from '../lib/ai-tools';
+import { stageSceneEdit } from '../lib/change-set';
+
+function capability(chatTools: boolean) {
+  return {
+    chatTools,
+    jsonMode: true,
+    streamingCancellation: true,
+    mediaUrlOutput: false,
+    chatDeadlineMs: 120_000,
+    flowStepDeadlineMs: 180_000,
+    mediaFetchDeadlineMs: 30_000,
+  };
+}
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => { resolve = done; });
-  return { promise, resolve };
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
 }
 
 function params() {
@@ -45,7 +64,9 @@ describe('conversational run ownership', () => {
   beforeEach(() => {
     vi.mocked(aiChatTurn).mockReset();
     vi.mocked(aiChatCancel).mockReset().mockResolvedValue(true);
+    vi.mocked(getAiProviderCapability).mockReset().mockResolvedValue(capability(true));
     vi.mocked(getTool).mockReset();
+    vi.mocked(stageSceneEdit).mockReset();
     localStorage.clear();
   });
 
@@ -80,5 +101,60 @@ describe('conversational run ownership', () => {
     act(() => { result.current.stop(); result.current.stop(); });
     expect(aiChatCancel).toHaveBeenCalledTimes(1);
     act(() => turn.resolve({ text: 'late', toolCalls: [] }));
+  });
+
+  it('switching projects revokes the active run before its response can reach the new project', async () => {
+    const turn = deferred<{ text: string; toolCalls: Array<{ id: string; name: string; arguments: Record<string, unknown> }> }>();
+    vi.mocked(aiChatTurn).mockReturnValueOnce(turn.promise);
+    const base = params();
+    const { result, rerender } = renderHook(
+      ({ projectPath }: { projectPath: string }) => useAiAgent({ ...base, projectPath }),
+      { initialProps: { projectPath: '/tmp/project-a' }, wrapper: MemoryRouter },
+    );
+
+    let request!: Promise<void>;
+    act(() => { request = result.current.sendPrompt('run A'); });
+    await waitFor(() => expect(aiChatTurn).toHaveBeenCalledTimes(1));
+    const runA = vi.mocked(aiChatTurn).mock.calls[0][0];
+
+    rerender({ projectPath: '/tmp/project-b' });
+    await waitFor(() => expect(aiChatCancel).toHaveBeenCalledWith(runA));
+
+    act(() => turn.resolve({ text: '', toolCalls: [{ id: 'late', name: 'edit_scene', arguments: {} }] }));
+    await act(async () => { await request; });
+
+    expect(getTool).not.toHaveBeenCalled();
+    expect(result.current.pendingChangeSet).toBeNull();
+    expect(result.current.busy).toBe(false);
+  });
+
+  it('ignores a legacy staging failure after switching projects', async () => {
+    vi.mocked(getAiProviderCapability).mockResolvedValue(capability(false));
+    vi.mocked(aiChatTurn).mockResolvedValueOnce({
+      text: JSON.stringify({ patches: [{ type: 'insert', file: 'start.txt', afterLine: 'end', text: '旁白:测试;' }] }),
+      toolCalls: [],
+    });
+    const staging = deferred<never>();
+    vi.mocked(stageSceneEdit).mockReturnValueOnce(staging.promise);
+    const base = params();
+    const { result, rerender } = renderHook(
+      ({ projectPath }: { projectPath: string }) => useAiAgent({ ...base, projectPath }),
+      { initialProps: { projectPath: '/tmp/project-a' }, wrapper: MemoryRouter },
+    );
+
+    let request!: Promise<void>;
+    act(() => { request = result.current.sendPrompt('legacy edit'); });
+    await waitFor(() => expect(aiChatTurn).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(aiChatTurn).mock.calls[0][2]).toEqual([]);
+    await waitFor(() => expect(stageSceneEdit).toHaveBeenCalledTimes(1));
+
+    rerender({ projectPath: '/tmp/project-b' });
+    await waitFor(() => expect(aiChatCancel).toHaveBeenCalledTimes(1));
+    act(() => staging.reject(new Error('late staging failure')));
+    await act(async () => { await request; });
+
+    expect(result.current.status).toBe('idle');
+    expect(result.current.error).toBeNull();
+    expect(result.current.pendingChangeSet).toBeNull();
   });
 });

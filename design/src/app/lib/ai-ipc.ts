@@ -103,12 +103,6 @@ export interface AiTurnResult {
   toolCalls: AiToolCall[];
 }
 
-export type AiStreamEvent =
-  | { type: 'start' }
-  | { type: 'chunk'; content: string }
-  | { type: 'done' }
-  | { type: 'error'; message: string };
-
 export async function getAiConfig(): Promise<AiConfig> {
   return invoke<AiConfig>('get_ai_config');
 }
@@ -246,66 +240,9 @@ export async function listenBatchTtsProgress(
   });
 }
 
-export interface StreamHandlers {
-  onChunk?: (content: string) => void;
-  onDone?: () => void;
-  onError?: (message: string) => void;
-  onStart?: () => void;
-}
-
-export async function aiChatStream(
-  messages: AiChatMessage[],
-  handlers: StreamHandlers,
-  characterContext?: string,
-): Promise<{ requestId: string; cancel: () => void }> {
-  const requestId =
-    typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const eventName = `ai-chat-${requestId}`;
-
-  let unlisten: UnlistenFn | null = null;
-  const stop = () => {
-    if (unlisten) {
-      unlisten();
-      unlisten = null;
-    }
-  };
-
-  unlisten = await listen<AiStreamEvent>(eventName, (e) => {
-    const payload = e.payload;
-    switch (payload.type) {
-      case 'start':
-        handlers.onStart?.();
-        break;
-      case 'chunk':
-        handlers.onChunk?.(payload.content);
-        break;
-      case 'done':
-        handlers.onDone?.();
-        stop();
-        break;
-      case 'error':
-        handlers.onError?.(payload.message);
-        stop();
-        break;
-    }
-  });
-
-  try {
-    await invoke<void>('ai_chat_stream', { requestId, messages, characterContext });
-  } catch (err) {
-    stop();
-    handlers.onError?.(String(err));
-  }
-
-  return { requestId, cancel: stop };
-}
-
 /**
  * One non-streaming agent turn. Sends conversation + available tools to the
- * model and returns either tool calls (to execute) or final text. Used by the
- * multi-step agent loop; pure-chat streaming still goes through aiChatStream.
+ * model and returns either tool calls (to execute) or final text.
  */
 export async function aiChatTurn(
   runId: string,

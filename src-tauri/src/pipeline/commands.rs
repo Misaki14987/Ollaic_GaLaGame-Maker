@@ -44,19 +44,27 @@ pub struct Orchestrator {
 
 impl Orchestrator {
     pub fn new(app: &tauri::AppHandle) -> Self {
-        let flow_step_timeout = crate::ai::provider_capability::capability_for_config(
-            &crate::ai::config::load_config(),
-        )
-        .map(|capability| std::time::Duration::from_millis(capability.flow_step_deadline_ms))
-        .unwrap_or_else(|_| std::time::Duration::from_secs(180));
         Orchestrator {
-            pipeline: Arc::new(
-                Pipeline::with_default_agents_and_matting(
-                    crate::matting::commands::resolve_model_path(app),
-                )
-                .with_step_timeout(flow_step_timeout),
-            ),
+            pipeline: Arc::new(Pipeline::with_default_agents_and_matting(
+                crate::matting::commands::resolve_model_path(app),
+            )),
             runs: RunRegistry::new(),
+        }
+    }
+
+    fn flow_step_timeout_for_new_run(
+        &self,
+        allow_local_fallback: bool,
+    ) -> Result<std::time::Duration, String> {
+        let config = crate::ai::config::load_config();
+        match crate::ai::provider_capability::capability_for_config(&config) {
+            Ok(capability) => Ok(std::time::Duration::from_millis(
+                capability.flow_step_deadline_ms,
+            )),
+            Err(_) if allow_local_fallback && !crate::ai::commands::has_agent_chat_config() => {
+                Ok(std::time::Duration::from_secs(180))
+            }
+            Err(error) => Err(error),
         }
     }
 }
@@ -119,14 +127,17 @@ pub async fn pipeline_start(
     let run_id = new_run_id();
     let recipe = default_recipe();
     let sink = make_sink(&app);
+    let step_timeout =
+        orchestrator.flow_step_timeout_for_new_run(allow_local_fallback == Some(true))?;
     let handle = orchestrator
         .pipeline
-        .create_run_with_options(
+        .create_run_with_timeout(
             &project_path,
             &run_id,
             &prompt,
             &recipe,
             allow_local_fallback == Some(true),
+            step_timeout,
             &SystemClock,
             &sink,
         )
@@ -479,7 +490,12 @@ pub async fn pipeline_export_run_history(
     project_path: String,
 ) -> Result<String, String> {
     let requested_path = PathBuf::from(project_path);
-    if let Some(handle) = orchestrator.runs.get(&run_id).await.map(|entry| entry.handle.clone()) {
+    if let Some(handle) = orchestrator
+        .runs
+        .get(&run_id)
+        .await
+        .map(|entry| entry.handle.clone())
+    {
         let state = handle.state().lock().await;
         return serde_json::to_string_pretty(&*state).map_err(|error| error.to_string());
     }

@@ -200,8 +200,6 @@ fn main() {
             ai::commands::ai_generate_image,
             ai::commands::ai_generate_tts,
             ai::commands::generate_music,
-            ai::commands::ai_chat_stream,
-            ai::commands::ai_chat_turn,
             ai::commands::ai_chat_turn_owned,
             ai::commands::ai_chat_cancel,
             ai::commands::list_ai_logs,

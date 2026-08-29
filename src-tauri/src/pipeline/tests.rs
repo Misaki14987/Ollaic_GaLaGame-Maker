@@ -8,7 +8,7 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
-use tokio::sync::{Mutex as AsyncMutex, Notify};
+use tokio::sync::{Mutex as AsyncMutex, Notify, Semaphore};
 use tokio::time::{sleep, timeout, Duration};
 
 use crate::agents::{Agent, AgentContext, AgentError, AgentOutput, AgentRegistry};
@@ -743,11 +743,7 @@ async fn step_timeout_terminates_run_as_timeout() {
     assert_eq!(run_state.status, RunStatus::Timeout);
     let plan = run_state.find_step("plan").unwrap();
     assert_eq!(plan.status, StepStatus::Failed);
-    assert!(plan
-        .error
-        .as_deref()
-        .unwrap()
-        .contains("timed out"));
+    assert!(plan.error.as_deref().unwrap().contains("timed out"));
 }
 
 #[tokio::test]
@@ -791,6 +787,150 @@ async fn retry_after_step_timeout_can_complete() {
         .await;
     assert_eq!(handle.state().lock().await.status, RunStatus::Completed);
     assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn asset_queue_step_obeys_the_flow_step_timeout() {
+    let project = fresh_project("asset_queue_timeout");
+    let sink = Arc::new(RecordingSink::new());
+    let clock = StepClock::new();
+    let started = Arc::new(Semaphore::new(0));
+    let pipeline = Arc::new(
+        Pipeline::with_default_agents()
+            .with_hanging_asset_queue_for_test(started.clone())
+            .with_step_timeout(Duration::from_secs(30)),
+    );
+    let recipe =
+        FlowRecipe::new().step(StepDef::new("assetQueue", StepKind::Asset).agent("assetQueue"));
+    let handle = pipeline
+        .create_run(
+            &project,
+            "run_asset_queue_timeout",
+            "brief",
+            &recipe,
+            &clock,
+            sink.as_ref(),
+        )
+        .unwrap();
+    let task = {
+        let pipeline = pipeline.clone();
+        let project = project.clone();
+        let handle = handle.clone();
+        let sink = sink.clone();
+        tokio::spawn(async move {
+            pipeline
+                .execute(&project, handle, sink.as_ref(), &SystemClock)
+                .await;
+        })
+    };
+
+    started.acquire().await.unwrap().forget();
+    tokio::time::advance(Duration::from_secs(30)).await;
+    task.await.unwrap();
+
+    assert_eq!(handle.state().lock().await.status, RunStatus::Timeout);
+    let state = crate::pipeline::load_run_state(&project, "run_asset_queue_timeout")
+        .unwrap()
+        .unwrap();
+    assert!(state
+        .find_step("assetQueue")
+        .and_then(|step| step.error.as_deref())
+        .is_some_and(|error| error.contains("timed out")));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_new_run_can_snapshot_a_fresh_provider_deadline() {
+    let project = fresh_project("fresh_provider_deadline");
+    let sink = Arc::new(RecordingSink::new());
+    let clock = StepClock::new();
+    let mut agents = AgentRegistry::with_defaults();
+    agents.register(StepKind::Plan, Box::new(HangingAgent));
+    let pipeline = Arc::new(Pipeline::new(agents).with_step_timeout(Duration::from_secs(3600)));
+    let recipe = FlowRecipe::new().step(StepDef::new("plan", StepKind::Plan));
+    let handle = pipeline
+        .create_run_with_timeout(
+            &project,
+            "run_fresh_provider_deadline",
+            "brief",
+            &recipe,
+            false,
+            Duration::from_millis(50),
+            &clock,
+            sink.as_ref(),
+        )
+        .unwrap();
+    let task = {
+        let pipeline = pipeline.clone();
+        let project = project.clone();
+        let handle = handle.clone();
+        let sink = sink.clone();
+        tokio::spawn(async move {
+            pipeline
+                .execute(&project, handle, sink.as_ref(), &SystemClock)
+                .await;
+        })
+    };
+
+    tokio::time::advance(Duration::from_millis(50)).await;
+    task.await.unwrap();
+
+    assert_eq!(handle.state().lock().await.status, RunStatus::Timeout);
+}
+
+#[tokio::test(start_paused = true)]
+async fn crash_resume_preserves_the_run_provider_deadline_snapshot() {
+    let project = fresh_project("resume_provider_deadline");
+    let sink = Arc::new(RecordingSink::new());
+    let clock = StepClock::new();
+    let recipe = FlowRecipe::new().step(StepDef::new("plan", StepKind::Plan));
+    Pipeline::with_default_agents()
+        .create_run_with_timeout(
+            &project,
+            "run_resume_provider_deadline",
+            "brief",
+            &recipe,
+            false,
+            Duration::from_millis(50),
+            &clock,
+            sink.as_ref(),
+        )
+        .unwrap();
+
+    let mut agents = AgentRegistry::with_defaults();
+    agents.register(StepKind::Plan, Box::new(HangingAgent));
+    let resumed_pipeline =
+        Arc::new(Pipeline::new(agents).with_step_timeout(Duration::from_secs(3600)));
+    let handle = resumed_pipeline
+        .resume_run(
+            &project,
+            "run_resume_provider_deadline",
+            sink.as_ref(),
+            &clock,
+        )
+        .unwrap();
+    let task = {
+        let pipeline = resumed_pipeline.clone();
+        let project = project.clone();
+        let handle = handle.clone();
+        let sink = sink.clone();
+        tokio::spawn(async move {
+            pipeline
+                .execute(&project, handle, sink.as_ref(), &SystemClock)
+                .await;
+        })
+    };
+
+    wait_until(&sink, |events| {
+        events.iter().any(|event| matches!(event, PipelineEvent::StepStarted { step_id, .. } if step_id == "plan"))
+    })
+    .await;
+    tokio::time::advance(Duration::from_millis(50)).await;
+    timeout(Duration::from_secs(1), task)
+        .await
+        .expect("resumed run did not retain its provider deadline")
+        .unwrap();
+
+    assert_eq!(handle.state().lock().await.status, RunStatus::Timeout);
 }
 
 // ---------- scheduler: crash-resume ----------
