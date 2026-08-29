@@ -116,6 +116,27 @@ fn apply_locked(request: ApplyChangeSetRequest) -> ApplyChangeSetResult {
         );
     }
 
+    let project_path = Path::new(&request.project_path);
+    if let Err(message) = crate::flow_edit_lock::ensure_editable(
+        project_path,
+        crate::flow_edit_lock::FlowResource::StoryPlan,
+    ) {
+        return failed_without_writes("flow_lock", message);
+    }
+    if request.edits.iter().any(|edit| {
+        matches!(
+            edit,
+            ChangeSetEdit::Character { .. } | ChangeSetEdit::CreateCharacter { .. }
+        )
+    }) {
+        if let Err(message) = crate::flow_edit_lock::ensure_editable(
+            project_path,
+            crate::flow_edit_lock::FlowResource::Characters,
+        ) {
+            return failed_without_writes("flow_lock", message);
+        }
+    }
+
     if !request.force {
         match detect_conflicts(&request) {
             Ok(resources) if !resources.is_empty() => {
@@ -209,18 +230,17 @@ fn detect_conflicts(request: &ApplyChangeSetRequest) -> Result<Vec<String>, (Str
                 before_content,
                 ..
             } => {
-                let current = request
+                let path = scene_path(&request.project_path, file)
+                    .map_err(|message| (format!("scene:{file}"), message))?;
+                let disk_content = crate::json_store::read_to_string_recovering(&path)
+                    .map_err(|error| error.to_string())
+                    .map_err(|message| (format!("scene:{file}"), message))?;
+                let buffer_changed = request
                     .current_scene
                     .as_ref()
                     .filter(|scene| scene.file == *file)
-                    .map(|scene| Ok(scene.content.clone()))
-                    .unwrap_or_else(|| {
-                        let path = scene_path(&request.project_path, file)?;
-                        crate::json_store::read_to_string_recovering(&path)
-                            .map_err(|error| error.to_string())
-                    })
-                    .map_err(|message| (format!("scene:{file}"), message))?;
-                if current != *before_content {
+                    .is_some_and(|scene| scene.content != *before_content);
+                if disk_content != *before_content || buffer_changed {
                     conflicts.push(format!("scene:{file}"));
                 }
             }
@@ -709,6 +729,104 @@ mod tests {
         assert!(!std::path::Path::new(&project)
             .join(".webgal-editor/snapshots")
             .exists());
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn disk_change_is_not_hidden_by_a_stale_current_scene_buffer() {
+        let project = project_dir("disk_conflict_with_stale_buffer");
+        let scene_path = std::path::Path::new(&project).join("game/scene/start.txt");
+        fs::write(&scene_path, "external edit after preview").unwrap();
+
+        let result = apply_ai_change_set(ApplyChangeSetRequest {
+            project_path: project.clone(),
+            force: false,
+            current_scene: Some(CurrentSceneState {
+                file: "start.txt".to_string(),
+                content: "old scene".to_string(),
+            }),
+            edits: vec![ChangeSetEdit::Scene {
+                file: "start.txt".to_string(),
+                before_content: "old scene".to_string(),
+                after_content: "AI scene".to_string(),
+            }],
+        });
+
+        assert!(matches!(
+            result,
+            ApplyChangeSetResult::Conflict { resources }
+                if resources == vec!["scene:start.txt".to_string()]
+        ));
+        assert_eq!(
+            fs::read_to_string(&scene_path).unwrap(),
+            "external edit after preview"
+        );
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn active_flow_scopes_reject_change_sets_before_snapshot_or_write() {
+        let project = project_dir("flow_scope_rejects_change_set");
+        let scene_path = std::path::Path::new(&project).join("game/scene/start.txt");
+        fs::write(&scene_path, "old scene").unwrap();
+        save_characters(project.clone(), vec![character("hero", "Old Hero")]).unwrap();
+
+        let story_guard = crate::flow_edit_lock::FlowEditGuard::acquire(
+            std::path::Path::new(&project),
+            &[crate::flow_edit_lock::FlowResource::StoryPlan],
+        )
+        .unwrap();
+        let scene_result = apply_ai_change_set(ApplyChangeSetRequest {
+            project_path: project.clone(),
+            force: true,
+            current_scene: None,
+            edits: vec![ChangeSetEdit::Scene {
+                file: "start.txt".to_string(),
+                before_content: "old scene".to_string(),
+                after_content: "new scene".to_string(),
+            }],
+        });
+        assert!(matches!(
+            scene_result,
+            ApplyChangeSetResult::Failed {
+                resource,
+                recovery: RecoveryStatus::NotNeeded,
+                ..
+            } if resource == "flow_lock"
+        ));
+        assert_eq!(fs::read_to_string(&scene_path).unwrap(), "old scene");
+        assert!(!std::path::Path::new(&project)
+            .join(".webgal-editor/snapshots")
+            .exists());
+        drop(story_guard);
+
+        let character_guard = crate::flow_edit_lock::FlowEditGuard::acquire(
+            std::path::Path::new(&project),
+            &[crate::flow_edit_lock::FlowResource::Characters],
+        )
+        .unwrap();
+        let character_result = apply_ai_change_set(ApplyChangeSetRequest {
+            project_path: project.clone(),
+            force: true,
+            current_scene: None,
+            edits: vec![ChangeSetEdit::Character {
+                before: Box::new(character("hero", "Old Hero")),
+                after: Box::new(character("hero", "New Hero")),
+            }],
+        });
+        assert!(matches!(
+            character_result,
+            ApplyChangeSetResult::Failed {
+                resource,
+                recovery: RecoveryStatus::NotNeeded,
+                ..
+            } if resource == "flow_lock"
+        ));
+        assert_eq!(
+            list_characters(project.clone()).unwrap()[0].name,
+            "Old Hero"
+        );
+        drop(character_guard);
         let _ = fs::remove_dir_all(project);
     }
 

@@ -54,6 +54,10 @@ function eventDescription(event: PipelineEvent): { text: string; tone: EventTone
       return { text: '生产流程已完成', tone: 'success' };
     case 'runFailed':
       return { text: `生产流程失败：${event.error}`, tone: 'error' };
+    case 'runTimedOut':
+      return { text: `生产流程已超时：${event.error}`, tone: 'error' };
+    case 'runPersistenceFailed':
+      return { text: `流程状态保存失败：${event.error}`, tone: 'error' };
   }
 }
 

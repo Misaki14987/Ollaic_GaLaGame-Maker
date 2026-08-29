@@ -7,6 +7,10 @@ use base64::Engine;
 use crate::asset_queue::{AssetGenerator, AssetKind, AssetTask, GeneratedArtifact};
 
 pub(crate) trait AssetGeneratorFactory: Send + Sync {
+    fn preflight_run(&self, _allow_local_fallback: bool) -> Result<(), String> {
+        Ok(())
+    }
+
     fn create(
         &self,
         allow_local_fallback: bool,
@@ -27,6 +31,28 @@ impl ConfiguredAssetGeneratorFactory {
 }
 
 impl AssetGeneratorFactory for ConfiguredAssetGeneratorFactory {
+    fn preflight_run(&self, allow_local_fallback: bool) -> Result<(), String> {
+        if allow_local_fallback {
+            return Ok(());
+        }
+        require_figure_matting_model(&self.figure_matting_model)?;
+        preflight_media_config(
+            &crate::ai::config::load_image_config(),
+            "图片",
+            crate::ai::provider_capability::MediaCapability::ImageGeneration,
+        )?;
+        preflight_media_config(
+            &crate::ai::config::load_tts_config(),
+            "音频",
+            crate::ai::provider_capability::MediaCapability::TtsGeneration,
+        )?;
+        preflight_media_config(
+            &crate::ai::config::load_music_config(),
+            "音乐",
+            crate::ai::provider_capability::MediaCapability::MusicGeneration,
+        )
+    }
+
     fn create(
         &self,
         allow_local_fallback: bool,
@@ -40,6 +66,22 @@ impl AssetGeneratorFactory for ConfiguredAssetGeneratorFactory {
     }
 }
 
+fn preflight_media_config(
+    config: &crate::ai::config::AiProviderConfig,
+    label: &str,
+    required: crate::ai::provider_capability::MediaCapability,
+) -> Result<(), String> {
+    crate::ai::commands::validate_provider_config_basics(config, label)?;
+    configured_model(&config.model)?;
+    crate::ai::provider_capability::require_media_capability(config, required)
+}
+
+fn require_figure_matting_model(model: &Result<PathBuf, String>) -> Result<(), String> {
+    model.as_ref().map(|_| ()).map_err(|error| {
+        format!("立绘抠图能力不可用：{error}；请安装抠图模型、允许本地素材降级，或禁用素材步骤")
+    })
+}
+
 struct ConfiguredAssetGenerator {
     local_fallback: bool,
     cancelled: Arc<AtomicBool>,
@@ -51,22 +93,27 @@ impl AssetGenerator for ConfiguredAssetGenerator {
         if self.local_fallback {
             return Ok(());
         }
-        let (config, capability) = match task.kind {
-            AssetKind::Background | AssetKind::Figure => {
-                (crate::ai::config::load_image_config(), "图片")
-            }
-            AssetKind::Tts => (crate::ai::config::load_tts_config(), "音频"),
-            AssetKind::Bgm | AssetKind::Sfx => (crate::ai::config::load_music_config(), "音乐"),
-        };
-        crate::ai::commands::validate_provider_config_basics(&config, capability)?;
-        configured_model(&config.model)?;
-        if matches!(task.kind, AssetKind::Bgm | AssetKind::Sfx)
-            && config.provider.trim() == "custom"
-            && config.base_url.trim().is_empty()
-        {
-            return Err("自定义音乐端点未填写 Base URL".to_string());
+        if task.kind == AssetKind::Figure {
+            require_figure_matting_model(&self.figure_matting_model)?;
         }
-        Ok(())
+        let (config, label, required) = match task.kind {
+            AssetKind::Background | AssetKind::Figure => (
+                crate::ai::config::load_image_config(),
+                "图片",
+                crate::ai::provider_capability::MediaCapability::ImageGeneration,
+            ),
+            AssetKind::Tts => (
+                crate::ai::config::load_tts_config(),
+                "音频",
+                crate::ai::provider_capability::MediaCapability::TtsGeneration,
+            ),
+            AssetKind::Bgm | AssetKind::Sfx => (
+                crate::ai::config::load_music_config(),
+                "音乐",
+                crate::ai::provider_capability::MediaCapability::MusicGeneration,
+            ),
+        };
+        preflight_media_config(&config, label, required)
     }
 
     fn generate<'a>(
@@ -244,7 +291,10 @@ impl AssetGenerator for PlaceholderAssetGenerator {
 
 #[cfg(test)]
 mod tests {
-    use super::matte_figure_bytes;
+    use super::{matte_figure_bytes, preflight_media_config, require_figure_matting_model};
+    use crate::ai::config::AiProviderConfig;
+    use crate::ai::provider_capability::MediaCapability;
+    use std::path::PathBuf;
 
     #[test]
     fn generated_figure_uses_matting_output() {
@@ -259,5 +309,33 @@ mod tests {
                 .unwrap_err(),
             "matting failed"
         );
+    }
+
+    #[test]
+    fn media_preflight_rejects_custom_configs_without_a_base_url() {
+        let config = AiProviderConfig {
+            provider: "custom".to_string(),
+            model: "media-model".to_string(),
+            api_key: "key".to_string(),
+            base_url: String::new(),
+        };
+
+        for (label, required) in [
+            ("图片", MediaCapability::ImageGeneration),
+            ("音频", MediaCapability::TtsGeneration),
+            ("音乐", MediaCapability::MusicGeneration),
+        ] {
+            let error = preflight_media_config(&config, label, required).unwrap_err();
+            assert!(error.contains("Base URL"), "{required:?}: {error}");
+        }
+    }
+
+    #[test]
+    fn media_preflight_rejects_a_missing_figure_matting_model() {
+        let error =
+            require_figure_matting_model(&Err("model file not found".to_string())).unwrap_err();
+        assert!(error.contains("立绘抠图能力不可用"));
+        assert!(error.contains("model file not found"));
+        assert!(require_figure_matting_model(&Ok(PathBuf::from("model.onnx"))).is_ok());
     }
 }

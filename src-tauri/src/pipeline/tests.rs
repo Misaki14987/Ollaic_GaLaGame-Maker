@@ -14,8 +14,10 @@ use tokio::time::{sleep, timeout, Duration};
 use crate::agents::{
     Agent, AgentContext, AgentError, AgentOutput, AgentOutputPayload, AgentRegistry,
 };
+use crate::asset_queue::{AssetGenerator, AssetTask, GeneratedArtifact};
+use crate::pipeline::asset_executor::AssetGeneratorFactory;
 use crate::pipeline::dsl::{default_recipe, FlowRecipe, RecipeError, StepDef, StepKind};
-use crate::pipeline::events::{PipelineEvent, RecordingSink};
+use crate::pipeline::events::{EventSink, PipelineEvent, RecordingSink};
 use crate::pipeline::project_state::project_has_story_content;
 use crate::pipeline::recovery::cleanup_rollback_snapshots;
 use crate::pipeline::scheduler::{Pipeline, RunCreation, DEFAULT_STEP_TIMEOUT};
@@ -79,6 +81,109 @@ impl Agent for FailingAgent {
     }
 }
 
+/// Makes the run-state directory unwritable immediately before failing, so
+/// the scheduler's terminal transition is the first write that fails.
+struct StoreSabotagingAgent {
+    project: std::path::PathBuf,
+}
+
+struct StepSucceededStoreSabotagingSink {
+    project: std::path::PathBuf,
+    events: std::sync::Mutex<Vec<PipelineEvent>>,
+    sabotaged: std::sync::atomic::AtomicBool,
+}
+
+impl StepSucceededStoreSabotagingSink {
+    fn new(project: std::path::PathBuf) -> Self {
+        Self {
+            project,
+            events: std::sync::Mutex::new(Vec::new()),
+            sabotaged: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    fn events(&self) -> Vec<PipelineEvent> {
+        self.events.lock().unwrap().clone()
+    }
+}
+
+impl EventSink for StepSucceededStoreSabotagingSink {
+    fn emit(&self, event: PipelineEvent) {
+        if matches!(event, PipelineEvent::StepSucceeded { .. })
+            && !self.sabotaged.swap(true, Ordering::SeqCst)
+        {
+            let state_dir = crate::pipeline::store::run_state_dir(&self.project);
+            std::fs::remove_dir_all(&state_dir).unwrap();
+            std::fs::write(&state_dir, b"not a directory").unwrap();
+        }
+        self.events.lock().unwrap().push(event);
+    }
+}
+
+struct MissingMediaCapabilityFactory;
+struct UnusedAssetGenerator;
+
+struct LockProbeAgent {
+    entered: Arc<Semaphore>,
+    release: Arc<Notify>,
+}
+
+impl Agent for LockProbeAgent {
+    fn run<'a>(
+        &'a self,
+        _ctx: &'a AgentContext<'a>,
+    ) -> Pin<Box<dyn Future<Output = Result<AgentOutput, AgentError>> + Send + 'a>> {
+        let entered = self.entered.clone();
+        let release = self.release.clone();
+        Box::pin(async move {
+            entered.add_permits(1);
+            release.notified().await;
+            Ok(synopsis_output("done"))
+        })
+    }
+}
+
+impl AssetGeneratorFactory for MissingMediaCapabilityFactory {
+    fn preflight_run(&self, allow_local_fallback: bool) -> Result<(), String> {
+        if allow_local_fallback {
+            Ok(())
+        } else {
+            Err("未配置图片生成能力".to_string())
+        }
+    }
+
+    fn create(
+        &self,
+        _allow_local_fallback: bool,
+        _cancelled: Arc<std::sync::atomic::AtomicBool>,
+    ) -> Arc<dyn AssetGenerator> {
+        Arc::new(UnusedAssetGenerator)
+    }
+}
+
+impl AssetGenerator for UnusedAssetGenerator {
+    fn generate<'a>(
+        &'a self,
+        _task: &'a AssetTask,
+    ) -> Pin<Box<dyn Future<Output = Result<GeneratedArtifact, String>> + Send + 'a>> {
+        Box::pin(async { panic!("preflight must reject before asset execution") })
+    }
+}
+impl Agent for StoreSabotagingAgent {
+    fn run<'a>(
+        &'a self,
+        _ctx: &'a AgentContext<'a>,
+    ) -> Pin<Box<dyn Future<Output = Result<AgentOutput, AgentError>> + Send + 'a>> {
+        let project = self.project.clone();
+        Box::pin(async move {
+            let state_dir = crate::pipeline::store::run_state_dir(&project);
+            std::fs::remove_dir_all(&state_dir).unwrap();
+            std::fs::write(&state_dir, b"not a directory").unwrap();
+            Err(AgentError("provider failed".to_string()))
+        })
+    }
+}
+
 /// An agent that never resolves, to exercise the step timeout.
 struct HangingAgent;
 impl Agent for HangingAgent {
@@ -137,6 +242,28 @@ fn synopsis_output(text: &str) -> AgentOutput {
     AgentOutput::new(AgentOutputPayload::Synopsis(text.to_string()))
 }
 
+fn pipeline_test_character(name: &str) -> crate::characters::types::Character {
+    crate::characters::types::Character {
+        id: "hero".to_string(),
+        name: name.to_string(),
+        aliases: Vec::new(),
+        description: String::new(),
+        personality: String::new(),
+        reference_images: Vec::new(),
+        stance: String::new(),
+        keywords: Vec::new(),
+        dialogue_style: String::new(),
+        gender: String::new(),
+        age: String::new(),
+        sprites: Vec::new(),
+        default_voice: None,
+        voice_timbre: None,
+        relations: Vec::new(),
+        color_theme: None,
+        notes: String::new(),
+    }
+}
+
 fn chapters_output() -> AgentOutput {
     AgentOutput::new(AgentOutputPayload::Outline {
         chapters: vec![
@@ -178,6 +305,8 @@ fn labels(events: &[PipelineEvent]) -> Vec<String> {
             PipelineEvent::RunResumed { .. } => "run_resumed".to_string(),
             PipelineEvent::RunCompleted { .. } => "run_completed".to_string(),
             PipelineEvent::RunFailed { .. } => "run_failed".to_string(),
+            PipelineEvent::RunTimedOut { .. } => "run_timed_out".to_string(),
+            PipelineEvent::RunPersistenceFailed { .. } => "run_persistence_failed".to_string(),
             PipelineEvent::RunStopped { .. } => "run_stopped".to_string(),
         })
         .collect()
@@ -208,6 +337,69 @@ fn default_recipe_is_valid() {
 }
 
 #[test]
+fn media_capability_gap_rejects_asset_recipe_before_run_creation() {
+    let project = fresh_project("media_capability_preflight");
+    let sink = RecordingSink::new();
+    let clock = StepClock::new();
+    let pipeline = Pipeline::with_default_agents()
+        .with_asset_generators_for_test(Arc::new(MissingMediaCapabilityFactory));
+    let recipe = FlowRecipe::new().step(StepDef::new("assetQueue", StepKind::Asset).asset_queue());
+
+    let result = pipeline.create_run_with_options(RunCreation {
+        project_path: &project,
+        run_id: "run_media_preflight",
+        prompt: "brief",
+        recipe: &recipe,
+        allow_local_fallback: false,
+        step_timeout: Some(DEFAULT_STEP_TIMEOUT),
+        clock: &clock,
+        sink: &sink,
+    });
+    let error = match result {
+        Ok(_) => panic!("media capability gap must reject run creation"),
+        Err(error) => error,
+    };
+
+    assert!(error.to_string().contains("未配置图片生成能力"));
+    assert!(sink.events().is_empty());
+    assert!(
+        crate::pipeline::load_run_state(&project, "run_media_preflight")
+            .unwrap()
+            .is_none()
+    );
+    assert!(crate::story_plan::load_plan(&project).unwrap().is_none());
+}
+
+#[test]
+fn explicit_local_fallback_accepts_asset_recipe_with_media_gap() {
+    let project = fresh_project("media_capability_fallback");
+    let sink = RecordingSink::new();
+    let clock = StepClock::new();
+    let pipeline = Pipeline::with_default_agents()
+        .with_asset_generators_for_test(Arc::new(MissingMediaCapabilityFactory));
+    let recipe = FlowRecipe::new().step(StepDef::new("assetQueue", StepKind::Asset).asset_queue());
+
+    let handle = pipeline
+        .create_run_with_options(RunCreation {
+            project_path: &project,
+            run_id: "run_media_fallback",
+            prompt: "brief",
+            recipe: &recipe,
+            allow_local_fallback: true,
+            step_timeout: Some(DEFAULT_STEP_TIMEOUT),
+            clock: &clock,
+            sink: &sink,
+        })
+        .expect("explicit fallback should satisfy media capability review");
+
+    assert!(handle.state().try_lock().unwrap().allow_local_fallback);
+    assert!(matches!(
+        sink.events().as_slice(),
+        [PipelineEvent::RunStarted { .. }]
+    ));
+}
+
+#[test]
 fn ipc_contract_serializes_to_camel_case() {
     // Pin the exact JSON shape the frontend (pipeline-ipc.ts) must match.
     use serde_json::json;
@@ -234,6 +426,24 @@ fn ipc_contract_serializes_to_camel_case() {
     assert_eq!(
         serde_json::to_value(&run_failed).unwrap(),
         json!({ "type": "runFailed", "runId": "run_1", "error": "boom" })
+    );
+
+    let run_timed_out = PipelineEvent::RunTimedOut {
+        run_id: "run_1".to_string(),
+        error: "step timed out".to_string(),
+    };
+    assert_eq!(
+        serde_json::to_value(&run_timed_out).unwrap(),
+        json!({ "type": "runTimedOut", "runId": "run_1", "error": "step timed out" })
+    );
+
+    let persistence_failed = PipelineEvent::RunPersistenceFailed {
+        run_id: "run_1".to_string(),
+        error: "disk full".to_string(),
+    };
+    assert_eq!(
+        serde_json::to_value(&persistence_failed).unwrap(),
+        json!({ "type": "runPersistenceFailed", "runId": "run_1", "error": "disk full" })
     );
 
     assert_eq!(
@@ -426,6 +636,86 @@ async fn runs_full_p2_recipe_and_binds_generated_assets() {
     assert!(run_state.find_step("outline").unwrap().history[0]
         .duration_ms
         .is_some());
+}
+
+#[tokio::test]
+async fn flow_resources_are_locked_while_a_step_uses_them() {
+    let project = fresh_project("character_flow_scope");
+    let project_string = project.to_string_lossy().to_string();
+    crate::characters::commands::save_characters(
+        project_string.clone(),
+        vec![pipeline_test_character("Before")],
+    )
+    .unwrap();
+    let entered = Arc::new(Semaphore::new(0));
+    let release = Arc::new(Notify::new());
+    let mut agents = AgentRegistry::new();
+    agents.register(
+        StepKind::Plan,
+        Box::new(LockProbeAgent {
+            entered: entered.clone(),
+            release: release.clone(),
+        }),
+    );
+    let pipeline = Arc::new(Pipeline::new(agents));
+    let sink = Arc::new(RecordingSink::new());
+    let clock = Arc::new(StepClock::new());
+    let recipe = FlowRecipe::new().step(StepDef::new("plan", StepKind::Plan));
+    let handle = pipeline
+        .create_run(
+            &project,
+            "run_character_flow_scope",
+            "brief",
+            &recipe,
+            clock.as_ref(),
+            sink.as_ref(),
+        )
+        .unwrap();
+    let snapshot = crate::webgal::project::create_project_snapshot(
+        project_string.clone(),
+        Some("before-running-step".to_string()),
+        Some("manual".to_string()),
+        None,
+    )
+    .unwrap();
+    let execution = {
+        let pipeline = pipeline.clone();
+        let project = project.clone();
+        let sink = sink.clone();
+        let clock = clock.clone();
+        tokio::spawn(async move {
+            pipeline
+                .execute(&project, handle, sink.as_ref(), clock.as_ref())
+                .await;
+        })
+    };
+
+    entered.acquire().await.unwrap().forget();
+    let edit_error = crate::characters::commands::update_character(
+        project_string.clone(),
+        pipeline_test_character("During"),
+    )
+    .unwrap_err();
+    assert!(edit_error.contains("Agent Flow 正在使用角色资料"));
+    let restore_error = crate::webgal::project::restore_project_snapshot(
+        project_string.clone(),
+        snapshot.id.clone(),
+    )
+    .unwrap_err();
+    assert!(restore_error.contains("Agent Flow 正在使用故事计划"));
+
+    release.notify_one();
+    execution.await.unwrap();
+    crate::webgal::project::restore_project_snapshot(project_string.clone(), snapshot.id).unwrap();
+    crate::characters::commands::update_character(
+        project_string.clone(),
+        pipeline_test_character("After"),
+    )
+    .unwrap();
+    assert_eq!(
+        crate::characters::commands::list_characters(project_string).unwrap()[0].name,
+        "After"
+    );
 }
 
 #[test]
@@ -697,9 +987,191 @@ async fn step_timeout_terminates_run_as_timeout() {
         .unwrap()
         .unwrap();
     assert_eq!(run_state.status, RunStatus::Timeout);
+    assert!(sink.events().iter().any(|event| matches!(
+        event,
+        PipelineEvent::RunTimedOut { run_id, .. } if run_id == "run_timeout"
+    )));
+    assert!(!sink.events().iter().any(|event| matches!(
+        event,
+        PipelineEvent::RunFailed { run_id, .. } if run_id == "run_timeout"
+    )));
     let plan = run_state.find_step("plan").unwrap();
     assert_eq!(plan.status, StepStatus::Failed);
     assert!(plan.error.as_deref().unwrap().contains("timed out"));
+}
+
+#[tokio::test]
+async fn terminal_save_failure_emits_only_persistence_failure() {
+    let project = fresh_project("terminal_save_failure");
+    let sink = Arc::new(RecordingSink::new());
+    let clock = StepClock::new();
+    let mut agents = AgentRegistry::new();
+    agents.register(
+        StepKind::Plan,
+        Box::new(StoreSabotagingAgent {
+            project: project.clone(),
+        }),
+    );
+    let pipeline = Pipeline::new(agents);
+    let recipe = FlowRecipe::new().step(StepDef::new("plan", StepKind::Plan));
+    let handle = pipeline
+        .create_run(
+            &project,
+            "run_terminal_save_failure",
+            "brief",
+            &recipe,
+            &clock,
+            sink.as_ref(),
+        )
+        .unwrap();
+
+    pipeline
+        .execute(&project, handle.clone(), sink.as_ref(), &clock)
+        .await;
+
+    let events = sink.events();
+    assert!(events.iter().any(|event| matches!(
+        event,
+        PipelineEvent::RunPersistenceFailed { run_id, error }
+            if run_id == "run_terminal_save_failure" && error.contains("无法保存运行 'run_terminal_save_failure' 的失败终态")
+    )));
+    assert!(!events.iter().any(|event| matches!(
+        event,
+        PipelineEvent::StepFailed { .. }
+            | PipelineEvent::RunFailed { .. }
+            | PipelineEvent::RunTimedOut { .. }
+    )));
+    assert_eq!(
+        handle.state().lock().await.status,
+        RunStatus::PersistenceFailed
+    );
+}
+
+#[tokio::test]
+async fn completion_save_failure_emits_only_persistence_failure() {
+    let project = fresh_project("completion_save_failure");
+    let sink = StepSucceededStoreSabotagingSink::new(project.clone());
+    let clock = StepClock::new();
+    let pipeline = Pipeline::with_default_agents();
+    let recipe = FlowRecipe::new().step(StepDef::new("plan", StepKind::Plan));
+    let handle = pipeline
+        .create_run(
+            &project,
+            "run_completion_save_failure",
+            "brief",
+            &recipe,
+            &clock,
+            &sink,
+        )
+        .unwrap();
+
+    pipeline
+        .execute(&project, handle.clone(), &sink, &clock)
+        .await;
+
+    let events = sink.events();
+    assert!(events.iter().any(|event| matches!(
+        event,
+        PipelineEvent::RunPersistenceFailed { run_id, .. }
+            if run_id == "run_completion_save_failure"
+    )));
+    assert!(!events.iter().any(|event| matches!(
+        event,
+        PipelineEvent::RunCompleted { .. } | PipelineEvent::RunFailed { .. }
+    )));
+    assert_eq!(
+        handle.state().lock().await.status,
+        RunStatus::PersistenceFailed
+    );
+}
+
+#[tokio::test]
+async fn blocked_run_save_failure_emits_only_persistence_failure() {
+    let project = fresh_project("blocked_save_failure");
+    let sink = RecordingSink::new();
+    let clock = StepClock::new();
+    let pipeline = Pipeline::with_default_agents();
+    let recipe = FlowRecipe::new()
+        .step(StepDef::new("plan", StepKind::Plan))
+        .step(StepDef::new("outline", StepKind::Outline).depends_on("plan"));
+    let handle = pipeline
+        .create_run(
+            &project,
+            "run_blocked_save_failure",
+            "brief",
+            &recipe,
+            &clock,
+            &sink,
+        )
+        .unwrap();
+    {
+        let mut state = handle.state().lock().await;
+        let plan = state.find_step_mut("plan").unwrap();
+        plan.status = StepStatus::Failed;
+        plan.error = Some("upstream failed".to_string());
+    }
+    let state_dir = crate::pipeline::store::run_state_dir(&project);
+    std::fs::remove_dir_all(&state_dir).unwrap();
+    std::fs::write(&state_dir, b"not a directory").unwrap();
+
+    pipeline
+        .execute(&project, handle.clone(), &sink, &clock)
+        .await;
+
+    let events = sink.events();
+    assert!(events.iter().any(|event| matches!(
+        event,
+        PipelineEvent::RunPersistenceFailed { run_id, .. }
+            if run_id == "run_blocked_save_failure"
+    )));
+    assert!(!events
+        .iter()
+        .any(|event| matches!(event, PipelineEvent::RunFailed { .. })));
+    assert_eq!(
+        handle.state().lock().await.status,
+        RunStatus::PersistenceFailed
+    );
+}
+
+#[tokio::test]
+async fn pause_after_step_save_failure_emits_only_persistence_failure() {
+    let project = fresh_project("pause_after_step_save_failure");
+    let sink = StepSucceededStoreSabotagingSink::new(project.clone());
+    let clock = StepClock::new();
+    let pipeline = Pipeline::with_default_agents();
+    let recipe = FlowRecipe::new()
+        .step(StepDef::new("plan", StepKind::Plan))
+        .step(StepDef::new("outline", StepKind::Outline).depends_on("plan"));
+    let handle = pipeline
+        .create_run(
+            &project,
+            "run_pause_after_step_save_failure",
+            "brief",
+            &recipe,
+            &clock,
+            &sink,
+        )
+        .unwrap();
+    handle.pause(&project, &sink, &clock).await.unwrap();
+    handle.step_once(&project, &sink, &clock).await.unwrap();
+
+    pipeline
+        .execute(&project, handle.clone(), &sink, &clock)
+        .await;
+
+    let events = sink.events();
+    assert!(events.iter().any(|event| matches!(
+        event,
+        PipelineEvent::RunPersistenceFailed { run_id, .. }
+            if run_id == "run_pause_after_step_save_failure"
+    )));
+    assert!(!events
+        .iter()
+        .any(|event| matches!(event, PipelineEvent::RunFailed { .. })));
+    assert_eq!(
+        handle.state().lock().await.status,
+        RunStatus::PersistenceFailed
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -1511,9 +1983,13 @@ async fn transition_persistence_failure_stops_before_running_the_agent() {
         .execute(&project, handle.clone(), &sink, &clock)
         .await;
 
-    assert_eq!(handle.state().lock().await.status, RunStatus::Failed);
+    assert_eq!(
+        handle.state().lock().await.status,
+        RunStatus::PersistenceFailed
+    );
     let events = labels(&sink.events());
-    assert!(events.contains(&"run_failed".to_string()));
+    assert!(events.contains(&"run_persistence_failed".to_string()));
+    assert!(!events.contains(&"run_failed".to_string()));
     assert!(!events
         .iter()
         .any(|event| event.starts_with("step_started:")));

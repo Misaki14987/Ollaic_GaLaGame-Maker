@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
-import { initialFlowState, reduceFlowEvent } from '../lib/flow-state';
+import { initialFlowState, recordsFromSnapshot, reduceFlowEvent } from '../lib/flow-state';
 import {
   assetQueueDeleteArtifact,
   assetQueueGet,
@@ -23,51 +23,7 @@ import {
   pipelineUpdateStepPrompt,
 } from '../lib/pipeline-ipc';
 import { isAssetQueueStep } from '../lib/pipeline-types';
-import type { AssetQueueState, PipelineEvent, PipelineEventRecord, RunState } from '../lib/pipeline-types';
-
-function recordsFromSnapshot(snapshot: RunState): PipelineEventRecord[] {
-  const events: PipelineEventRecord[] = [{
-    event: { type: 'runStarted', runId: snapshot.runId },
-    receivedAt: snapshot.startedAt,
-  }];
-
-  for (const step of snapshot.steps) {
-    if (step.startedAt != null) {
-      events.push({
-        event: { type: 'stepStarted', runId: snapshot.runId, stepId: step.def.id, kind: step.def.kind },
-        receivedAt: step.startedAt,
-      });
-    }
-    if (step.status === 'succeeded') {
-      events.push({
-        event: { type: 'stepSucceeded', runId: snapshot.runId, stepId: step.def.id, output: step.output ?? null },
-        receivedAt: step.finishedAt ?? snapshot.updatedAt,
-      });
-    } else if (step.status === 'failed') {
-      events.push({
-        event: { type: 'stepFailed', runId: snapshot.runId, stepId: step.def.id, error: step.error ?? '未知错误' },
-        receivedAt: step.finishedAt ?? snapshot.updatedAt,
-      });
-    } else if (step.status === 'skipped') {
-      events.push({
-        event: { type: 'stepSkipped', runId: snapshot.runId, stepId: step.def.id },
-        receivedAt: step.finishedAt ?? snapshot.updatedAt,
-      });
-    }
-  }
-
-  const terminalEvent: PipelineEvent | null = snapshot.status === 'completed'
-    ? { type: 'runCompleted', runId: snapshot.runId }
-    : snapshot.status === 'failed'
-      ? { type: 'runFailed', runId: snapshot.runId, error: snapshot.steps.find((step) => step.error)?.error ?? '流程失败' }
-      : snapshot.status === 'cancelled'
-        ? { type: 'runStopped', runId: snapshot.runId }
-        : snapshot.status === 'paused'
-          ? { type: 'runPaused', runId: snapshot.runId }
-          : null;
-  if (terminalEvent) events.push({ event: terminalEvent, receivedAt: snapshot.updatedAt });
-  return events;
-}
+import type { AssetQueueState, PipelineEventRecord } from '../lib/pipeline-types';
 
 export function useFlowRunController(projectPath: string) {
   const [state, dispatch] = useReducer(reduceFlowEvent, undefined, initialFlowState);
@@ -130,6 +86,7 @@ export function useFlowRunController(projectPath: string) {
       if (event.runId !== runId || runIdRef.current !== runId || subscriptionRef.current !== subscription) return;
       dispatch(event);
       setEvents((current) => [...current, { event, receivedAt: Date.now() }]);
+      if (event.type === 'runPersistenceFailed') setError(event.error);
       if (event.type === 'stepSucceeded' || event.type === 'runCompleted') void refreshPlan();
       if ('stepId' in event && assetQueueStepIdsRef.current.has(event.stepId)) void refreshAssetQueue();
     });

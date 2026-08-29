@@ -17,7 +17,7 @@ use crate::agents::{AgentContext, AgentRegistry};
 #[cfg(test)]
 use crate::pipeline::asset_executor::PlaceholderAssetGeneratorFactory;
 use crate::pipeline::asset_executor::{AssetGeneratorFactory, ConfiguredAssetGeneratorFactory};
-use crate::pipeline::dsl::{FlowRecipe, StepKind};
+use crate::pipeline::dsl::{FlowRecipe, StepExecutor, StepKind};
 use crate::pipeline::events::{EventSink, PipelineEvent};
 use crate::pipeline::output_commit::{
     apply_canonical_characters, apply_output, commit_step_output, restore_interrupted_outputs,
@@ -26,7 +26,7 @@ use crate::pipeline::output_commit::{
 use crate::pipeline::project_state::{project_has_story_content_locked, record_run_summary};
 use crate::pipeline::recovery::PipelineError;
 use crate::pipeline::run_control::RunHandle;
-use crate::pipeline::run_driver::{next_action, Action};
+use crate::pipeline::run_driver::{mark_run_persistence_failed, next_action, Action};
 use crate::pipeline::state::{Clock, RunState, RunStatus, StepStatus};
 use crate::pipeline::step_executor::{execute as execute_step, ExecutorContext};
 use crate::pipeline::store;
@@ -145,6 +145,15 @@ impl Pipeline {
         self
     }
 
+    #[cfg(test)]
+    pub(crate) fn with_asset_generators_for_test(
+        mut self,
+        asset_generators: Arc<dyn AssetGeneratorFactory>,
+    ) -> Self {
+        self.asset_generators = asset_generators;
+        self
+    }
+
     /// Create + persist a run, emit `RunStarted`, return a handle set to
     /// `Running`. Ensures a StoryPlan exists. Does NOT execute.
     #[cfg(test)]
@@ -233,6 +242,15 @@ impl Pipeline {
             sink,
         } = creation;
         recipe.validate().map_err(PipelineError::RecipeInvalid)?;
+        if recipe
+            .steps
+            .iter()
+            .any(|step| step.executor == StepExecutor::AssetQueue)
+        {
+            self.asset_generators
+                .preflight_run(allow_local_fallback)
+                .map_err(PipelineError::CapabilityGap)?;
+        }
         // Validate or create the IR before writing any run state. An invalid
         // plan must not leave an orphan run that later bypasses validation.
         let previous_plan = story_plan::load_plan(project_path).map_err(PipelineError::Plan)?;
@@ -456,18 +474,13 @@ impl Pipeline {
                         if should_pause {
                             if let Err(error) = handle.pause(project_path, sink, clock).await {
                                 let mut state = handle.state.lock().await;
-                                state.status = RunStatus::Failed;
-                                state.updated_at = clock.now_ms();
-                                let run_id = state.run_id.clone();
-                                let _ = store::save_run_state(project_path, &state);
+                                let event = mark_run_persistence_failed(
+                                    &mut state,
+                                    "单步执行后的暂停状态",
+                                    error,
+                                );
                                 drop(state);
-                                sink.emit(PipelineEvent::RunFailed {
-                                    run_id,
-                                    error: format!(
-                                        "failed to persist single-step pause: {}",
-                                        error
-                                    ),
-                                });
+                                sink.emit(event);
                                 return;
                             }
                         }
@@ -490,6 +503,24 @@ impl Pipeline {
             sink,
             clock,
         } = execution;
+        let _flow_resource_guard = match crate::flow_edit_lock::FlowEditGuard::acquire(
+            project_path,
+            &[
+                crate::flow_edit_lock::FlowResource::Characters,
+                crate::flow_edit_lock::FlowResource::StoryPlan,
+            ],
+        ) {
+            Ok(guard) => guard,
+            Err(error) => {
+                self.fail_step(
+                    execution,
+                    id,
+                    format!("failed to lock Flow Step inputs: {error}"),
+                )
+                .await;
+                return;
+            }
+        };
         // Load the plan to build the agent context.
         let mut plan = match story_plan::load_plan(project_path) {
             Ok(Some(plan)) => plan,
@@ -510,8 +541,8 @@ impl Pipeline {
         };
         let characters_path = project_path.join("game/config/characters.json");
         if characters_path.is_file() {
-            match crate::characters::commands::list_characters(
-                project_path.to_string_lossy().to_string(),
+            match crate::characters::commands::list_characters_locked(
+                project_path.to_string_lossy().as_ref(),
             ) {
                 Ok(characters) => {
                     apply_canonical_characters(&mut plan, characters, kind == StepKind::Character);
@@ -746,17 +777,33 @@ impl Pipeline {
         state.status = status;
         state.updated_at = finished_at;
         let run_id = state.run_id.clone();
-        let _ = store::save_run_state(project_path, &state);
+        if let Err(save_error) = store::save_run_state(project_path, &state) {
+            let operation = if status == RunStatus::Timeout {
+                "超时终态"
+            } else {
+                "失败终态"
+            };
+            let event = mark_run_persistence_failed(&mut state, operation, save_error);
+            drop(state);
+            sink.emit(event);
+            return;
+        }
         drop(state);
         sink.emit(PipelineEvent::StepFailed {
             run_id: run_id.clone(),
             step_id,
             error: error.clone(),
         });
-        sink.emit(PipelineEvent::RunFailed {
-            run_id: run_id.clone(),
-            error,
-        });
+        match status {
+            RunStatus::Timeout => sink.emit(PipelineEvent::RunTimedOut {
+                run_id: run_id.clone(),
+                error,
+            }),
+            _ => sink.emit(PipelineEvent::RunFailed {
+                run_id: run_id.clone(),
+                error,
+            }),
+        }
         let _ = record_run_summary(project_path, &run_id, clock);
     }
 }

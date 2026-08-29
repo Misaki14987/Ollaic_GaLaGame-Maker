@@ -54,6 +54,7 @@ import {
   buildNumberedScriptContext,
   hasAssetContextTruncation,
   truncateContextMessages,
+  type MissingAssetIssue,
 } from '../lib/story-agent';
 import { getScenePath, listScenes, readFileText, sceneDisplayName, type SceneHeader } from '../lib/webgal-ipc';
 import type { WebGalNode } from '../lib/webgal-types';
@@ -67,6 +68,7 @@ export type AiPanelStatus =
   | 'accepted'
   | 'reverted'
   | 'conflict'
+  | 'missing_assets'
   | 'error';
 
 export interface AiErrorState {
@@ -257,10 +259,12 @@ export function useAiAgent(params: UseAiAgentParams) {
   } = useChatSession(projectId, INITIAL_AI_MESSAGE);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
+  const [committing, setCommitting] = useState(false);
   const [status, setStatus] = useState<AiPanelStatus>('idle');
   const [stepLabel, setStepLabel] = useState('');
   const [pendingChangeSet, setPendingChangeSet] = useState<PendingChangeSet | null>(null);
   const [error, setError] = useState<AiErrorState | null>(null);
+  const [missingIssues, setMissingIssues] = useState<MissingAssetIssue[]>([]);
   const [assets, setAssets] = useState<AssetInfo[]>([]);
   const [memory, setMemory] = useState<ProjectMemory | null>(null);
   // Reference uploads: author-attached local files the agent may read.
@@ -277,6 +281,7 @@ export function useAiAgent(params: UseAiAgentParams) {
   const cancelledRef = useRef(false);
   const streamingIdRef = useRef<string | null>(null);
   const inFlightRef = useRef(false);
+  const commitInFlightRef = useRef(false);
   // Monotonic token identifying the in-flight request. A new prompt bumps this;
   // an old request's finally only touches shared UI state when its token still
   // matches, so a stale request can't clobber a newer one.
@@ -289,8 +294,12 @@ export function useAiAgent(params: UseAiAgentParams) {
   const currentRunIdRef = useRef<string | null>(null);
   const ownsRun = useCallback((runId: string) => currentRunIdRef.current === runId, []);
   const currentSceneNameRef = useRef(currentSceneName);
+  const currentSceneRevisionRef = useRef(0);
   const projectPathRef = useRef(projectPath);
+  const previousProjectPathRef = useRef(projectPath);
+  const activeSessionIdRef = useRef(activeId);
   projectPathRef.current = projectPath;
+  activeSessionIdRef.current = activeId;
 
   // Sessions are shared across scenes, and a pending change set is cross-scene
   // (each edit carries its own file + before/after snapshots). So switching
@@ -299,8 +308,28 @@ export function useAiAgent(params: UseAiAgentParams) {
   // scene snapshot they started with; this ref is only used to decide whether a
   // finished preview should update the currently visible canvas.
   useLayoutEffect(() => {
+    if (currentSceneNameRef.current !== currentSceneName) currentSceneRevisionRef.current += 1;
     currentSceneNameRef.current = currentSceneName;
   }, [currentSceneName]);
+
+  useLayoutEffect(() => {
+    if (previousProjectPathRef.current === projectPath) return;
+    previousProjectPathRef.current = projectPath;
+    currentSceneRevisionRef.current += 1;
+    requestTokenRef.current += 1;
+    const staleRunId = currentRunIdRef.current;
+    currentRunIdRef.current = null;
+    cancelledRef.current = true;
+    inFlightRef.current = false;
+    streamingIdRef.current = null;
+    if (staleRunId) void aiChatCancel(staleRunId);
+    setBusy(false);
+    setStepLabel('');
+    setError(null);
+    setMissingIssues([]);
+    setPendingChangeSet(null);
+    setStatus('idle');
+  }, [projectPath]);
 
   useLayoutEffect(() => {
     setUploads([]);
@@ -448,6 +477,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     setPendingChangeSet(changeSet);
     setStatus('pending');
     setError(null);
+    setMissingIssues([]);
     return true;
   }, [sceneHeaders, replaceAssistantMessage, setSelectedNode, setShowScript]);
 
@@ -478,9 +508,11 @@ export function useAiAgent(params: UseAiAgentParams) {
     const createCharEdits = new Map<string, CreateCharacterEdit>();
     const createSceneEdits = new Map<string, CreateSceneEdit>();
     const assetPlanEdits: ReturnType<typeof stageAssetPlanEdit>[] = [];
+    const missingAssetsByScene = new Map<string, MissingAssetIssue[]>();
     let memEdit: MemoryEdit | undefined;
 
     const stage = async (staged: StagedWrite): Promise<{ content: string; ok: boolean; error?: string }> => {
+      const stagedSceneFile = 'file' in staged && typeof staged.file === 'string' ? staged.file : null;
       try {
         if (staged.tool === 'edit_scene') {
           sceneEdits.set(staged.file, await stageSceneEdit(sceneEdits.get(staged.file), staged, stagingCtx));
@@ -544,6 +576,9 @@ export function useAiAgent(params: UseAiAgentParams) {
         return { content: JSON.stringify({ staged: true, message: '已暂存，等待用户确认。' }), ok: true };
       } catch (e) {
         const msg = isStageError(e) ? e.message : String(e);
+        if (stagedSceneFile && isStageError(e) && e.missingAssets?.length) {
+          missingAssetsByScene.set(stagedSceneFile, e.missingAssets);
+        }
         return { content: JSON.stringify({ staged: false, error: msg }), ok: false, error: msg };
       }
     };
@@ -718,6 +753,16 @@ export function useAiAgent(params: UseAiAgentParams) {
     setStepLabel('');
     trace.finalText = finalText;
     trace.edits = edits.map((edit) => describeEdit(edit, sceneHeaders));
+    const unresolvedMissingAssets = Array.from(missingAssetsByScene.values()).flat();
+    if (unresolvedMissingAssets.length > 0) {
+      trace.outcome = 'missing_assets';
+      trace.error = '修改方案引用了素材库中不存在的文件';
+      setMissingIssues(unresolvedMissingAssets);
+      setError(null);
+      setStatus('missing_assets');
+      void writeAgentTrace(trace);
+      return;
+    }
     if (!finalizeChangeSet(edits, assistantId)) {
       // No change set: ensure a closing text is visible. If the loop produced
       // no terminal text at all, fall back to a short note (steps still shown).
@@ -838,14 +883,20 @@ export function useAiAgent(params: UseAiAgentParams) {
       trace.outcome = 'stage_error';
       trace.error = msg;
       void writeAgentTrace(trace);
-      setStatus('error');
-      setError({ kind: 'other', retryable: true, message: msg });
+      if (isStageError(e) && e.missingAssets?.length) {
+        setMissingIssues(e.missingAssets);
+        setError(null);
+        setStatus('missing_assets');
+      } else {
+        setStatus('error');
+        setError({ kind: 'other', retryable: true, message: msg });
+      }
     }
   }, [assets, buildLegacySystemContext, buildStagingContext, currentSceneName, ownsRun, projectId, projectPath, sceneHeaders, finalizeChangeSet, messages, replaceAssistantMessage]);
 
   const sendPrompt = useCallback(async (prompt: string, retryAttachmentIds?: string[]) => {
     const text = prompt.trim();
-    if (!text || busy || inFlightRef.current) return;
+    if (!text || busy || inFlightRef.current || commitInFlightRef.current) return;
     if (pendingChangeSet?.status === 'pending') {
       setError({ kind: 'other', retryable: false, message: '当前还有 AI 修改方案待确认。请先同意或拒绝后再继续对话。' });
       return;
@@ -862,6 +913,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     const myRunId = `run-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     currentRunIdRef.current = myRunId;
     setError(null);
+    setMissingIssues([]);
     setPendingChangeSet(null);
     setStatus('generating');
 
@@ -939,16 +991,20 @@ export function useAiAgent(params: UseAiAgentParams) {
     options: { force: boolean; historyNodes?: WebGalNode[] },
   ) => {
     if (!projectPath) return;
+    const operationProjectPath = projectPath;
+    const operationSessionId = activeId;
+    const sceneRevision = currentSceneRevisionRef.current;
     const currentSceneEdit = set.edits.find((e): e is SceneEdit => e.kind === 'scene' && e.file === currentSceneName);
     let result: ApplyChangeSetResult;
     try {
       result = await applyAiChangeSet(
-        projectPath,
+        operationProjectPath,
         set,
         { file: currentSceneName, content: scriptSource },
         options.force,
       );
     } catch (e) {
+      if (projectPathRef.current !== operationProjectPath || activeSessionIdRef.current !== operationSessionId) return;
       setStatus('error');
       setError({
         kind: 'other',
@@ -957,6 +1013,8 @@ export function useAiAgent(params: UseAiAgentParams) {
       });
       return;
     }
+
+    if (projectPathRef.current !== operationProjectPath || activeSessionIdRef.current !== operationSessionId) return;
 
     if (result.outcome === 'conflict') {
       setStatus('conflict');
@@ -989,7 +1047,7 @@ export function useAiAgent(params: UseAiAgentParams) {
       return;
     }
 
-    if (currentSceneEdit) {
+    if (currentSceneEdit && currentSceneRevisionRef.current === sceneRevision) {
       pushHistory(options.historyNodes ?? currentSceneEdit.beforeNodes);
       setNodes(currentSceneEdit.afterNodes);
       setScriptSource(currentSceneEdit.afterContent);
@@ -1007,6 +1065,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     setPendingChangeSet({ ...set, status: 'accepted' });
     setStatus('accepted');
   }, [
+    activeId,
     currentSceneName,
     sceneHeaders,
     onScenesChanged,
@@ -1022,13 +1081,28 @@ export function useAiAgent(params: UseAiAgentParams) {
     scriptSource,
   ]);
 
+  const commitChangeSet = useCallback(async (
+    set: PendingChangeSet,
+    options: { force: boolean; historyNodes?: WebGalNode[] },
+  ) => {
+    if (commitInFlightRef.current) return;
+    commitInFlightRef.current = true;
+    setCommitting(true);
+    try {
+      await persistChangeSet(set, options);
+    } finally {
+      commitInFlightRef.current = false;
+      setCommitting(false);
+    }
+  }, [persistChangeSet]);
+
   const acceptChange = useCallback(async () => {
     if (!pendingChangeSet || pendingChangeSet.status !== 'pending' || !projectPath) return;
-    await persistChangeSet(pendingChangeSet, { force: false });
-  }, [pendingChangeSet, persistChangeSet, projectPath]);
+    await commitChangeSet(pendingChangeSet, { force: false });
+  }, [commitChangeSet, pendingChangeSet, projectPath]);
 
   const revertChange = useCallback(() => {
-    if (!pendingChangeSet) return;
+    if (!pendingChangeSet || commitInFlightRef.current) return;
     // The preview never entered the live buffer (see finalizeChangeSet), so
     // rejecting only marks the set reverted — no buffer/disk restore needed.
     replaceAssistantMessage(pendingChangeSet.sourceMessageId, `已拒绝：${summarizeChangeSet(pendingChangeSet, sceneHeaders)}`);
@@ -1038,11 +1112,11 @@ export function useAiAgent(params: UseAiAgentParams) {
 
   const forceApplyChange = useCallback(async () => {
     if (!pendingChangeSet) return;
-    await persistChangeSet(pendingChangeSet, { force: true, historyNodes: nodes });
-  }, [nodes, pendingChangeSet, persistChangeSet]);
+    await commitChangeSet(pendingChangeSet, { force: true, historyNodes: nodes });
+  }, [commitChangeSet, nodes, pendingChangeSet]);
 
   const regenerateAfterConflict = useCallback(() => {
-    if (!pendingChangeSet) return;
+    if (!pendingChangeSet || commitInFlightRef.current) return;
     setPendingChangeSet({ ...pendingChangeSet, status: 'reverted' });
     setStatus('idle');
     setInput('请基于我当前最新的脚本内容，重新生成一个不覆盖我手动修改的方案。');
@@ -1052,34 +1126,49 @@ export function useAiAgent(params: UseAiAgentParams) {
     if (projectId) navigate(`/editor/${projectId}/assets`);
   }, [navigate, projectId]);
 
+  const useFallbackAssets = useCallback(() => {
+    setMissingIssues([]);
+    setError(null);
+    setStatus('idle');
+    void sendPrompt('请把缺失素材替换为素材库中已有的同类素材，然后重新生成修改方案。');
+  }, [sendPrompt]);
+
+  const retryWithExistingAssets = useCallback(() => {
+    setMissingIssues([]);
+    setError(null);
+    setStatus('idle');
+    setInput(lastRequest?.prompt ?? '');
+  }, [lastRequest]);
+
   // Reset transient UI state shared by all session-switching actions.
   const resetTransient = useCallback(() => {
     if (pendingChangeSet?.status === 'pending') revertChange();
     setInput('');
     setError(null);
+    setMissingIssues([]);
     setStatus('idle');
     setPendingChangeSet(null);
   }, [pendingChangeSet, revertChange]);
 
   const startNewSession = useCallback(() => {
-    if (busy) return;
+    if (busy || committing) return;
     resetTransient();
     newSession();
-  }, [busy, newSession, resetTransient]);
+  }, [busy, committing, newSession, resetTransient]);
 
   const selectSession = useCallback((id: string) => {
-    if (busy) return;
+    if (busy || committing) return;
     resetTransient();
     switchSession(id);
-  }, [busy, resetTransient, switchSession]);
+  }, [busy, committing, resetTransient, switchSession]);
 
   // Deletion confirmation and rename input are handled by in-app dialogs in the
   // UI layer (Tauri has no native prompt/confirm command). These just apply.
   const removeSession = useCallback((id: string) => {
-    if (busy) return;
+    if (busy || committing) return;
     if (id === activeId) resetTransient();
     deleteSession(id);
-  }, [activeId, busy, deleteSession, resetTransient]);
+  }, [activeId, busy, committing, deleteSession, resetTransient]);
 
   // --- Reference uploads ---------------------------------------------------
   // Import is per-file so one rejected file (unsupported type, too large,
@@ -1192,10 +1281,12 @@ export function useAiAgent(params: UseAiAgentParams) {
     input,
     setInput,
     busy,
+    committing,
     status,
     stepLabel,
     pendingChangeSet,
     error,
+    missingIssues,
     cooldown,
     hasAssetTruncation: hasAssetContextTruncation(assets),
     memory,
@@ -1222,7 +1313,9 @@ export function useAiAgent(params: UseAiAgentParams) {
     revertChange,
     forceApplyChange,
     regenerateAfterConflict,
+    useFallbackAssets,
     openAssets,
+    retryWithExistingAssets,
     retry,
     saveMemory,
     stop,

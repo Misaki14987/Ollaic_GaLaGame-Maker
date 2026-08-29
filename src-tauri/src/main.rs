@@ -5,6 +5,7 @@ mod ai;
 mod asset_queue;
 mod assets;
 mod characters;
+mod flow_edit_lock;
 mod json_store;
 mod matting;
 mod pipeline;

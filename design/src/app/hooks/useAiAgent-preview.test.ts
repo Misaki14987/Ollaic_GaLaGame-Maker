@@ -5,6 +5,7 @@ import { useAiAgent } from './useAiAgent';
 
 vi.mock('../lib/ai-ipc', () => ({
   aiChatTurn: vi.fn(),
+  aiChatCancel: vi.fn(async () => {}),
   appendAiAgentTrace: vi.fn(async () => {}),
   getAiProviderCapability: vi.fn(async () => ({
     chatTools: true,
@@ -62,7 +63,7 @@ vi.mock('../lib/webgal-ipc', () => ({
   sceneDisplayName: (f: string) => f,
 }));
 
-import { aiChatTurn } from '../lib/ai-ipc';
+import { aiChatCancel, aiChatTurn } from '../lib/ai-ipc';
 import { applyAiChangeSet } from '../lib/ai-change-set-ipc';
 import { getTool } from '../lib/ai-tools';
 import { createCharacter, updateCharacter } from '../lib/character-ipc';
@@ -160,6 +161,183 @@ describe('AI pending preview isolation', () => {
     expect(params.setNodes).toHaveBeenCalled();
     expect(params.setScriptSource).toHaveBeenCalled();
   });
+
+  it('does not write a committed edit into a different scene after the user switches scenes', async () => {
+    let finishCommit!: (value: { outcome: 'applied' }) => void;
+    vi.mocked(applyAiChangeSet).mockImplementationOnce(() => new Promise((resolve) => {
+      finishCommit = resolve;
+    }));
+    vi.mocked(aiChatTurn)
+      .mockResolvedValueOnce({
+        text: '',
+        toolCalls: [
+          { id: 'c1', name: 'edit_scene', arguments: {} },
+          { id: 'c2', name: 'create_scene', arguments: {} },
+        ],
+      } as unknown as AiTurnResult)
+      .mockResolvedValue({ text: 'done', toolCalls: [] } as unknown as AiTurnResult);
+    vi.mocked(getTool).mockImplementation((name) => ({
+      name,
+      kind: 'write',
+      schema: {},
+      run: async () => name === 'create_scene'
+        ? { tool: 'create_scene', name: 'chapter_03' }
+        : {
+          tool: 'edit_scene',
+          file: 'start.txt',
+          patches: [{ type: 'insert', file: 'start.txt', afterLine: 'end', text: 'B:world;' }],
+        },
+    }) as never);
+    const onScenesChanged = vi.fn();
+    const initialParams = makeParams({ onScenesChanged });
+    let params = initialParams;
+    const { result, rerender } = renderHook(() => useAiAgent(params), { wrapper: MemoryRouter });
+
+    await act(async () => { await result.current.sendPrompt('请修改场景'); });
+    await waitFor(() => { expect(result.current.pendingChangeSet).toBeTruthy(); });
+
+    let applyPromise!: Promise<void>;
+    act(() => { applyPromise = result.current.acceptChange(); });
+    const nextParams = makeParams({
+      currentSceneName: 'chapter_02.txt',
+      scriptSource: 'chapter two',
+      nodes: [{ id: 'chapter-two', type: 'comment', content: 'chapter two', flags: [], position: { x: 0, y: 0 }, connections: [] }],
+      onScenesChanged,
+    });
+    params = nextParams;
+    rerender();
+
+    await act(async () => {
+      finishCommit({ outcome: 'applied' });
+      await applyPromise;
+    });
+
+    expect(initialParams.setNodes).not.toHaveBeenCalled();
+    expect(initialParams.setScriptSource).not.toHaveBeenCalled();
+    expect(initialParams.pushHistory).not.toHaveBeenCalled();
+    expect(initialParams.setDirty).not.toHaveBeenCalled();
+    expect(initialParams.setSaveStatus).not.toHaveBeenCalled();
+    expect(nextParams.setNodes).not.toHaveBeenCalled();
+    expect(onScenesChanged).toHaveBeenCalledTimes(1);
+    expect(result.current.status).toBe('accepted');
+    expect(result.current.pendingChangeSet?.status).toBe('accepted');
+  });
+
+  it('does not publish an old project commit into the newly opened project', async () => {
+    let finishCommit!: (value: { outcome: 'applied' }) => void;
+    vi.mocked(applyAiChangeSet).mockImplementationOnce(() => new Promise((resolve) => {
+      finishCommit = resolve;
+    }));
+    const oldProject = makeParams({ projectId: 'old', projectPath: '/tmp/old-project' });
+    let params = oldProject;
+    const { result, rerender } = renderHook(() => useAiAgent(params), { wrapper: MemoryRouter });
+
+    await act(async () => { await result.current.sendPrompt('请修改场景'); });
+    await waitFor(() => { expect(result.current.pendingChangeSet).toBeTruthy(); });
+
+    let applyPromise!: Promise<void>;
+    act(() => { applyPromise = result.current.acceptChange(); });
+    const newProject = makeParams({
+      projectId: 'new',
+      projectPath: '/tmp/new-project',
+      currentSceneName: 'start.txt',
+      scriptSource: 'new project content',
+    });
+    params = newProject;
+    rerender();
+
+    await act(async () => {
+      finishCommit({ outcome: 'applied' });
+      await applyPromise;
+    });
+
+    expect(applyAiChangeSet).toHaveBeenCalledWith(
+      '/tmp/old-project',
+      expect.anything(),
+      expect.anything(),
+      false,
+    );
+    expect(oldProject.setNodes).not.toHaveBeenCalled();
+    expect(oldProject.setScriptSource).not.toHaveBeenCalled();
+    expect(newProject.setNodes).not.toHaveBeenCalled();
+    expect(newProject.setScriptSource).not.toHaveBeenCalled();
+  });
+
+  it('drops a pending preview when the user opens another project', async () => {
+    let params = makeParams({ projectId: 'old', projectPath: '/tmp/old-project' });
+    const { result, rerender } = renderHook(() => useAiAgent(params), { wrapper: MemoryRouter });
+    await act(async () => { await result.current.sendPrompt('请修改场景'); });
+    await waitFor(() => { expect(result.current.pendingChangeSet).toBeTruthy(); });
+
+    params = makeParams({ projectId: 'new', projectPath: '/tmp/new-project' });
+    rerender();
+
+    expect(result.current.pendingChangeSet).toBeNull();
+    expect(result.current.status).toBe('idle');
+    await act(async () => { await result.current.acceptChange(); });
+    expect(applyAiChangeSet).not.toHaveBeenCalled();
+  });
+
+  it('cancels and ignores generation that belongs to the previous project', async () => {
+    let finishTurn!: (value: AiTurnResult) => void;
+    vi.mocked(aiChatTurn).mockImplementationOnce(() => new Promise((resolve) => {
+      finishTurn = resolve;
+    }));
+    let params = makeParams({ projectId: 'old', projectPath: '/tmp/old-project' });
+    const { result, rerender } = renderHook(() => useAiAgent(params), { wrapper: MemoryRouter });
+
+    let promptPromise!: Promise<void>;
+    act(() => { promptPromise = result.current.sendPrompt('请修改场景'); });
+    await waitFor(() => { expect(result.current.busy).toBe(true); });
+
+    params = makeParams({ projectId: 'new', projectPath: '/tmp/new-project' });
+    rerender();
+    expect(result.current.busy).toBe(false);
+    expect(result.current.pendingChangeSet).toBeNull();
+    expect(aiChatCancel).toHaveBeenCalledWith(expect.stringMatching(/^run-/));
+
+    await act(async () => {
+      finishTurn({ text: 'old project response', toolCalls: [] } as unknown as AiTurnResult);
+      await promptPromise;
+    });
+    expect(result.current.status).toBe('idle');
+    expect(result.current.pendingChangeSet).toBeNull();
+  });
+
+  it('serializes acceptance attempts and allows retry after a commit error', async () => {
+    const params = makeParams();
+    const { result } = renderHook(() => useAiAgent(params), { wrapper: MemoryRouter });
+    await act(async () => { await result.current.sendPrompt('请修改场景'); });
+    await waitFor(() => { expect(result.current.pendingChangeSet).toBeTruthy(); });
+
+    let failCommit!: (reason: unknown) => void;
+    vi.mocked(applyAiChangeSet).mockImplementationOnce(() => new Promise((_resolve, reject) => {
+      failCommit = reject;
+    }));
+
+    let firstAttempt!: Promise<void>;
+    let duplicateAttempt!: Promise<void>;
+    act(() => {
+      firstAttempt = result.current.acceptChange();
+      duplicateAttempt = result.current.acceptChange();
+    });
+
+    expect(result.current.committing).toBe(true);
+    expect(applyAiChangeSet).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      failCommit(new Error('connection lost'));
+      await Promise.all([firstAttempt, duplicateAttempt]);
+    });
+
+    expect(result.current.committing).toBe(false);
+    expect(result.current.pendingChangeSet?.status).toBe('pending');
+
+    vi.mocked(applyAiChangeSet).mockResolvedValueOnce({ outcome: 'applied' });
+    await act(async () => { await result.current.acceptChange(); });
+    expect(applyAiChangeSet).toHaveBeenCalledTimes(2);
+    expect(result.current.status).toBe('accepted');
+  });
 });
 
 describe('backend change-set recovery', () => {
@@ -229,6 +407,71 @@ describe('backend change-set recovery', () => {
     expect(result.current.error?.message).toContain('项目可能只写入了一部分');
     expect(result.current.error?.message).toContain('rollback-123');
     expect(result.current.error?.message).toContain('请先在快照管理中恢复它');
+  });
+});
+
+describe('missing asset recovery', () => {
+  it('preserves missing asset details instead of publishing a partial change set', async () => {
+    vi.mocked(aiChatTurn)
+      .mockResolvedValueOnce({
+        text: '',
+        toolCalls: [{ id: 'c1', name: 'edit_scene', arguments: {} }],
+      } as unknown as AiTurnResult)
+      .mockResolvedValue({ text: 'done', toolCalls: [] } as unknown as AiTurnResult);
+    vi.mocked(getTool).mockReturnValue({
+      name: 'edit_scene',
+      kind: 'write',
+      schema: {},
+      run: async () => ({
+        tool: 'edit_scene',
+        file: 'start.txt',
+        patches: [{ type: 'insert', file: 'start.txt', afterLine: 'end', text: 'changeBg:missing-room.png -next;' }],
+      }),
+    } as never);
+
+    const params = makeParams();
+    const { result } = renderHook(() => useAiAgent(params), { wrapper: MemoryRouter });
+    await act(async () => { await result.current.sendPrompt('换一个背景'); });
+
+    expect(result.current.status).toBe('missing_assets');
+    expect(result.current.missingIssues).toEqual([{
+      command: 'changeBg',
+      file: 'missing-room.png',
+      expectedCategory: 'background',
+    }]);
+    expect(result.current.pendingChangeSet).toBeNull();
+  });
+
+  it('does not hide a missing asset after an unrelated write succeeds in the same scene', async () => {
+    vi.mocked(aiChatTurn)
+      .mockResolvedValueOnce({
+        text: '',
+        toolCalls: [
+          { id: 'c1', name: 'edit_scene', arguments: {} },
+          { id: 'c2', name: 'set_scene_header', arguments: {} },
+        ],
+      } as unknown as AiTurnResult)
+      .mockResolvedValue({ text: 'done', toolCalls: [] } as unknown as AiTurnResult);
+    vi.mocked(getTool).mockImplementation((name) => ({
+      name,
+      kind: 'write',
+      schema: {},
+      run: async () => name === 'edit_scene'
+        ? {
+          tool: 'edit_scene',
+          file: 'start.txt',
+          patches: [{ type: 'insert', file: 'start.txt', afterLine: 'end', text: 'changeBg:missing-room.png -next;' }],
+        }
+        : { tool: 'set_scene_header', file: 'start.txt', chapter: '第二章' },
+    }) as never);
+
+    const params = makeParams();
+    const { result } = renderHook(() => useAiAgent(params), { wrapper: MemoryRouter });
+    await act(async () => { await result.current.sendPrompt('换背景并修改章节'); });
+
+    expect(result.current.status).toBe('missing_assets');
+    expect(result.current.missingIssues).toHaveLength(1);
+    expect(result.current.pendingChangeSet).toBeNull();
   });
 });
 

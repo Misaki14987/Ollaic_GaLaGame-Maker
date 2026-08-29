@@ -34,13 +34,18 @@ pub enum RunStatus {
     Failed,
     Cancelled,
     Timeout,
+    PersistenceFailed,
 }
 
 impl RunStatus {
     pub fn is_terminal(self) -> bool {
         matches!(
             self,
-            RunStatus::Completed | RunStatus::Failed | RunStatus::Cancelled | RunStatus::Timeout
+            RunStatus::Completed
+                | RunStatus::Failed
+                | RunStatus::Cancelled
+                | RunStatus::Timeout
+                | RunStatus::PersistenceFailed
         )
     }
 }

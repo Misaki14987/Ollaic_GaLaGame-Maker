@@ -20,6 +20,21 @@ pub(crate) enum Action {
     Idle,
 }
 
+pub(crate) fn mark_run_persistence_failed(
+    state: &mut crate::pipeline::state::RunState,
+    operation: &str,
+    error: impl std::fmt::Display,
+) -> PipelineEvent {
+    state.status = RunStatus::PersistenceFailed;
+    let run_id = state.run_id.clone();
+    PipelineEvent::RunPersistenceFailed {
+        run_id: run_id.clone(),
+        error: format!(
+            "无法保存运行 '{run_id}' 的{operation}：{error}。请重新打开项目，从上次已保存的进度恢复。"
+        ),
+    }
+}
+
 pub(crate) async fn next_action(
     project_path: &Path,
     handle: &Arc<RunHandle>,
@@ -66,22 +81,9 @@ pub(crate) async fn next_action(
             queue_rollback_snapshot_cleanup(&mut state, removed_snapshots);
             state.updated_at = clock.now_ms();
             if let Err(err) = store::save_run_state(project_path, &state) {
-                let error = format!("failed to persist step transition: {}", err);
-                if let Some(step) = state.find_step_mut(&id) {
-                    let finished_at = clock.now_ms();
-                    step.status = StepStatus::Failed;
-                    step.error = Some(error.clone());
-                    step.finished_at = Some(finished_at);
-                    if let Some(attempt) = step.history.last_mut() {
-                        attempt.error = Some(error.clone());
-                        attempt.finished_at = Some(finished_at);
-                        attempt.duration_ms = Some(finished_at.saturating_sub(attempt.started_at));
-                    }
-                }
-                state.status = RunStatus::Failed;
-                let run_id = state.run_id.clone();
+                let event = mark_run_persistence_failed(&mut state, "步骤启动状态", err);
                 drop(state);
-                sink.emit(PipelineEvent::RunFailed { run_id, error });
+                sink.emit(event);
                 return Action::Idle;
             }
             if let Err(error) = cleanup_rollback_snapshots(project_path, &mut state) {
@@ -107,13 +109,9 @@ pub(crate) async fn next_action(
                 state.updated_at = clock.now_ms();
                 let run_id = state.run_id.clone();
                 if let Err(err) = store::save_run_state(project_path, &state) {
-                    state.status = RunStatus::Failed;
-                    let run_id = state.run_id.clone();
+                    let event = mark_run_persistence_failed(&mut state, "完成终态", err);
                     drop(state);
-                    sink.emit(PipelineEvent::RunFailed {
-                        run_id,
-                        error: format!("failed to persist run completion: {}", err),
-                    });
+                    sink.emit(event);
                     return Action::Idle;
                 }
                 drop(state);
@@ -127,7 +125,12 @@ pub(crate) async fn next_action(
                 state.status = RunStatus::Failed;
                 state.updated_at = clock.now_ms();
                 let run_id = state.run_id.clone();
-                let _ = store::save_run_state(project_path, &state);
+                if let Err(save_error) = store::save_run_state(project_path, &state) {
+                    let event = mark_run_persistence_failed(&mut state, "依赖阻塞终态", save_error);
+                    drop(state);
+                    sink.emit(event);
+                    return Action::Idle;
+                }
                 drop(state);
                 sink.emit(PipelineEvent::RunFailed {
                     run_id,

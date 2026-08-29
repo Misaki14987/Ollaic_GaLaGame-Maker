@@ -5,7 +5,7 @@
 
 use serde::Serialize;
 
-use super::config::{AiConfig, ProviderCapabilityDeclaration};
+use super::config::{AiConfig, AiProviderConfig, ProviderCapabilityDeclaration};
 
 const DEFAULT_CHAT_DEADLINE_MS: u64 = 120_000;
 const DEFAULT_FLOW_DEADLINE_MS: u64 = 180_000;
@@ -40,6 +40,58 @@ pub enum RequiredCapability {
     /// them out. Closes the SSRF pivot where an unknown provider would
     /// otherwise land us in arbitrary network fetches.
     MediaUrlOutput,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaCapability {
+    ImageGeneration,
+    TtsGeneration,
+    MusicGeneration,
+}
+
+pub fn require_media_capability(
+    config: &AiProviderConfig,
+    required: MediaCapability,
+) -> Result<(), String> {
+    let provider = config.provider.trim().to_ascii_lowercase();
+    let supported = match required {
+        MediaCapability::ImageGeneration => matches!(
+            provider.as_str(),
+            "openai"
+                | "custom"
+                | "zhipu"
+                | "siliconflow"
+                | "midjourney"
+                | "volcengine"
+                | "aliyun"
+                | "gemini"
+                | "sd-webui"
+        ),
+        MediaCapability::TtsGeneration => matches!(
+            provider.as_str(),
+            "openai" | "custom" | "elevenlabs" | "aliyun" | "volcengine"
+        ),
+        MediaCapability::MusicGeneration => {
+            matches!(provider.as_str(), "openai" | "custom" | "siliconflow")
+        }
+    };
+    let label = match required {
+        MediaCapability::ImageGeneration => "图片生成",
+        MediaCapability::TtsGeneration => "语音生成",
+        MediaCapability::MusicGeneration => "音乐生成",
+    };
+    if !supported {
+        return Err(format!(
+            "当前媒体供应商 '{}' 未声明支持{label}；请更换供应商、允许本地素材降级，或禁用素材步骤",
+            config.provider.trim()
+        ));
+    }
+    if provider == "custom" && config.base_url.trim().is_empty() {
+        return Err(format!(
+            "自定义{label}端点未填写 Base URL；请填写真实接口地址或允许本地素材降级"
+        ));
+    }
+    Ok(())
 }
 
 impl ProviderCapability {
@@ -251,6 +303,58 @@ mod tests {
         // through.
         let openai = capability_for_config(&config("openai", "gpt-image-1")).unwrap();
         assert!(openai.require(RequiredCapability::MediaUrlOutput).is_ok());
+    }
+
+    #[test]
+    fn media_provider_mapping_rejects_unsupported_capabilities_before_run() {
+        let image = AiProviderConfig {
+            provider: "anthropic".to_string(),
+            model: "claude".to_string(),
+            api_key: "key".to_string(),
+            base_url: String::new(),
+        };
+        assert!(
+            require_media_capability(&image, MediaCapability::ImageGeneration)
+                .unwrap_err()
+                .contains("未声明支持图片生成")
+        );
+
+        let tts = AiProviderConfig {
+            provider: "elevenlabs".to_string(),
+            model: "voice".to_string(),
+            api_key: "key".to_string(),
+            base_url: String::new(),
+        };
+        assert!(require_media_capability(&tts, MediaCapability::TtsGeneration).is_ok());
+        assert!(require_media_capability(&tts, MediaCapability::MusicGeneration).is_err());
+    }
+
+    #[test]
+    fn custom_media_capabilities_require_an_explicit_endpoint() {
+        let mut custom = AiProviderConfig {
+            provider: "custom".to_string(),
+            model: "media-model".to_string(),
+            api_key: "key".to_string(),
+            base_url: String::new(),
+        };
+
+        for required in [
+            MediaCapability::ImageGeneration,
+            MediaCapability::TtsGeneration,
+            MediaCapability::MusicGeneration,
+        ] {
+            let error = require_media_capability(&custom, required).unwrap_err();
+            assert!(error.contains("Base URL"), "{required:?}: {error}");
+        }
+
+        custom.base_url = "https://media.example.test/v1".to_string();
+        for required in [
+            MediaCapability::ImageGeneration,
+            MediaCapability::TtsGeneration,
+            MediaCapability::MusicGeneration,
+        ] {
+            assert!(require_media_capability(&custom, required).is_ok());
+        }
     }
 
     #[test]

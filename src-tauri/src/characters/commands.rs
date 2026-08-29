@@ -92,6 +92,10 @@ pub fn get_character(project_path: String, id: String) -> Result<Character, Stri
 pub fn create_character(project_path: String, character: Character) -> Result<Character, String> {
     let root = PathBuf::from(&project_path);
     crate::project_lock::with_project_lock(&root, || {
+        crate::flow_edit_lock::ensure_editable(
+            &root,
+            crate::flow_edit_lock::FlowResource::Characters,
+        )?;
         create_character_locked(&project_path, character)
     })
 }
@@ -114,6 +118,10 @@ pub(crate) fn create_character_locked(
 pub fn update_character(project_path: String, character: Character) -> Result<Character, String> {
     let root = PathBuf::from(&project_path);
     crate::project_lock::with_project_lock(&root, || {
+        crate::flow_edit_lock::ensure_editable(
+            &root,
+            crate::flow_edit_lock::FlowResource::Characters,
+        )?;
         update_character_locked(&project_path, character)
     })
 }
@@ -137,7 +145,13 @@ pub(crate) fn update_character_locked(
 #[tauri::command]
 pub fn delete_character(project_path: String, id: String) -> Result<(), String> {
     let root = PathBuf::from(&project_path);
-    crate::project_lock::with_project_lock(&root, || delete_character_locked(&project_path, &id))
+    crate::project_lock::with_project_lock(&root, || {
+        crate::flow_edit_lock::ensure_editable(
+            &root,
+            crate::flow_edit_lock::FlowResource::Characters,
+        )?;
+        delete_character_locked(&project_path, &id)
+    })
 }
 
 pub(crate) fn delete_character_locked(project_path: &str, id: &str) -> Result<(), String> {
@@ -167,6 +181,10 @@ pub fn list_character_names(project_path: String) -> Result<Vec<CharacterRef>, S
 pub fn save_characters(project_path: String, characters: Vec<Character>) -> Result<(), String> {
     let root = PathBuf::from(&project_path);
     crate::project_lock::with_project_lock(&root, || {
+        crate::flow_edit_lock::ensure_editable(
+            &root,
+            crate::flow_edit_lock::FlowResource::Characters,
+        )?;
         save_characters_locked(&project_path, characters)
     })
 }
@@ -232,5 +250,31 @@ mod tests {
         assert_eq!(names.len(), 1);
         assert_eq!(names[0].name, "Current");
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn active_flow_character_scope_rejects_user_mutation_until_released() {
+        let tmp = std::env::temp_dir().join("ollaic_character_flow_lock_test");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join("game/config")).unwrap();
+        let project = tmp.to_string_lossy().to_string();
+        save_characters(project.clone(), vec![character("hero", "Old Hero")]).unwrap();
+
+        let guard = crate::flow_edit_lock::FlowEditGuard::acquire(
+            &tmp,
+            &[crate::flow_edit_lock::FlowResource::Characters],
+        )
+        .unwrap();
+        let error = update_character(project.clone(), character("hero", "New Hero")).unwrap_err();
+        assert!(error.contains("Agent Flow 正在使用角色资料"));
+        assert_eq!(
+            list_characters(project.clone()).unwrap()[0].name,
+            "Old Hero"
+        );
+
+        drop(guard);
+        update_character(project.clone(), character("hero", "New Hero")).unwrap();
+        assert_eq!(list_characters(project).unwrap()[0].name, "New Hero");
+        let _ = std::fs::remove_dir_all(tmp);
     }
 }

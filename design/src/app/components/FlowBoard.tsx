@@ -51,6 +51,7 @@ const RUN_STATUS: Record<RunStatus, string> = {
   failed: '失败',
   cancelled: '已停止',
   timeout: '已超时',
+  persistenceFailed: '状态保存失败',
 };
 
 export interface FlowBoardProps {

@@ -59,6 +59,7 @@ pub(crate) fn cleanup_rollback_snapshots(
 #[derive(Debug)]
 pub enum PipelineError {
     RecipeInvalid(crate::pipeline::dsl::RecipeError),
+    CapabilityGap(String),
     Store(crate::pipeline::store::RunStoreError),
     Plan(crate::story_plan::PlanError),
     PlanMissing,
@@ -74,6 +75,7 @@ impl std::fmt::Display for PipelineError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             PipelineError::RecipeInvalid(e) => write!(f, "invalid recipe: {}", e),
+            PipelineError::CapabilityGap(e) => write!(f, "Flow capability gap: {}", e),
             PipelineError::Store(e) => write!(f, "run store error: {}", e),
             PipelineError::Plan(e) => write!(f, "story plan error: {}", e),
             PipelineError::PlanMissing => write!(f, "StoryPlan is missing"),
