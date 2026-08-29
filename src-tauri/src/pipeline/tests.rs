@@ -14,9 +14,11 @@ use tokio::time::{sleep, timeout, Duration};
 use crate::agents::{Agent, AgentContext, AgentError, AgentOutput, AgentRegistry};
 use crate::pipeline::dsl::{default_recipe, FlowRecipe, RecipeError, StepDef, StepKind};
 use crate::pipeline::events::{PipelineEvent, RecordingSink};
-use crate::pipeline::scheduler::{cleanup_rollback_snapshots, project_has_story_content, Pipeline};
+use crate::pipeline::scheduler::{
+    cleanup_rollback_snapshots, project_has_story_content, HangingAssetGeneratorFactory, Pipeline,
+};
 use crate::pipeline::state::{Clock, RunStatus, StepRunHistory, StepStatus, SystemClock};
-use crate::story_plan::types::ChapterPlan;
+use crate::story_plan::types::{AssetTaskPlan, ChapterPlan};
 
 // ---------- test helpers ----------
 
@@ -179,6 +181,23 @@ fn fresh_project(name: &str) -> std::path::PathBuf {
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).unwrap();
     tmp
+}
+
+fn seed_background_asset(project: &std::path::Path) {
+    let mut plan = crate::story_plan::load_plan(project)
+        .unwrap()
+        .expect("run creation writes a story plan");
+    plan.asset_plan = vec![AssetTaskPlan {
+        id: "test_background".to_string(),
+        kind: "background".to_string(),
+        target_stem: "test_background".to_string(),
+        prompt: "test background".to_string(),
+        scene_ref: None,
+        character_ref: None,
+        emotion: None,
+        status: "pending".to_string(),
+    }];
+    crate::story_plan::save_plan(project, &plan).unwrap();
 }
 
 /// Human-readable event sequence: run events by name, step events by
@@ -797,7 +816,9 @@ async fn asset_queue_step_obeys_the_flow_step_timeout() {
     let started = Arc::new(Semaphore::new(0));
     let pipeline = Arc::new(
         Pipeline::with_default_agents()
-            .with_hanging_asset_queue_for_test(started.clone())
+            .with_asset_generators_for_test(Arc::new(HangingAssetGeneratorFactory::new(
+                started.clone(),
+            )))
             .with_step_timeout(Duration::from_secs(30)),
     );
     let recipe =
@@ -812,6 +833,7 @@ async fn asset_queue_step_obeys_the_flow_step_timeout() {
             sink.as_ref(),
         )
         .unwrap();
+    seed_background_asset(&project);
     let task = {
         let pipeline = pipeline.clone();
         let project = project.clone();
@@ -884,7 +906,9 @@ async fn asset_queue_uses_its_own_deadline_snapshot() {
     let clock = StepClock::new();
     let started = Arc::new(Semaphore::new(0));
     let pipeline = Arc::new(
-        Pipeline::with_default_agents().with_hanging_asset_queue_for_test(started.clone()),
+        Pipeline::with_default_agents().with_asset_generators_for_test(Arc::new(
+            HangingAssetGeneratorFactory::new(started.clone()),
+        )),
     );
     let recipe =
         FlowRecipe::new().step(StepDef::new("assetQueue", StepKind::Asset).agent("assetQueue"));
@@ -903,6 +927,7 @@ async fn asset_queue_uses_its_own_deadline_snapshot() {
             sink.as_ref(),
         )
         .unwrap();
+    seed_background_asset(&project);
     let task = {
         let pipeline = pipeline.clone();
         let project = project.clone();

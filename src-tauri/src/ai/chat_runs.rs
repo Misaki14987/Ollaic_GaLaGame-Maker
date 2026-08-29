@@ -3,8 +3,13 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::sync::{Mutex, Notify};
+use tokio::time::Instant;
+
+const CANCELLED_MARKER_TTL: Duration = Duration::from_secs(5 * 60);
+const MAX_CANCELLED_MARKERS: usize = 1024;
 
 #[derive(Clone)]
 struct ChatRunHandle {
@@ -13,9 +18,18 @@ struct ChatRunHandle {
     notify: Arc<Notify>,
 }
 
+#[derive(Clone)]
+enum ChatRunState {
+    Live(ChatRunHandle),
+    Cancelled {
+        project_path: PathBuf,
+        inserted_at: Instant,
+    },
+}
+
 #[derive(Default)]
 pub struct ChatRunRegistry {
-    runs: Mutex<HashMap<String, ChatRunHandle>>,
+    states: Mutex<HashMap<String, ChatRunState>>,
 }
 
 impl ChatRunRegistry {
@@ -35,19 +49,33 @@ impl ChatRunRegistry {
             notify: Arc::new(Notify::new()),
         };
         {
-            let mut runs = self.runs.lock().await;
-            if let Some(existing) = runs.get(run_id) {
-                return if existing.project_path == project_path {
-                    Err(format!("chat run already active: {run_id}"))
-                } else {
-                    Err(format!(
-                        "chat run {run_id} belongs to project {}, not {}",
-                        existing.project_path.display(),
-                        project_path.display()
-                    ))
-                };
+            let mut states = self.states.lock().await;
+            Self::prune_cancelled_markers(&mut states, Instant::now());
+            match states.get(run_id) {
+                Some(ChatRunState::Cancelled {
+                    project_path: owner,
+                    ..
+                }) if owner == project_path => {
+                    states.remove(run_id);
+                    return Err(format!("chat run cancelled before registration: {run_id}"));
+                }
+                Some(ChatRunState::Cancelled {
+                    project_path: owner,
+                    ..
+                })
+                | Some(ChatRunState::Live(ChatRunHandle {
+                    project_path: owner,
+                    ..
+                })) if owner != project_path => {
+                    return Err(Self::project_mismatch(run_id, owner, project_path));
+                }
+                Some(ChatRunState::Live(_)) => {
+                    return Err(format!("chat run already active: {run_id}"));
+                }
+                None => {}
+                Some(ChatRunState::Cancelled { .. }) => unreachable!("owner match handled above"),
             }
-            runs.insert(run_id.to_string(), handle.clone());
+            states.insert(run_id.to_string(), ChatRunState::Live(handle.clone()));
         }
 
         let result = tokio::select! {
@@ -55,34 +83,98 @@ impl ChatRunRegistry {
             _ = handle.notify.notified() => Err("chat run cancelled".to_string()),
             result = future => result,
         };
-        let mut runs = self.runs.lock().await;
-        if runs
-            .get(run_id)
-            .is_some_and(|current| Arc::ptr_eq(&current.cancelled, &handle.cancelled))
+        let mut states = self.states.lock().await;
+        if states.get(run_id).is_some_and(|current| {
+            matches!(current, ChatRunState::Live(current) if Arc::ptr_eq(&current.cancelled, &handle.cancelled))
+        })
         {
-            runs.remove(run_id);
+            states.remove(run_id);
         }
         result
     }
 
     pub async fn cancel(&self, project_path: &Path, run_id: &str) -> Result<bool, String> {
-        let handle = self.runs.lock().await.get(run_id).cloned();
-        let Some(handle) = handle else {
-            return Ok(false);
-        };
-        if handle.project_path != project_path {
-            return Err(format!(
-                "chat run {run_id} belongs to project {}, not {}",
-                handle.project_path.display(),
-                project_path.display()
-            ));
+        let mut states = self.states.lock().await;
+        let now = Instant::now();
+        Self::prune_cancelled_markers(&mut states, now);
+        match states.get(run_id).cloned() {
+            Some(ChatRunState::Live(handle)) => {
+                if handle.project_path != project_path {
+                    return Err(Self::project_mismatch(
+                        run_id,
+                        &handle.project_path,
+                        project_path,
+                    ));
+                }
+                if !handle.cancelled.swap(true, Ordering::SeqCst) {
+                    handle.notify.notify_one();
+                }
+                Ok(true)
+            }
+            Some(ChatRunState::Cancelled {
+                project_path: owner,
+                ..
+            }) => {
+                if owner != project_path {
+                    Err(Self::project_mismatch(run_id, &owner, project_path))
+                } else {
+                    Ok(false)
+                }
+            }
+            None => {
+                states.insert(
+                    run_id.to_string(),
+                    ChatRunState::Cancelled {
+                        project_path: project_path.to_path_buf(),
+                        inserted_at: now,
+                    },
+                );
+                Self::enforce_cancelled_marker_limit(&mut states);
+                Ok(false)
+            }
         }
-        if !handle.cancelled.swap(true, Ordering::SeqCst) {
-            // notify_one stores a permit when cancellation wins the tiny race
-            // between registry insertion and the select branch being polled.
-            handle.notify.notify_one();
+    }
+
+    fn project_mismatch(run_id: &str, owner: &Path, caller: &Path) -> String {
+        format!(
+            "chat run {run_id} belongs to project {}, not {}",
+            owner.display(),
+            caller.display()
+        )
+    }
+
+    fn prune_cancelled_markers(states: &mut HashMap<String, ChatRunState>, now: Instant) {
+        states.retain(|_, state| match state {
+            ChatRunState::Live(_) => true,
+            ChatRunState::Cancelled { inserted_at, .. } => {
+                now.saturating_duration_since(*inserted_at) < CANCELLED_MARKER_TTL
+            }
+        });
+    }
+
+    fn enforce_cancelled_marker_limit(states: &mut HashMap<String, ChatRunState>) {
+        while states
+            .values()
+            .filter(|state| matches!(state, ChatRunState::Cancelled { .. }))
+            .count()
+            > MAX_CANCELLED_MARKERS
+        {
+            let oldest = states
+                .iter()
+                .filter_map(|(run_id, state)| match state {
+                    ChatRunState::Cancelled { inserted_at, .. } => {
+                        Some((run_id.clone(), *inserted_at))
+                    }
+                    ChatRunState::Live(_) => None,
+                })
+                .min_by_key(|(_, inserted_at)| *inserted_at)
+                .map(|(run_id, _)| run_id);
+            if let Some(run_id) = oldest {
+                states.remove(&run_id);
+            } else {
+                break;
+            }
         }
-        Ok(true)
     }
 }
 
@@ -188,5 +280,90 @@ mod tests {
             .await
             .unwrap());
         task.await.unwrap().unwrap_err();
+    }
+
+    #[tokio::test]
+    async fn cancel_before_register_rejects_the_late_provider_for_the_same_project() {
+        let registry = ChatRunRegistry::new();
+        assert!(!registry
+            .cancel(Path::new("/project/a"), "late")
+            .await
+            .unwrap());
+        let error = registry
+            .run_cancellable(Path::new("/project/a"), "late", async {
+                Ok::<_, String>(())
+            })
+            .await
+            .unwrap_err();
+        assert!(error.contains("cancelled before registration"));
+    }
+
+    #[tokio::test]
+    async fn another_project_cannot_consume_a_cancel_before_register_marker() {
+        let registry = ChatRunRegistry::new();
+        assert!(!registry
+            .cancel(Path::new("/project/a"), "late")
+            .await
+            .unwrap());
+        assert!(registry
+            .run_cancellable(Path::new("/project/b"), "late", async {
+                Ok::<_, String>(())
+            })
+            .await
+            .unwrap_err()
+            .contains("belongs to project"));
+        assert!(registry
+            .run_cancellable(Path::new("/project/a"), "late", async {
+                Ok::<_, String>(())
+            })
+            .await
+            .unwrap_err()
+            .contains("cancelled before registration"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cancel_before_register_markers_expire_and_are_bounded() {
+        let registry = ChatRunRegistry::new();
+        for index in 0..=MAX_CANCELLED_MARKERS {
+            assert!(!registry
+                .cancel(Path::new("/project/a"), &format!("late-{index}"))
+                .await
+                .unwrap());
+            tokio::time::advance(Duration::from_millis(1)).await;
+        }
+        assert_eq!(
+            registry
+                .states
+                .lock()
+                .await
+                .values()
+                .filter(|state| matches!(state, ChatRunState::Cancelled { .. }))
+                .count(),
+            MAX_CANCELLED_MARKERS
+        );
+        assert!(registry
+            .run_cancellable(
+                Path::new("/project/a"),
+                &format!("late-{MAX_CANCELLED_MARKERS}"),
+                async { Ok::<_, String>(()) },
+            )
+            .await
+            .unwrap_err()
+            .contains("cancelled before registration"));
+
+        assert!(!registry
+            .cancel(Path::new("/project/a"), "expires")
+            .await
+            .unwrap());
+        tokio::time::advance(CANCELLED_MARKER_TTL).await;
+        assert_eq!(
+            registry
+                .run_cancellable(Path::new("/project/a"), "expires", async {
+                    Ok::<_, String>(7)
+                })
+                .await
+                .unwrap(),
+            7
+        );
     }
 }

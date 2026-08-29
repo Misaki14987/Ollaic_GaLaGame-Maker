@@ -103,10 +103,9 @@ enum Action {
 /// The testable orchestrator core.
 pub struct Pipeline {
     agents: AgentRegistry,
-    figure_matting_model: Result<std::path::PathBuf, String>,
+    asset_generators: Arc<dyn AssetGeneratorFactory>,
+    default_local_fallback: bool,
     step_timeout: Duration,
-    #[cfg(test)]
-    hanging_asset_queue_started: Option<Arc<tokio::sync::Semaphore>>,
 }
 
 const DEFAULT_PROVIDER_STEP_TIMEOUT: Duration = Duration::from_secs(180);
@@ -155,6 +154,32 @@ struct ConfiguredAssetGenerator {
     figure_matting_model: Result<std::path::PathBuf, String>,
 }
 
+pub(crate) trait AssetGeneratorFactory: Send + Sync {
+    fn create(
+        &self,
+        allow_local_fallback: bool,
+        cancelled: Arc<AtomicBool>,
+    ) -> Arc<dyn AssetGenerator>;
+}
+
+struct ConfiguredAssetGeneratorFactory {
+    figure_matting_model: Result<std::path::PathBuf, String>,
+}
+
+impl AssetGeneratorFactory for ConfiguredAssetGeneratorFactory {
+    fn create(
+        &self,
+        allow_local_fallback: bool,
+        cancelled: Arc<AtomicBool>,
+    ) -> Arc<dyn AssetGenerator> {
+        Arc::new(ConfiguredAssetGenerator {
+            local_fallback: allow_local_fallback,
+            cancelled,
+            figure_matting_model: self.figure_matting_model.clone(),
+        })
+    }
+}
+
 impl AssetGenerator for ConfiguredAssetGenerator {
     fn preflight(&self, task: &AssetTask) -> Result<(), String> {
         if self.local_fallback {
@@ -187,13 +212,6 @@ impl AssetGenerator for ConfiguredAssetGenerator {
         Box::pin(async move {
             if self.cancelled.load(Ordering::SeqCst) {
                 return Err(crate::asset_queue::scheduler::ASSET_QUEUE_CANCELLED.to_string());
-            }
-            // Tests must not hit the network: generation is deterministic
-            // placeholder output. Production still tries the provider and falls
-            // back to a placeholder only on error (or when local fallback was
-            // explicitly authorized).
-            if cfg!(test) {
-                return Ok(local_placeholder(task.kind));
             }
             let result = generate_configured_asset(task, &self.figure_matting_model).await;
             if self.cancelled.load(Ordering::SeqCst) {
@@ -392,17 +410,100 @@ fn local_placeholder(kind: AssetKind) -> GeneratedArtifact {
     }
 }
 
+#[cfg(test)]
+struct PlaceholderAssetGeneratorFactory;
+
+#[cfg(test)]
+impl AssetGeneratorFactory for PlaceholderAssetGeneratorFactory {
+    fn create(
+        &self,
+        _allow_local_fallback: bool,
+        cancelled: Arc<AtomicBool>,
+    ) -> Arc<dyn AssetGenerator> {
+        Arc::new(PlaceholderAssetGenerator { cancelled })
+    }
+}
+
+#[cfg(test)]
+struct PlaceholderAssetGenerator {
+    cancelled: Arc<AtomicBool>,
+}
+
+#[cfg(test)]
+impl AssetGenerator for PlaceholderAssetGenerator {
+    fn generate<'a>(
+        &'a self,
+        task: &'a AssetTask,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<GeneratedArtifact, String>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            if self.cancelled.load(Ordering::SeqCst) {
+                Err(crate::asset_queue::scheduler::ASSET_QUEUE_CANCELLED.to_string())
+            } else {
+                Ok(local_placeholder(task.kind))
+            }
+        })
+    }
+}
+
+#[cfg(test)]
+pub(crate) struct HangingAssetGeneratorFactory {
+    started: Arc<tokio::sync::Semaphore>,
+}
+
+#[cfg(test)]
+impl HangingAssetGeneratorFactory {
+    pub(crate) fn new(started: Arc<tokio::sync::Semaphore>) -> Self {
+        Self { started }
+    }
+}
+
+#[cfg(test)]
+impl AssetGeneratorFactory for HangingAssetGeneratorFactory {
+    fn create(
+        &self,
+        _allow_local_fallback: bool,
+        _cancelled: Arc<AtomicBool>,
+    ) -> Arc<dyn AssetGenerator> {
+        Arc::new(HangingAssetGenerator {
+            started: self.started.clone(),
+        })
+    }
+}
+
+#[cfg(test)]
+struct HangingAssetGenerator {
+    started: Arc<tokio::sync::Semaphore>,
+}
+
+#[cfg(test)]
+impl AssetGenerator for HangingAssetGenerator {
+    fn generate<'a>(
+        &'a self,
+        _task: &'a AssetTask,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<GeneratedArtifact, String>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            self.started.add_permits(1);
+            std::future::pending().await
+        })
+    }
+}
+
 impl Pipeline {
+    #[cfg(test)]
     pub fn new(agents: AgentRegistry) -> Self {
         Pipeline {
             agents,
-            figure_matting_model: Err("figure matting model is not configured".to_string()),
+            asset_generators: Arc::new(PlaceholderAssetGeneratorFactory),
+            default_local_fallback: true,
             step_timeout: DEFAULT_PROVIDER_STEP_TIMEOUT,
-            #[cfg(test)]
-            hanging_asset_queue_started: None,
         }
     }
 
+    #[cfg(test)]
     pub fn with_default_agents() -> Self {
         Self::new(AgentRegistry::with_defaults())
     }
@@ -412,10 +513,11 @@ impl Pipeline {
     ) -> Self {
         Self {
             agents: AgentRegistry::with_defaults(),
-            figure_matting_model,
+            asset_generators: Arc::new(ConfiguredAssetGeneratorFactory {
+                figure_matting_model,
+            }),
+            default_local_fallback: false,
             step_timeout: DEFAULT_PROVIDER_STEP_TIMEOUT,
-            #[cfg(test)]
-            hanging_asset_queue_started: None,
         }
     }
 
@@ -427,11 +529,11 @@ impl Pipeline {
     }
 
     #[cfg(test)]
-    pub(crate) fn with_hanging_asset_queue_for_test(
+    pub(crate) fn with_asset_generators_for_test(
         mut self,
-        started: Arc<tokio::sync::Semaphore>,
+        asset_generators: Arc<dyn AssetGeneratorFactory>,
     ) -> Self {
-        self.hanging_asset_queue_started = Some(started);
+        self.asset_generators = asset_generators;
         self
     }
 
@@ -451,7 +553,15 @@ impl Pipeline {
         clock: &dyn Clock,
         sink: &dyn EventSink,
     ) -> Result<Arc<RunHandle>, PipelineError> {
-        self.create_run_with_options(project_path, run_id, prompt, recipe, false, clock, sink)
+        self.create_run_with_options(
+            project_path,
+            run_id,
+            prompt,
+            recipe,
+            self.default_local_fallback,
+            clock,
+            sink,
+        )
     }
 
     pub fn create_run_with_options(
@@ -925,10 +1035,7 @@ impl Pipeline {
 
         let (production_brief, allow_local_fallback) = {
             let state = handle.state.lock().await;
-            (
-                state.prompt.clone(),
-                state.allow_local_fallback || cfg!(test),
-            )
+            (state.prompt.clone(), state.allow_local_fallback)
         };
         let input_snapshot = serde_json::json!({
             "productionBrief": &production_brief,
@@ -988,27 +1095,17 @@ impl Pipeline {
         };
         let result = if agent_key.as_deref() == Some("assetQueue") {
             let run_id = handle.state.lock().await.run_id.clone();
-            let generator = Arc::new(ConfiguredAssetGenerator {
-                local_fallback: allow_local_fallback,
-                cancelled: handle.cancelled.clone(),
-                figure_matting_model: self.figure_matting_model.clone(),
-            });
-            let queue_run = async {
-                #[cfg(test)]
-                if let Some(started) = &self.hanging_asset_queue_started {
-                    started.add_permits(1);
-                    return std::future::pending().await;
-                }
-                crate::asset_queue::run_queue_cancellable(
-                    project_path,
-                    &run_id,
-                    &plan,
-                    generator,
-                    handle.cancelled.clone(),
-                    handle.asset_binding_gate.clone(),
-                )
-                .await
-            };
+            let generator = self
+                .asset_generators
+                .create(allow_local_fallback, handle.cancelled.clone());
+            let queue_run = crate::asset_queue::run_queue_cancellable(
+                project_path,
+                &run_id,
+                &plan,
+                generator,
+                handle.cancelled.clone(),
+                handle.asset_binding_gate.clone(),
+            );
             tokio::pin!(queue_run);
             let cancel_wait = handle.cancel_notify.notified();
             tokio::pin!(cancel_wait);

@@ -65,20 +65,36 @@ impl Orchestrator {
             }
             Err(error) => return Err(error),
         };
-        let asset_queue = if allow_local_fallback {
-            std::time::Duration::from_secs(180)
-        } else {
-            let configs = [
-                crate::ai::config::load_image_config(),
-                crate::ai::config::load_tts_config(),
-                crate::ai::config::load_music_config(),
-            ];
-            std::time::Duration::from_millis(
-                crate::ai::provider_capability::media_flow_step_deadline_ms(&configs)?,
-            )
-        };
+        let configs = [
+            crate::ai::config::load_image_config(),
+            crate::ai::config::load_tts_config(),
+            crate::ai::config::load_music_config(),
+        ];
+        let asset_queue = media_deadline_for_new_run(&configs, allow_local_fallback)?;
         Ok(StepDeadlines { agent, asset_queue })
     }
+}
+
+fn media_deadline_for_new_run(
+    configs: &[crate::ai::config::AiProviderConfig],
+    allow_local_fallback: bool,
+) -> Result<std::time::Duration, String> {
+    if !allow_local_fallback {
+        return Ok(std::time::Duration::from_millis(
+            crate::ai::provider_capability::media_flow_step_deadline_ms(configs)?,
+        ));
+    }
+
+    let declared = configs
+        .iter()
+        .filter_map(|config| {
+            crate::ai::provider_capability::capability_for_provider_config(config)
+                .ok()
+                .map(|capability| capability.flow_step_deadline_ms)
+        })
+        .max()
+        .unwrap_or(0);
+    Ok(std::time::Duration::from_millis(declared.max(180_000)))
 }
 
 static RUN_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -585,6 +601,7 @@ pub async fn pipeline_list_runs(project_path: String) -> Result<Vec<RunState>, S
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ai::config::{AiProviderConfig, ProviderCapabilityDeclaration};
 
     #[test]
     fn run_ids_are_unique() {
@@ -592,5 +609,49 @@ mod tests {
         let b = new_run_id();
         assert_ne!(a, b);
         assert!(a.starts_with("run_"));
+    }
+
+    #[test]
+    fn local_fallback_keeps_long_declared_media_deadlines() {
+        let configs = [
+            AiProviderConfig {
+                provider: "custom".to_string(),
+                model: "slow-image".to_string(),
+                api_key: String::new(),
+                base_url: "https://media.example".to_string(),
+                capabilities: Some(ProviderCapabilityDeclaration {
+                    flow_step_deadline_ms: Some(900_000),
+                    ..Default::default()
+                }),
+            },
+            AiProviderConfig {
+                provider: "unknown".to_string(),
+                model: String::new(),
+                api_key: String::new(),
+                base_url: String::new(),
+                capabilities: None,
+            },
+        ];
+
+        assert_eq!(
+            media_deadline_for_new_run(&configs, true).unwrap(),
+            std::time::Duration::from_secs(900)
+        );
+        assert!(media_deadline_for_new_run(&configs, false).is_err());
+    }
+
+    #[test]
+    fn local_fallback_uses_its_floor_when_no_media_capability_is_available() {
+        let configs = [AiProviderConfig {
+            provider: "unknown".to_string(),
+            model: String::new(),
+            api_key: String::new(),
+            base_url: String::new(),
+            capabilities: None,
+        }];
+        assert_eq!(
+            media_deadline_for_new_run(&configs, true).unwrap(),
+            std::time::Duration::from_secs(180)
+        );
     }
 }
