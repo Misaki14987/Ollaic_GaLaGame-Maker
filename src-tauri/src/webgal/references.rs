@@ -50,7 +50,14 @@ pub fn rename_asset_references(
         };
 
         let next = if reference.command == "voice" {
-            line.replacen(&format!("-{old_filename}"), &format!("-{new_filename}"), 1)
+            match voice_flag_span(line, old_filename) {
+                Some(span) => {
+                    let token = &line[span.clone()];
+                    let prefix = token.rfind('=').map_or("-", |index| &token[..=index]);
+                    format!("{}{prefix}{new_filename}{}", &line[..span.start], &line[span.end..])
+                }
+                None => line.to_string(),
+            }
         } else if let Some(colon) = line.find(':') {
             let (prefix, value) = line.split_at(colon + 1);
             format!("{prefix}{}", value.replacen(old_filename, new_filename, 1))
@@ -92,11 +99,10 @@ pub fn remove_asset_references(source: &str, category: &str, filename: &str) -> 
 }
 
 fn remove_voice_flag(line: &str, filename: &str) -> String {
-    let needle = format!("-{filename}");
-    let Some(flag_start) = line.find(&needle) else {
+    let Some(span) = voice_flag_span(line, filename) else {
         return line.to_string();
     };
-    let mut remove_start = flag_start;
+    let mut remove_start = span.start;
     while remove_start > 0 {
         let previous = line[..remove_start].chars().next_back().unwrap();
         if !previous.is_whitespace() || previous == '\n' || previous == '\r' {
@@ -107,8 +113,24 @@ fn remove_voice_flag(line: &str, filename: &str) -> String {
     format!(
         "{}{}",
         &line[..remove_start],
-        &line[flag_start + needle.len()..]
+        &line[span.end..]
     )
+}
+
+fn voice_flag_span(line: &str, filename: &str) -> Option<std::ops::Range<usize>> {
+    let body = line.split(';').next()?;
+    let content_start = body.find(':').map_or(0, |index| index + 1);
+    for token in body[content_start..].split_whitespace() {
+        if !token.starts_with('-') {
+            continue;
+        }
+        let node = parser::parse_script(&format!("Speaker: {token};")).into_iter().next()?;
+        if node.voice.as_deref() == Some(filename) {
+            let start = token.as_ptr() as usize - line.as_ptr() as usize;
+            return Some(start..start + token.len());
+        }
+    }
+    None
 }
 
 fn reference_from_node(node: &WebGalNode) -> Option<(&'static str, &'static str, String)> {
@@ -137,6 +159,17 @@ fn reference_from_node(node: &WebGalNode) -> Option<(&'static str, &'static str,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn voice_mutations_preserve_filename_mentions_in_dialogue_and_comments() {
+        let source = "Alice:clip-v1.wav -v1.wav; // -v1.wav\r\n";
+        let (removed, count) = remove_asset_references(source, "vocal", "v1.wav");
+        assert_eq!(count, 1);
+        assert_eq!(removed, "Alice:clip-v1.wav; // -v1.wav\r\n");
+        let (renamed, count) = rename_asset_references(source, "vocal", "v1.wav", "v2.wav");
+        assert_eq!(count, 1);
+        assert_eq!(renamed, "Alice:clip-v1.wav -v2.wav; // -v1.wav\r\n");
+    }
 
     #[test]
     fn extracts_supported_asset_commands_with_source_locations() {
