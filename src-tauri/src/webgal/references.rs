@@ -53,7 +53,7 @@ pub fn rename_asset_references(
             match voice_flag_span(line, old_filename) {
                 Some(span) => {
                     let token = &line[span.clone()];
-                    let prefix = token.rfind('=').map_or("-", |index| &token[..=index]);
+                    let prefix = token.find('=').map_or("-", |index| &token[..=index]);
                     format!(
                         "{}{prefix}{new_filename}{}",
                         &line[..span.start],
@@ -161,6 +161,18 @@ fn reference_from_node(node: &WebGalNode) -> Option<(&'static str, &'static str,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn voice_rename_preserves_flag_key_when_filename_contains_equals() {
+        let (renamed, count) = rename_asset_references(
+            "Alice:hello -v1=clip=take.wav;",
+            "vocal",
+            "clip=take.wav",
+            "new.wav",
+        );
+        assert_eq!(count, 1);
+        assert_eq!(renamed, "Alice:hello -v1=new.wav;");
+    }
 
     #[test]
     fn voice_mutations_preserve_filename_mentions_in_dialogue_and_comments() {
