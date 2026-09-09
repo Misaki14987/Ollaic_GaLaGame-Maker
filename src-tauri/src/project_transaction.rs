@@ -508,6 +508,25 @@ fn unique_transaction_id(label: &str) -> String {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn scene_writes_and_transactions_share_the_project_lock() {
+        use futures::FutureExt;
+        let root = project("shared_scene_lock");
+        let paths = crate::webgal::project_paths::ProjectPaths::open(&root).unwrap();
+        let guard = paths.lock_for_write();
+        assert!(
+            ProjectFileTransaction::begin(&root, "blocked", [PathBuf::from("game/scene")])
+                .now_or_never()
+                .is_none()
+        );
+        drop(guard);
+        let mut transaction =
+            ProjectFileTransaction::begin(&root, "available", [PathBuf::from("game/scene")])
+                .await
+                .unwrap();
+        transaction.rollback().unwrap();
+    }
+
     fn project(name: &str) -> PathBuf {
         let path = std::env::temp_dir().join(format!(
             "ollaic_project_transaction_{}_{}",

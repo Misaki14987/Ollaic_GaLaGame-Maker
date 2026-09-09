@@ -9,7 +9,7 @@ use futures_util::stream::{FuturesUnordered, StreamExt};
 use tokio::sync::{Mutex, Semaphore};
 
 use super::binder::{bind_asset, rebind_asset};
-use super::store::{load_queue, queue_path, save_queue};
+use super::store::{load_queue, save_queue};
 use super::types::{AssetAttempt, AssetKind, AssetQueue, AssetTask, AssetTaskStatus};
 use crate::project_transaction::ProjectFileTransaction;
 use crate::story_plan::types::StoryPlan;
@@ -97,13 +97,7 @@ pub async fn run_queue_cancellable_transactional(
     cancelled: Arc<AtomicBool>,
     binding_gate: Arc<Mutex<()>>,
 ) -> Result<AssetQueueRun, String> {
-    let mut transaction = ProjectFileTransaction::begin(
-        project_path,
-        &format!("asset-queue-{run_id}"),
-        asset_queue_transaction_paths(),
-    )
-    .await?;
-    let queue = match run_queue_inner(
+    run_queue_inner(
         project_path,
         run_id,
         plan,
@@ -112,18 +106,6 @@ pub async fn run_queue_cancellable_transactional(
         binding_gate,
     )
     .await
-    {
-        Ok(queue) => queue,
-        Err(error) => {
-            let rollback = transaction
-                .rollback()
-                .err()
-                .map(|rollback| format!("; rollback failed: {rollback}"))
-                .unwrap_or_default();
-            return Err(format!("{error}{rollback}"));
-        }
-    };
-    Ok(AssetQueueRun { queue, transaction })
 }
 
 fn asset_queue_transaction_paths() -> Vec<std::path::PathBuf> {
@@ -150,8 +132,9 @@ async fn run_queue_inner(
     generator: Arc<dyn AssetGenerator>,
     cancelled: Arc<AtomicBool>,
     binding_gate: Arc<Mutex<()>>,
-) -> Result<AssetQueue, String> {
+) -> Result<AssetQueueRun, String> {
     let _queue_guard = super::lock_queue_writes().await;
+    crate::project_transaction::recover_pending(project_path).await?;
     let mut queue = load_queue(project_path)?;
     let same_run = queue.run_id == run_id;
     queue = if same_run {
@@ -164,22 +147,6 @@ async fn run_queue_inner(
         super::store::derive_queue(project_path, run_id, plan)?
     };
     validate_limits(&queue)?;
-    if same_run {
-        for task in queue
-            .tasks
-            .iter_mut()
-            .filter(|task| task.status == AssetTaskStatus::Succeeded)
-        {
-            let _binding_guard = binding_gate.lock().await;
-            if cancelled.load(Ordering::SeqCst) {
-                return Err(ASSET_QUEUE_CANCELLED.to_string());
-            }
-            if let Err(error) = rebind_asset(project_path, task) {
-                task.status = AssetTaskStatus::Failed;
-                task.error = Some(format!("rebinding failed: {error}"));
-            }
-        }
-    }
     let attempt_budget = queue.limits.max_retries + 1;
     let mut runnable = Vec::new();
     for (index, task) in queue.tasks.iter_mut().enumerate() {
@@ -249,6 +216,30 @@ async fn run_queue_inner(
     }
     generated.sort_unstable();
 
+    let transaction = ProjectFileTransaction::begin(
+        &project_path,
+        &format!("asset-queue-{run_id}"),
+        asset_queue_transaction_paths(),
+    )
+    .await?;
+    if same_run {
+        let mut state = queue.lock().await;
+        for task in state
+            .tasks
+            .iter_mut()
+            .filter(|task| task.status == AssetTaskStatus::Succeeded)
+        {
+            let _binding_guard = binding_gate.lock().await;
+            if cancelled.load(Ordering::SeqCst) {
+                return Err(ASSET_QUEUE_CANCELLED.to_string());
+            }
+            if let Err(error) = rebind_asset(&project_path, task) {
+                task.status = AssetTaskStatus::Failed;
+                task.error = Some(format!("rebinding failed: {error}"));
+            }
+        }
+    }
+
     for (position, &index) in generated.iter().enumerate() {
         let _binding_guard = binding_gate.lock().await;
         if cancelled.load(Ordering::SeqCst) {
@@ -287,7 +278,10 @@ async fn run_queue_inner(
         save_queue(&project_path, &state)?;
     }
     let result = queue.lock().await.clone();
-    Ok(result)
+    Ok(AssetQueueRun {
+        queue: result,
+        transaction,
+    })
 }
 
 async fn generate_task(
@@ -297,6 +291,19 @@ async fn generate_task(
     attempt_limit: u32,
     generator: &dyn AssetGenerator,
 ) -> Result<Option<usize>, String> {
+    {
+        let state = queue.lock().await;
+        let task = &state.tasks[index];
+        if task.attempts.last().is_some_and(|attempt| {
+            attempt.error.is_none()
+                && attempt
+                    .artifact
+                    .as_ref()
+                    .is_some_and(|artifact| Path::new(artifact).is_file())
+        }) {
+            return Ok(Some(index));
+        }
+    }
     loop {
         let (task, attempt) = {
             let mut state = queue.lock().await;
@@ -435,7 +442,126 @@ mod tests {
     use std::time::Duration;
 
     struct RetryOnce(AtomicUsize);
+
+    struct EditingBeforeCancellation {
+        project: std::path::PathBuf,
+        cancelled: Arc<AtomicBool>,
+    }
+
+    impl AssetGenerator for EditingBeforeCancellation {
+        fn generate<'a>(
+            &'a self,
+            _task: &'a AssetTask,
+        ) -> Pin<Box<dyn Future<Output = Result<GeneratedArtifact, String>> + Send + 'a>> {
+            Box::pin(async move {
+                let project = self.project.to_string_lossy().into_owned();
+                let write = tokio::task::spawn_blocking(move || {
+                    crate::webgal::commands::write_file_text(
+                        project,
+                        "unrelated.txt".into(),
+                        "User:accepted edit;\n".into(),
+                    )
+                });
+                tokio::time::timeout(Duration::from_secs(2), write)
+                    .await
+                    .map_err(|_| "scene save blocked during generation".to_string())?
+                    .map_err(|error| error.to_string())??;
+                self.cancelled.store(true, Ordering::SeqCst);
+                Ok(GeneratedArtifact {
+                    extension: "wav".into(),
+                    bytes: b"candidate".to_vec(),
+                    used_local_fallback: false,
+                })
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn generation_cancellation_preserves_user_edits_and_reuses_candidates() {
+        let project = std::env::temp_dir().join(format!(
+            "ollaic_queue_edit_cancel_{}_{}",
+            std::process::id(),
+            now_ms()
+        ));
+        std::fs::create_dir_all(project.join("game/scene")).unwrap();
+        std::fs::write(project.join("game/scene/start.txt"), "; empty\n").unwrap();
+        std::fs::write(project.join("game/scene/unrelated.txt"), "User:before;\n").unwrap();
+        let queue = AssetQueue::new(
+            "run-edit-cancel",
+            vec![task("bg_edit_cancel".into(), AssetKind::Background, None)],
+            now_ms(),
+        );
+        let plan = plan_for(&queue, vec!["start.txt".into()]);
+        save_queue(&project, &queue).unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let result = run_queue_cancellable(
+            &project,
+            "run-edit-cancel",
+            &plan,
+            Arc::new(EditingBeforeCancellation {
+                project: project.clone(),
+                cancelled: cancelled.clone(),
+            }),
+            cancelled,
+            Arc::new(Mutex::new(())),
+        )
+        .await;
+        assert_eq!(result.unwrap_err(), ASSET_QUEUE_CANCELLED);
+        assert_eq!(
+            std::fs::read_to_string(project.join("game/scene/unrelated.txt")).unwrap(),
+            "User:accepted edit;\n"
+        );
+        let retained = load_queue(&project).unwrap();
+        assert_eq!(retained.tasks[0].attempts.len(), 1);
+        assert!(Path::new(retained.tasks[0].attempts[0].artifact.as_ref().unwrap()).is_file());
+        let generator = Arc::new(CountingGenerate(AtomicUsize::new(0)));
+        let completed = run_queue(&project, "run-edit-cancel", &plan, generator.clone())
+            .await
+            .unwrap();
+        assert_eq!(completed.tasks[0].status, AssetTaskStatus::Succeeded);
+        assert_eq!(generator.0.load(Ordering::SeqCst), 0);
+    }
     struct AlwaysGenerate;
+
+    #[tokio::test]
+    async fn publication_rollback_retains_candidates_for_retry_without_regeneration() {
+        let project = std::env::temp_dir().join(format!(
+            "ollaic_queue_publication_retry_{}_{}",
+            std::process::id(),
+            now_ms()
+        ));
+        std::fs::create_dir_all(project.join("game/scene")).unwrap();
+        std::fs::write(project.join("game/scene/start.txt"), "; empty\n").unwrap();
+        let queue = AssetQueue::new(
+            "run-publication-retry",
+            vec![task("bg_retry".into(), AssetKind::Background, None)],
+            now_ms(),
+        );
+        let plan = plan_for(&queue, vec!["start.txt".into()]);
+        save_queue(&project, &queue).unwrap();
+        let generator = Arc::new(CountingGenerate(AtomicUsize::new(0)));
+        let mut staged = run_queue_cancellable_transactional(
+            &project,
+            "run-publication-retry",
+            &plan,
+            generator.clone(),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(Mutex::new(())),
+        )
+        .await
+        .unwrap();
+        assert_eq!(staged.queue.tasks[0].status, AssetTaskStatus::Succeeded);
+        staged.transaction.rollback().unwrap();
+        drop(staged);
+        let recovered = load_queue(&project).unwrap();
+        assert_eq!(recovered.tasks[0].attempts.len(), 1);
+        assert_ne!(recovered.tasks[0].status, AssetTaskStatus::Succeeded);
+        let completed = run_queue(&project, "run-publication-retry", &plan, generator.clone())
+            .await
+            .unwrap();
+        assert_eq!(completed.tasks[0].status, AssetTaskStatus::Succeeded);
+        assert_eq!(generator.0.load(Ordering::SeqCst), 1);
+    }
     struct TransparentFigure;
     struct AlwaysFail(AtomicUsize);
     struct CountingGenerate(AtomicUsize);
@@ -942,7 +1068,6 @@ mod tests {
         );
         let plan = plan_for(&queue, vec!["start.txt".into()]);
         save_queue(&project, &queue).unwrap();
-        let queue_before = std::fs::read(queue_path(&project)).unwrap();
         let scene_before = std::fs::read(project.join("game/scene/start.txt")).unwrap();
         let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let binding_gate = Arc::new(Mutex::new(()));
@@ -976,7 +1101,13 @@ mod tests {
         assert_eq!(result.unwrap_err(), ASSET_QUEUE_CANCELLED);
         assert!(cancelled.load(Ordering::SeqCst));
         assert!(!project.join("game/background/bg_one.wav").exists());
-        assert_eq!(std::fs::read(queue_path(&project)).unwrap(), queue_before);
+        let retained = load_queue(&project).unwrap();
+        assert_ne!(retained.tasks[0].status, AssetTaskStatus::Succeeded);
+        assert_eq!(retained.tasks[0].attempts.len(), 1);
+        assert_eq!(
+            retained.tasks[0].attempts[0].artifact.as_deref(),
+            artifact.to_str()
+        );
         assert_eq!(
             std::fs::read(project.join("game/scene/start.txt")).unwrap(),
             scene_before

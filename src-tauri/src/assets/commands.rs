@@ -736,6 +736,7 @@ async fn delete_asset_inner(
 
     let mutation = (|| {
         validate_asset_mutation_source(&path)?;
+        ensure_asset_within_project(project_root, &path)?;
         fs::remove_file(&path).map_err(|e| format!("删除失败: {e}"))?;
         fail_asset_mutation(failure, AssetMutationFailure::AfterAsset)?;
         if let Some(reference_dir) = reference_dir {
@@ -860,6 +861,7 @@ async fn rename_asset_inner(
 
     let mutation = (|| {
         validate_asset_mutation_source(&old_path)?;
+        ensure_asset_within_project(project_root, &old_path)?;
         if new_path.exists() {
             return Err(format!("目标文件已存在: {}", new_path.display()));
         }
@@ -1235,6 +1237,16 @@ pub fn delete_voice_card(project_path: String, voice_card_id: String) -> Result<
     })
 }
 
+fn ensure_asset_within_project(project_root: &Path, path: &Path) -> Result<(), String> {
+    let resolved = path
+        .canonicalize()
+        .map_err(|error| format!("无法检查素材路径 {}: {error}", path.display()))?;
+    if !resolved.starts_with(project_root) {
+        return Err(format!("素材路径超出项目目录：{}", path.display()));
+    }
+    Ok(())
+}
+
 fn unique_path(path: PathBuf) -> PathBuf {
     if !path.exists() {
         return path;
@@ -1298,6 +1310,45 @@ fn find_duplicate_in_dir(source: &Path, dir: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn asset_mutations_reject_symlinked_parent_directories() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "asset_parent_symlink_{}_{nonce}",
+            std::process::id()
+        ));
+        let project = root.join("project");
+        let external = root.join("external");
+        fs::create_dir_all(project.join("game/scene")).unwrap();
+        fs::create_dir_all(&external).unwrap();
+        fs::write(external.join("victim.png"), b"external data").unwrap();
+        std::os::unix::fs::symlink(&external, project.join("game/background")).unwrap();
+        let result = delete_asset(
+            project.to_string_lossy().into_owned(),
+            "background".into(),
+            "victim.png".into(),
+        )
+        .await;
+        assert!(result.is_err(), "deletion escaped the project");
+        let result = rename_asset(
+            project.to_string_lossy().into_owned(),
+            "background".into(),
+            "victim.png".into(),
+            "renamed.png".into(),
+        )
+        .await;
+        assert!(result.is_err(), "rename escaped the project");
+        assert_eq!(
+            fs::read(external.join("victim.png")).unwrap(),
+            b"external data"
+        );
+        assert!(!external.join("renamed.png").exists());
+    }
     use futures::executor::block_on;
 
     #[test]
