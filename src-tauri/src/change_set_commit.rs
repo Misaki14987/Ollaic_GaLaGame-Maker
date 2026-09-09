@@ -428,7 +428,7 @@ fn baseline_matches(write: &PreparedWrite) -> bool {
             .unwrap_or(false),
         Baseline::Json(expected) => match std::fs::read(&write.path) {
             Ok(bytes) => serde_json::from_slice::<serde_json::Value>(&bytes)
-                .is_ok_and(|current| current == *expected),
+                .is_ok_and(|current| json_baseline_matches(&write.resource, current, expected)),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 missing_json_matches(&write.resource, expected)
             }
@@ -436,6 +436,19 @@ fn baseline_matches(write: &PreparedWrite) -> bool {
         },
         Baseline::Missing => !case_insensitive_sibling_exists(&write.path),
     }
+}
+
+fn json_baseline_matches(resource: &ResourceId, current: serde_json::Value, expected: &serde_json::Value) -> bool {
+    if *resource != ResourceId::NarrativeContext {
+        return current == *expected;
+    }
+    let normalize = |value| {
+        serde_json::from_value::<crate::webgal::project::NarrativeContextDocument>(value)
+            .ok()
+            .and_then(|document| serde_json::to_value(document).ok())
+    };
+    normalize(current).zip(normalize(expected.clone()))
+        .is_some_and(|(current, expected)| current == expected)
 }
 
 fn missing_json_matches(resource: &ResourceId, expected: &serde_json::Value) -> bool {
@@ -510,6 +523,31 @@ mod tests {
 
     fn json(value: serde_json::Value) -> serde_json::Value {
         value
+    }
+
+    #[test]
+    fn legacy_narrative_baseline_accepts_defaults_but_rejects_changed_facts() {
+        let project = temp_project("legacy_narrative_baseline");
+        fs::create_dir_all(project.join(".webgal-editor")).unwrap();
+        let path = project.join(".webgal-editor/narrative-context.json");
+        let legacy = serde_json::json!({"version":1,"acceptedFacts":[
+            {"id":"old","acceptedAt":"now","summary":"established fact"}
+        ]});
+        fs::write(&path, legacy.to_string()).unwrap();
+        let loaded = crate::webgal::project::read_narrative_context(project.to_string_lossy().into_owned())
+            .unwrap().unwrap();
+        let baseline = serde_json::to_value(loaded).unwrap();
+        let request = ApplyChangeSetRequest {
+            project_path: project.to_string_lossy().into_owned(),
+            operations: vec![ChangeSetOperation::NarrativeContext {
+                baseline: baseline.clone(), document: baseline,
+            }],
+        };
+        assert!(matches!(apply_change_set(request.clone()), ApplyChangeSetResult::Committed { .. }));
+        let mut concurrent = legacy;
+        concurrent["acceptedFacts"][0]["summary"] = serde_json::json!("new fact");
+        fs::write(&path, concurrent.to_string()).unwrap();
+        assert!(matches!(apply_change_set(request), ApplyChangeSetResult::Conflict { .. }));
     }
 
     fn setup_all_resources(label: &str) -> PathBuf {
