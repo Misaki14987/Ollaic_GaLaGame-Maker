@@ -438,7 +438,11 @@ fn baseline_matches(write: &PreparedWrite) -> bool {
     }
 }
 
-fn json_baseline_matches(resource: &ResourceId, current: serde_json::Value, expected: &serde_json::Value) -> bool {
+fn json_baseline_matches(
+    resource: &ResourceId,
+    current: serde_json::Value,
+    expected: &serde_json::Value,
+) -> bool {
     if *resource != ResourceId::NarrativeContext {
         return current == *expected;
     }
@@ -447,16 +451,17 @@ fn json_baseline_matches(resource: &ResourceId, current: serde_json::Value, expe
             .ok()
             .and_then(|document| serde_json::to_value(document).ok())
     };
-    normalize(current).zip(normalize(expected.clone()))
+    normalize(current)
+        .zip(normalize(expected.clone()))
         .is_some_and(|(current, expected)| current == expected)
 }
 
 fn missing_json_matches(resource: &ResourceId, expected: &serde_json::Value) -> bool {
     match resource {
-        ResourceId::Characters => serde_json::from_value::<
-            crate::characters::types::CharactersDocument,
-        >(expected.clone())
-        .is_ok_and(|document| document.version == 1 && document.characters.is_empty()),
+        ResourceId::Characters => {
+            serde_json::from_value::<crate::characters::types::CharactersDocument>(expected.clone())
+                .is_ok_and(|document| document.version == 1 && document.characters.is_empty())
+        }
         ResourceId::ProjectMemory => {
             serde_json::from_value::<crate::webgal::project::ProjectMemory>(expected.clone())
                 .is_ok_and(|memory| {
@@ -534,20 +539,29 @@ mod tests {
             {"id":"old","acceptedAt":"now","summary":"established fact"}
         ]});
         fs::write(&path, legacy.to_string()).unwrap();
-        let loaded = crate::webgal::project::read_narrative_context(project.to_string_lossy().into_owned())
-            .unwrap().unwrap();
+        let loaded =
+            crate::webgal::project::read_narrative_context(project.to_string_lossy().into_owned())
+                .unwrap()
+                .unwrap();
         let baseline = serde_json::to_value(loaded).unwrap();
         let request = ApplyChangeSetRequest {
             project_path: project.to_string_lossy().into_owned(),
             operations: vec![ChangeSetOperation::NarrativeContext {
-                baseline: baseline.clone(), document: baseline,
+                baseline: baseline.clone(),
+                document: baseline,
             }],
         };
-        assert!(matches!(apply_change_set(request.clone()), ApplyChangeSetResult::Committed { .. }));
+        assert!(matches!(
+            apply_change_set(request.clone()),
+            ApplyChangeSetResult::Committed { .. }
+        ));
         let mut concurrent = legacy;
         concurrent["acceptedFacts"][0]["summary"] = serde_json::json!("new fact");
         fs::write(&path, concurrent.to_string()).unwrap();
-        assert!(matches!(apply_change_set(request), ApplyChangeSetResult::Conflict { .. }));
+        assert!(matches!(
+            apply_change_set(request),
+            ApplyChangeSetResult::Conflict { .. }
+        ));
     }
 
     fn setup_all_resources(label: &str) -> PathBuf {
