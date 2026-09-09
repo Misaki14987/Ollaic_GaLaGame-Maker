@@ -421,29 +421,25 @@ mod tests {
             )
             .await
         });
-        let staging_root = root.join(".ollaic/tts-staging");
-        tokio::time::timeout(Duration::from_secs(2), async {
-            loop {
-                if fs::read_dir(&staging_root).is_ok_and(|mut entries| entries.next().is_some()) {
-                    break;
-                }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("batch TTS did not reach the Project transaction guard");
-        assert!(
-            !batch.is_finished(),
-            "batch TTS must wait while AssetQueue holds the Project transaction guard"
+        tokio::time::timeout(Duration::from_secs(2), batch)
+            .await
+            .expect("batch TTS must finish while AssetQueue is still generating")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            read_asset_metadata(root.to_str().unwrap())
+                .unwrap()
+                .voice_cards["voice-1"]
+                .voice_asset
+                .as_deref(),
+            Some("line_one.wav")
         );
 
         proceed.add_permits(1);
-        let (queue_result, batch_result) =
-            tokio::time::timeout(Duration::from_secs(5), async { (queue.await, batch.await) })
-                .await
-                .expect("concurrent AssetQueue and batch TTS operations deadlocked");
+        let queue_result = tokio::time::timeout(Duration::from_secs(5), queue)
+            .await
+            .expect("concurrent AssetQueue and batch TTS operations deadlocked");
         queue_result.unwrap().unwrap();
-        batch_result.unwrap().unwrap();
 
         let metadata = read_asset_metadata(root.to_str().unwrap()).unwrap();
         assert_eq!(
