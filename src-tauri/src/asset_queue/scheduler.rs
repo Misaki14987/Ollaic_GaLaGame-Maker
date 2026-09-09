@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use futures_util::stream::{FuturesUnordered, StreamExt};
 use tokio::sync::{Mutex, Semaphore};
 
-use super::binder::{bind_asset, rebind_asset};
+use super::binder::{bind_asset, rebind_asset, validate_promoted_asset};
 use super::store::{load_queue, save_queue};
 use super::types::{AssetAttempt, AssetKind, AssetQueue, AssetTask, AssetTaskStatus};
 use crate::project_transaction::ProjectFileTransaction;
@@ -151,12 +151,17 @@ async fn run_queue_inner(
     let mut runnable = Vec::new();
     for (index, task) in queue.tasks.iter_mut().enumerate() {
         if task.status == AssetTaskStatus::Succeeded {
-            continue;
-        }
-        if let Err(error) = generator.preflight(task) {
+            if validate_promoted_asset(project_path, task).is_ok() {
+                continue;
+            }
             task.status = AssetTaskStatus::Pending;
-            task.error = Some(format!("pending configuration: {error}"));
-            continue;
+        }
+        if !has_reusable_candidate(task) {
+            if let Err(error) = generator.preflight(task) {
+                task.status = AssetTaskStatus::Pending;
+                task.error = Some(format!("pending configuration: {error}"));
+                continue;
+            }
         }
         let was_blocked = task
             .error
@@ -216,71 +221,120 @@ async fn run_queue_inner(
     }
     generated.sort_unstable();
 
-    let transaction = ProjectFileTransaction::begin(
+    let mut transaction = ProjectFileTransaction::begin(
         &project_path,
         &format!("asset-queue-{run_id}"),
         asset_queue_transaction_paths(),
     )
     .await?;
-    if same_run {
-        let mut state = queue.lock().await;
-        for task in state
-            .tasks
-            .iter_mut()
-            .filter(|task| task.status == AssetTaskStatus::Succeeded)
-        {
-            let _binding_guard = binding_gate.lock().await;
-            if cancelled.load(Ordering::SeqCst) {
-                return Err(ASSET_QUEUE_CANCELLED.to_string());
-            }
-            if let Err(error) = rebind_asset(&project_path, task) {
-                task.status = AssetTaskStatus::Failed;
-                task.error = Some(format!("rebinding failed: {error}"));
+    let publication: Result<AssetQueue, String> = async {
+        if same_run {
+            let mut state = queue.lock().await;
+            for task in state
+                .tasks
+                .iter_mut()
+                .filter(|task| task.status == AssetTaskStatus::Succeeded)
+            {
+                let _binding_guard = binding_gate.lock().await;
+                if cancelled.load(Ordering::SeqCst) {
+                    return Err(ASSET_QUEUE_CANCELLED.to_string());
+                }
+                let rebound = rebind_asset(&project_path, task).or_else(|error| {
+                    if has_reusable_candidate(task) {
+                        let filename = bind_asset(&project_path, task)?;
+                        task.used_local_fallback = task
+                            .attempts
+                            .iter()
+                            .rev()
+                            .find(|attempt| attempt.artifact.is_some())
+                            .is_some_and(|attempt| attempt.used_local_fallback);
+                        Ok(filename)
+                    } else {
+                        Err(error)
+                    }
+                });
+                match rebound {
+                    Ok(filename) => {
+                        task.asset_file = Some(filename);
+                        task.error = None;
+                    }
+                    Err(error) => {
+                        task.status = AssetTaskStatus::Failed;
+                        task.error = Some(format!("rebinding failed: {error}"));
+                    }
+                }
             }
         }
-    }
 
-    for (position, &index) in generated.iter().enumerate() {
-        let _binding_guard = binding_gate.lock().await;
-        if cancelled.load(Ordering::SeqCst) {
+        for (position, &index) in generated.iter().enumerate() {
+            let _binding_guard = binding_gate.lock().await;
+            if cancelled.load(Ordering::SeqCst) {
+                let mut state = queue.lock().await;
+                for &pending in &generated[position..] {
+                    if state.tasks[pending].status != AssetTaskStatus::Succeeded {
+                        state.tasks[pending].status = AssetTaskStatus::Pending;
+                    }
+                }
+                state.updated_at = now_ms();
+                save_queue(&project_path, &state)?;
+                return Err(ASSET_QUEUE_CANCELLED.to_string());
+            }
+            let task = queue.lock().await.tasks[index].clone();
+            let result = bind_asset(&project_path, &task);
             let mut state = queue.lock().await;
-            for &pending in &generated[position..] {
-                if state.tasks[pending].status != AssetTaskStatus::Succeeded {
-                    state.tasks[pending].status = AssetTaskStatus::Pending;
+            let task = &mut state.tasks[index];
+            match result {
+                Ok(filename) => {
+                    task.status = AssetTaskStatus::Succeeded;
+                    task.asset_file = Some(filename);
+                    task.error = None;
+                    task.used_local_fallback = task
+                        .attempts
+                        .iter()
+                        .rev()
+                        .find(|attempt| attempt.artifact.is_some())
+                        .is_some_and(|attempt| attempt.used_local_fallback);
+                }
+                Err(error) => {
+                    task.status = AssetTaskStatus::Failed;
+                    task.error = Some(format!("binding failed: {error}"));
                 }
             }
             state.updated_at = now_ms();
             save_queue(&project_path, &state)?;
-            return Err(ASSET_QUEUE_CANCELLED.to_string());
         }
-        let task = queue.lock().await.tasks[index].clone();
-        let result = bind_asset(&project_path, &task);
         let mut state = queue.lock().await;
-        let task = &mut state.tasks[index];
-        match result {
-            Ok(filename) => {
-                task.status = AssetTaskStatus::Succeeded;
-                task.asset_file = Some(filename);
-                task.error = None;
-                task.used_local_fallback = task
-                    .attempts
-                    .iter()
-                    .rev()
-                    .find(|attempt| attempt.artifact.is_some())
-                    .is_some_and(|attempt| attempt.used_local_fallback);
-            }
-            Err(error) => {
-                task.status = AssetTaskStatus::Failed;
-                task.error = Some(format!("binding failed: {error}"));
-            }
-        }
         state.updated_at = now_ms();
         save_queue(&project_path, &state)?;
+        Ok(state.clone())
     }
-    let result = queue.lock().await.clone();
+    .await;
+    let result = match publication {
+        Ok(result) => result,
+        Err(error) => {
+            return Err(rollback_publication_error(&mut transaction, error));
+        }
+    };
     Ok(AssetQueueRun {
         queue: result,
         transaction,
+    })
+}
+
+fn rollback_publication_error(transaction: &mut ProjectFileTransaction, error: String) -> String {
+    match transaction.rollback() {
+        Ok(()) => error,
+        Err(rollback) => format!("{error}; rollback failed: {rollback}"),
+    }
+}
+
+fn has_reusable_candidate(task: &AssetTask) -> bool {
+    task.attempts.last().is_some_and(|attempt| {
+        attempt.error.is_none()
+            && attempt
+                .artifact
+                .as_ref()
+                .is_some_and(|artifact| Path::new(artifact).is_file())
     })
 }
 
@@ -294,13 +348,7 @@ async fn generate_task(
     {
         let state = queue.lock().await;
         let task = &state.tasks[index];
-        if task.attempts.last().is_some_and(|attempt| {
-            attempt.error.is_none()
-                && attempt
-                    .artifact
-                    .as_ref()
-                    .is_some_and(|artifact| Path::new(artifact).is_file())
-        }) {
+        if has_reusable_candidate(task) {
             return Ok(Some(index));
         }
     }
@@ -524,6 +572,27 @@ mod tests {
     struct AlwaysGenerate;
 
     #[tokio::test]
+    async fn publication_failure_reports_residual_paths_when_rollback_fails() {
+        let project = std::env::temp_dir().join(format!(
+            "ollaic_queue_rollback_error_{}_{}",
+            std::process::id(),
+            now_ms()
+        ));
+        std::fs::create_dir_all(project.join("game/scene")).unwrap();
+        let relative = std::path::PathBuf::from("game/scene/start.txt");
+        std::fs::write(project.join(&relative), "; before\n").unwrap();
+        let mut transaction =
+            ProjectFileTransaction::begin(&project, "rollback-error", [relative.clone()])
+                .await
+                .unwrap();
+        transaction.remove_backup_for_test(&relative).unwrap();
+        let error = rollback_publication_error(&mut transaction, "publication failed".into());
+        assert!(error.contains("publication failed"));
+        assert!(error.contains("rollback failed"));
+        assert!(error.contains("start.txt"));
+    }
+
+    #[tokio::test]
     async fn publication_rollback_retains_candidates_for_retry_without_regeneration() {
         let project = std::env::temp_dir().join(format!(
             "ollaic_queue_publication_retry_{}_{}",
@@ -561,8 +630,56 @@ mod tests {
             .unwrap();
         assert_eq!(completed.tasks[0].status, AssetTaskStatus::Succeeded);
         assert_eq!(generator.0.load(Ordering::SeqCst), 1);
+        std::fs::remove_file(
+            project
+                .join("game/background")
+                .join(completed.tasks[0].asset_file.as_ref().unwrap()),
+        )
+        .unwrap();
+        let offline = Arc::new(MissingConfiguration(AtomicUsize::new(0)));
+        let repaired = run_queue(&project, "run-publication-retry", &plan, offline.clone())
+            .await
+            .unwrap();
+        assert_eq!(repaired.tasks[0].status, AssetTaskStatus::Succeeded);
+        assert_eq!(offline.0.load(Ordering::SeqCst), 0);
     }
     struct TransparentFigure;
+
+    #[tokio::test]
+    async fn invalid_published_figure_without_candidate_can_be_regenerated() {
+        let project = std::env::temp_dir().join(format!(
+            "ollaic_invalid_figure_{}_{}",
+            std::process::id(),
+            now_ms()
+        ));
+        std::fs::create_dir_all(project.join("game/scene")).unwrap();
+        std::fs::create_dir_all(project.join("game/config")).unwrap();
+        std::fs::create_dir_all(project.join("game/figure")).unwrap();
+        std::fs::write(project.join("game/scene/start.txt"), "; empty\n").unwrap();
+        std::fs::write(
+            project.join("game/config/characters.json"),
+            r#"{"version":1,"characters":[{"id":"alice","name":"Alice"}]}"#,
+        )
+        .unwrap();
+        std::fs::write(project.join("game/figure/alice.png"), b"broken png").unwrap();
+        let mut figure = task("alice".into(), AssetKind::Figure, None);
+        figure.character_ref = Some("alice".into());
+        figure.status = AssetTaskStatus::Succeeded;
+        figure.asset_file = Some("alice.png".into());
+        let queue = AssetQueue::new("run-invalid-figure", vec![figure], now_ms());
+        let plan = plan_for(&queue, vec!["start.txt".into()]);
+        save_queue(&project, &queue).unwrap();
+        let result = run_queue(
+            &project,
+            "run-invalid-figure",
+            &plan,
+            Arc::new(TransparentFigure),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.tasks[0].status, AssetTaskStatus::Succeeded);
+        assert_eq!(result.tasks[0].attempts.len(), 1);
+    }
     struct AlwaysFail(AtomicUsize);
     struct CountingGenerate(AtomicUsize);
     struct MissingConfiguration(AtomicUsize);
