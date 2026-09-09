@@ -54,7 +54,11 @@ pub fn rename_asset_references(
                 Some(span) => {
                     let token = &line[span.clone()];
                     let prefix = token.rfind('=').map_or("-", |index| &token[..=index]);
-                    format!("{}{prefix}{new_filename}{}", &line[..span.start], &line[span.end..])
+                    format!(
+                        "{}{prefix}{new_filename}{}",
+                        &line[..span.start],
+                        &line[span.end..]
+                    )
                 }
                 None => line.to_string(),
             }
@@ -110,11 +114,7 @@ fn remove_voice_flag(line: &str, filename: &str) -> String {
         }
         remove_start -= previous.len_utf8();
     }
-    format!(
-        "{}{}",
-        &line[..remove_start],
-        &line[span.end..]
-    )
+    format!("{}{}", &line[..remove_start], &line[span.end..])
 }
 
 fn voice_flag_span(line: &str, filename: &str) -> Option<std::ops::Range<usize>> {
@@ -124,7 +124,9 @@ fn voice_flag_span(line: &str, filename: &str) -> Option<std::ops::Range<usize>>
         if !token.starts_with('-') {
             continue;
         }
-        let node = parser::parse_script(&format!("Speaker: {token};")).into_iter().next()?;
+        let node = parser::parse_script(&format!("Speaker: {token};"))
+            .into_iter()
+            .next()?;
         if node.voice.as_deref() == Some(filename) {
             let start = token.as_ptr() as usize - line.as_ptr() as usize;
             return Some(start..start + token.len());
