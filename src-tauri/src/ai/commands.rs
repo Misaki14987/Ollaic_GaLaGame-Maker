@@ -651,8 +651,8 @@ fn validate_config_basics(cfg: &AiConfig) -> Result<(), String> {
     if is_placeholder_base_url(&cfg.base_url) {
         return Err("Base URL 仍是示例地址，请填写真实接口地址".into());
     }
-    let needs_base_url = registry::modality_spec(provider, Modality::Chat)
-        .is_some_and(|spec| spec.needs_base_url());
+    let needs_base_url =
+        registry::modality_spec(provider, Modality::Chat).is_some_and(|spec| spec.needs_base_url());
     if needs_base_url && cfg.base_url.trim().is_empty() {
         return Err("该供应商没有内置地址，需要填写 Base URL".into());
     }
@@ -706,15 +706,27 @@ pub(crate) async fn download_generated_media(
     // gate behind explicit acknowledgement. `AiProviderConfig` does not
     // carry the optional `capabilities` declaration; the capability
     // resolver falls back to the table default in that case.
-    let as_chat_config = AiConfig {
-        provider: cfg.provider.clone(),
-        model: cfg.model.clone(),
-        api_key: cfg.api_key.clone(),
-        base_url: cfg.base_url.clone(),
-        capabilities: None,
-    };
-    let capability = capability_for_config(&as_chat_config)?;
-    capability.require(RequiredCapability::MediaUrlOutput)?;
+    if cfg.provider.trim().eq_ignore_ascii_case("custom") {
+        let base = reqwest::Url::parse(cfg.base_url.trim())
+            .map_err(|_| "自定义媒体 Base URL 无效".to_string())?;
+        let target = reqwest::Url::parse(url).map_err(|_| "媒体下载 URL 无效".to_string())?;
+        if base.scheme() != target.scheme()
+            || base.host_str() != target.host_str()
+            || base.port_or_known_default() != target.port_or_known_default()
+        {
+            return Err("自定义媒体下载 URL 必须与 Base URL 同源".to_string());
+        }
+    } else {
+        let as_chat_config = AiConfig {
+            provider: cfg.provider.clone(),
+            model: cfg.model.clone(),
+            api_key: cfg.api_key.clone(),
+            base_url: cfg.base_url.clone(),
+            capabilities: None,
+        };
+        let capability = capability_for_config(&as_chat_config)?;
+        capability.require(RequiredCapability::MediaUrlOutput)?;
+    }
     let kind = if action.contains("image") {
         super::safe_media_fetch::MediaKind::Image
     } else {
