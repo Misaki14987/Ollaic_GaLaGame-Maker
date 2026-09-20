@@ -88,7 +88,7 @@ impl AiProviderConfig {
     fn video_default() -> Self {
         Self {
             provider: "minimax".into(),
-            model: "MiniMax-Hailuo-02".into(),
+            model: "MiniMax-Hailuo-2.3".into(),
             api_key: String::new(),
             base_url: String::new(),
         }

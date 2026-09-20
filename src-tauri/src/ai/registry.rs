@@ -278,7 +278,12 @@ const ALIYUN_TTS_MODELS: &[&str] = &[
 const VOLCENGINE_TTS_MODELS: &[&str] = &["seed-tts", "seed-tts-2.0", "mega-tts", "doubao-tts"];
 
 const MUSIC_MODELS: &[&str] = &["music-1"];
-const MINIMAX_VIDEO_MODELS: &[&str] = &["MiniMax-Hailuo-02", "T2V-01-Director", "T2V-01"];
+const MINIMAX_VIDEO_MODELS: &[&str] = &[
+    "MiniMax-Hailuo-2.3",
+    "MiniMax-Hailuo-02",
+    "T2V-01-Director",
+    "T2V-01",
+];
 
 const CUSTOM_CHAT_MODELS: &[&str] = &["gpt-4o-mini"];
 const CUSTOM_IMAGE_MODELS: &[&str] = &["image-model"];
@@ -608,7 +613,7 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         music: None,
         video: Some(ModalitySpec {
             label: "MiniMax 视频",
-            default_model: "MiniMax-Hailuo-02",
+            default_model: "MiniMax-Hailuo-2.3",
             models: MINIMAX_VIDEO_MODELS,
             default_base_url: "https://api.minimax.io/v1",
             base_url_placeholder: "(默认 https://api.minimax.io/v1)",
