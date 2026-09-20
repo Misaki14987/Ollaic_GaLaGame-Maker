@@ -239,8 +239,7 @@ const SILICONFLOW_IMAGE_MODELS: &[&str] = &[
 
 const MIDJOURNEY_IMAGE_MODELS: &[&str] = &["midjourney", "niji"];
 
-const SD_WEBUI_IMAGE_MODELS: &[&str] =
-    &["local", "sdxl", "sd1.5", "sd3.5-large", "flux", "kolors"];
+const SD_WEBUI_IMAGE_MODELS: &[&str] = &["local", "sdxl", "sd1.5", "sd3.5-large", "flux", "kolors"];
 
 const OPENAI_TTS_MODELS: &[&str] = &[
     "gpt-4o-mini-tts",
@@ -273,8 +272,7 @@ const ALIYUN_TTS_MODELS: &[&str] = &[
     "qwen-tts-latest",
 ];
 
-const VOLCENGINE_TTS_MODELS: &[&str] =
-    &["seed-tts", "seed-tts-2.0", "mega-tts", "doubao-tts"];
+const VOLCENGINE_TTS_MODELS: &[&str] = &["seed-tts", "seed-tts-2.0", "mega-tts", "doubao-tts"];
 
 const MUSIC_MODELS: &[&str] = &["music-1"];
 
@@ -310,13 +308,7 @@ pub const PROVIDERS: &[ProviderSpec] = &[
             default_base_url: "https://api.openai.com/v1",
             base_url_placeholder: "(默认 https://api.openai.com/v1)",
         }),
-        music: Some(ModalitySpec {
-            label: "OpenAI 兼容",
-            default_model: "music-1",
-            models: MUSIC_MODELS,
-            default_base_url: "https://api.openai.com/v1",
-            base_url_placeholder: "(默认 https://api.openai.com/v1)",
-        }),
+        music: None,
     },
     ProviderSpec {
         id: "anthropic",
@@ -467,7 +459,8 @@ pub const PROVIDERS: &[ProviderSpec] = &[
             default_model: "seed-tts",
             models: VOLCENGINE_TTS_MODELS,
             default_base_url: "https://openspeech.bytedance.com/api/v3/tts/unidirectional",
-            base_url_placeholder: "(默认 https://openspeech.bytedance.com/api/v3/tts/unidirectional)",
+            base_url_placeholder:
+                "(默认 https://openspeech.bytedance.com/api/v3/tts/unidirectional)",
         }),
         music: None,
     },
