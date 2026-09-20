@@ -186,6 +186,68 @@ pub fn set_ai_music_config(config: AiProviderConfig) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn get_ai_video_config() -> AiProviderConfig {
+    config::load_video_config()
+}
+
+#[tauri::command]
+pub fn set_ai_video_config(config: AiProviderConfig) -> Result<(), String> {
+    config::save_video_config(&config)
+}
+
+/// MiniMax Hailuo video generation: create an asynchronous task, poll it,
+/// then download the returned MP4 through the same SSRF-safe media fetcher.
+#[tauri::command]
+pub async fn generate_video(prompt: String, model: String) -> Result<GeneratedMedia, String> {
+    let cfg = config::load_video_config();
+    validate_provider_config_basics(&cfg, "视频")?;
+    if !cfg.provider.eq_ignore_ascii_case("minimax") {
+        return Err("当前仅支持 MiniMax 视频生成".into());
+    }
+    let base = resolved_base_url(&cfg.provider, Modality::Video, &cfg.base_url);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(HTTP_REQUEST_TIMEOUT_SECS))
+        .build()
+        .map_err(|e| format!("创建视频客户端失败: {e}"))?;
+    let auth = cfg.api_key.trim();
+    let create = client
+        .post(format!("{}/video_generation", base.trim_end_matches('/')))
+        .bearer_auth(auth)
+        .json(&serde_json::json!({"model": model.trim(), "prompt": prompt.trim()}))
+        .send().await.map_err(|e| format!("MiniMax 视频任务提交失败: {e}"))?;
+    let status = create.status();
+    let payload: serde_json::Value = create.json().await.map_err(|e| format!("读取 MiniMax 任务响应失败: {e}"))?;
+    if !status.is_success() { return Err(format!("MiniMax 视频任务提交失败 ({status}): {payload}")); }
+    let task_id = payload.get("task_id").and_then(|v| v.as_str()).ok_or("MiniMax 响应缺少 task_id")?;
+    let query = format!("{}/query/video_generation?task_id={}", base.trim_end_matches('/'), urlencoding::encode(task_id));
+    for _ in 0..60 {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        let response: serde_json::Value = client.get(&query).bearer_auth(auth).send().await
+            .map_err(|e| format!("查询 MiniMax 视频任务失败: {e}"))?.json().await
+            .map_err(|e| format!("读取 MiniMax 任务状态失败: {e}"))?;
+        match response.get("status").and_then(|v| v.as_str()).unwrap_or("") {
+            "Success" | "success" => {
+                let file_id = response.get("file_id").and_then(|v| v.as_str())
+                    .ok_or("MiniMax 成功响应缺少 file_id")?;
+                let file: serde_json::Value = client
+                    .get(format!("{}/files/retrieve?file_id={}", base.trim_end_matches('/'), urlencoding::encode(file_id)))
+                    .bearer_auth(auth).send().await
+                    .map_err(|e| format!("获取 MiniMax 视频文件失败: {e}"))?
+                    .json().await.map_err(|e| format!("读取 MiniMax 视频文件失败: {e}"))?;
+                let url = file.get("file").and_then(|v| v.get("download_url"))
+                    .and_then(|v| v.as_str()).ok_or("MiniMax 文件响应缺少 download_url")?;
+                let bytes = super::safe_media_fetch::fetch_media(url, &super::safe_media_fetch::SystemMediaDnsResolver,
+                    &super::safe_media_fetch::FetchPolicy { total_deadline: Duration::from_secs(HTTP_REQUEST_TIMEOUT_SECS), kind: super::safe_media_fetch::MediaKind::Video, allow_address: Box::new(|_, ip| super::safe_media_fetch::is_public_download_ip(ip)) }).await?;
+                return Ok(GeneratedMedia { base64_data: base64::engine::general_purpose::STANDARD.encode(bytes), extension: "mp4".into() });
+            }
+            "Fail" | "Failed" | "failed" => return Err(format!("MiniMax 视频生成失败: {response}")),
+            _ => continue,
+        }
+    }
+    Err("MiniMax 视频生成超时".into())
+}
+
+#[tauri::command]
 pub fn list_ai_logs(limit: Option<usize>) -> Result<Vec<AiLogOutput>, String> {
     let limit = normalize_log_limit(limit);
     let lines = config::read_log_lines(limit)?;

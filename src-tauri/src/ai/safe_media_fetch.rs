@@ -48,6 +48,7 @@ pub const MAX_MEDIA_BYTES: u64 = 64 * 1024 * 1024;
 pub enum MediaKind {
     Image,
     Audio,
+    Video,
 }
 
 impl MediaKind {
@@ -55,6 +56,7 @@ impl MediaKind {
         match self {
             MediaKind::Image => "image/",
             MediaKind::Audio => "audio/",
+            MediaKind::Video => "video/",
         }
     }
 

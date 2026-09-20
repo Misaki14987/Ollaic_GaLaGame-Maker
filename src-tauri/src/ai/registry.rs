@@ -23,6 +23,7 @@ pub enum Modality {
     Image,
     Tts,
     Music,
+    Video,
 }
 
 /// Chat-semantics capability flags. Media-only providers still carry these
@@ -71,6 +72,7 @@ pub struct ProviderSpec {
     pub image: Option<ModalitySpec>,
     pub tts: Option<ModalitySpec>,
     pub music: Option<ModalitySpec>,
+    pub video: Option<ModalitySpec>,
 }
 
 impl ProviderSpec {
@@ -80,6 +82,7 @@ impl ProviderSpec {
             Modality::Image => self.image.as_ref(),
             Modality::Tts => self.tts.as_ref(),
             Modality::Music => self.music.as_ref(),
+            Modality::Video => self.video.as_ref(),
         }
     }
 }
@@ -275,6 +278,7 @@ const ALIYUN_TTS_MODELS: &[&str] = &[
 const VOLCENGINE_TTS_MODELS: &[&str] = &["seed-tts", "seed-tts-2.0", "mega-tts", "doubao-tts"];
 
 const MUSIC_MODELS: &[&str] = &["music-1"];
+const MINIMAX_VIDEO_MODELS: &[&str] = &["MiniMax-Hailuo-02", "T2V-01-Director", "T2V-01"];
 
 const CUSTOM_CHAT_MODELS: &[&str] = &["gpt-4o-mini"];
 const CUSTOM_IMAGE_MODELS: &[&str] = &["image-model"];
@@ -309,6 +313,7 @@ pub const PROVIDERS: &[ProviderSpec] = &[
             base_url_placeholder: "(默认 https://api.openai.com/v1)",
         }),
         music: None,
+        video: None,
     },
     ProviderSpec {
         id: "anthropic",
@@ -324,6 +329,7 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         image: None,
         tts: None,
         music: None,
+        video: None,
     },
     ProviderSpec {
         id: "gemini",
@@ -345,6 +351,7 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         }),
         tts: None,
         music: None,
+        video: None,
     },
     ProviderSpec {
         id: "deepseek",
@@ -360,6 +367,7 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         image: None,
         tts: None,
         music: None,
+        video: None,
     },
     ProviderSpec {
         id: "groq",
@@ -375,6 +383,7 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         image: None,
         tts: None,
         music: None,
+        video: None,
     },
     ProviderSpec {
         id: "xai",
@@ -390,6 +399,7 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         image: None,
         tts: None,
         music: None,
+        video: None,
     },
     ProviderSpec {
         id: "cohere",
@@ -405,6 +415,7 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         image: None,
         tts: None,
         music: None,
+        video: None,
     },
     ProviderSpec {
         id: "ollama",
@@ -420,6 +431,7 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         image: None,
         tts: None,
         music: None,
+        video: None,
     },
     ProviderSpec {
         id: "aliyun",
@@ -441,6 +453,7 @@ pub const PROVIDERS: &[ProviderSpec] = &[
             base_url_placeholder: "(默认 https://dashscope.aliyuncs.com/api/v1)",
         }),
         music: None,
+        video: None,
     },
     ProviderSpec {
         id: "volcengine",
@@ -463,6 +476,7 @@ pub const PROVIDERS: &[ProviderSpec] = &[
                 "(默认 https://openspeech.bytedance.com/api/v3/tts/unidirectional)",
         }),
         music: None,
+        video: None,
     },
     ProviderSpec {
         id: "zhipu",
@@ -478,6 +492,7 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         }),
         tts: None,
         music: None,
+        video: None,
     },
     ProviderSpec {
         id: "siliconflow",
@@ -499,6 +514,7 @@ pub const PROVIDERS: &[ProviderSpec] = &[
             default_base_url: "https://api.siliconflow.cn/v1",
             base_url_placeholder: "(默认 https://api.siliconflow.cn/v1)",
         }),
+        video: None,
     },
     ProviderSpec {
         id: "elevenlabs",
@@ -514,6 +530,7 @@ pub const PROVIDERS: &[ProviderSpec] = &[
             base_url_placeholder: "(默认 https://api.elevenlabs.io)",
         }),
         music: None,
+        video: None,
     },
     ProviderSpec {
         id: "midjourney",
@@ -529,6 +546,7 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         }),
         tts: None,
         music: None,
+        video: None,
     },
     ProviderSpec {
         id: "sd-webui",
@@ -544,6 +562,7 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         }),
         tts: None,
         music: None,
+        video: None,
     },
     ProviderSpec {
         id: "custom",
@@ -577,6 +596,23 @@ pub const PROVIDERS: &[ProviderSpec] = &[
             default_base_url: "",
             base_url_placeholder: "必填，指向返回音频字节的音乐生成端点",
         }),
+        video: None,
+    },
+    ProviderSpec {
+        id: "minimax",
+        requires_api_key: true,
+        capability: HOSTED_MEDIA,
+        chat: None,
+        image: None,
+        tts: None,
+        music: None,
+        video: Some(ModalitySpec {
+            label: "MiniMax 视频",
+            default_model: "MiniMax-Hailuo-02",
+            models: MINIMAX_VIDEO_MODELS,
+            default_base_url: "https://api.minimax.io/v1",
+            base_url_placeholder: "(默认 https://api.minimax.io/v1)",
+        }),
     },
     // Retired from every picker, kept resolvable so an older saved config
     // still loads and reports a useful error instead of "未知 AI 供应商".
@@ -588,6 +624,7 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         image: None,
         tts: None,
         music: None,
+        video: None,
     },
     ProviderSpec {
         id: "edge-tts",
@@ -597,6 +634,7 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         image: None,
         tts: None,
         music: None,
+        video: None,
     },
 ];
 
@@ -663,6 +701,7 @@ pub struct ProviderCatalog {
     pub image: Vec<ProviderOption>,
     pub tts: Vec<ProviderOption>,
     pub music: Vec<ProviderOption>,
+    pub video: Vec<ProviderOption>,
 }
 
 pub fn options_for(modality: Modality) -> Vec<ProviderOption> {
@@ -690,6 +729,7 @@ pub fn catalog() -> ProviderCatalog {
         image: options_for(Modality::Image),
         tts: options_for(Modality::Tts),
         music: options_for(Modality::Music),
+        video: options_for(Modality::Video),
     }
 }
 

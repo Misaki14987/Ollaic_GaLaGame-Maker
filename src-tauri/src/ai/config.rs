@@ -7,6 +7,7 @@ const CONFIG_FILE: &str = "ai.json";
 const IMAGE_CONFIG_FILE: &str = "ai-image.json";
 const TTS_CONFIG_FILE: &str = "ai-tts.json";
 const MUSIC_CONFIG_FILE: &str = "ai-music.json";
+const VIDEO_CONFIG_FILE: &str = "ai-video.json";
 const LOG_FILE: &str = "ai-log.jsonl";
 const AGENT_TRACE_FILE: &str = "ai-agent-trace.jsonl";
 
@@ -79,6 +80,15 @@ impl AiProviderConfig {
         Self {
             provider: "custom".into(),
             model: "music-1".into(),
+            api_key: String::new(),
+            base_url: String::new(),
+        }
+    }
+
+    fn video_default() -> Self {
+        Self {
+            provider: "minimax".into(),
+            model: "MiniMax-Hailuo-02".into(),
             api_key: String::new(),
             base_url: String::new(),
         }
@@ -174,6 +184,14 @@ pub fn load_music_config() -> AiProviderConfig {
 
 pub fn save_music_config(config: &AiProviderConfig) -> Result<(), String> {
     save_provider_config(MUSIC_CONFIG_FILE, config)
+}
+
+pub fn load_video_config() -> AiProviderConfig {
+    load_provider_config(VIDEO_CONFIG_FILE, AiProviderConfig::video_default)
+}
+
+pub fn save_video_config(config: &AiProviderConfig) -> Result<(), String> {
+    save_provider_config(VIDEO_CONFIG_FILE, config)
 }
 
 fn load_provider_config(

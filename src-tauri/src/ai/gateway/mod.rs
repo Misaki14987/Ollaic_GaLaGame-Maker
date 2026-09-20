@@ -190,6 +190,7 @@ fn media_capability(modality: Modality) -> MediaCapability {
         Modality::Image => MediaCapability::ImageGeneration,
         Modality::Tts => MediaCapability::TtsGeneration,
         Modality::Music => MediaCapability::MusicGeneration,
+        Modality::Video => unreachable!("video uses its asynchronous provider gateway"),
         Modality::Chat => unreachable!("chat does not route through the media gateway"),
     }
 }

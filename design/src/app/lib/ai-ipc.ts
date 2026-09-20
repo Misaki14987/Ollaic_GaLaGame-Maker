@@ -45,6 +45,7 @@ export interface ProviderCatalog {
   image: ProviderOption[];
   tts: ProviderOption[];
   music: ProviderOption[];
+  video: ProviderOption[];
 }
 
 export async function listAiProviders(): Promise<ProviderCatalog> {
@@ -171,6 +172,18 @@ export async function getAiMusicConfig(): Promise<AiProviderConfig> {
 
 export async function setAiMusicConfig(config: AiProviderConfig): Promise<void> {
   return invoke<void>('set_ai_music_config', { config });
+}
+
+export async function getAiVideoConfig(): Promise<AiProviderConfig> {
+  return invoke<AiProviderConfig>('get_ai_video_config');
+}
+
+export async function setAiVideoConfig(config: AiProviderConfig): Promise<void> {
+  return invoke<void>('set_ai_video_config', { config });
+}
+
+export async function generateVideo(prompt: string, model: string): Promise<GeneratedMedia> {
+  return invoke<GeneratedMedia>('generate_video', { prompt, model });
 }
 
 export async function validateAiConfig(config: AiConfig): Promise<AiValidationResult> {
