@@ -123,7 +123,7 @@ mod tests {
     /// to prevent.
     #[test]
     fn every_registry_modality_has_an_adaptor() {
-        for modality in [Modality::Image, Modality::Tts, Modality::Music] {
+        for modality in [Modality::Image, Modality::Tts, Modality::Music, Modality::Video] {
             for option in registry::options_for(modality) {
                 assert!(
                     adaptor_for(&option.value, modality).is_some(),
@@ -139,7 +139,7 @@ mod tests {
     /// is dead code the UI can never reach.
     #[test]
     fn every_adaptor_pairing_is_offered_by_the_registry() {
-        for modality in [Modality::Image, Modality::Tts, Modality::Music] {
+        for modality in [Modality::Image, Modality::Tts, Modality::Music, Modality::Video] {
             let offered: Vec<String> = registry::options_for(modality)
                 .into_iter()
                 .map(|option| option.value)

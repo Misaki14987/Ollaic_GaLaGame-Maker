@@ -12,6 +12,7 @@ import {
   Image,
   Volume2,
   Music,
+  Film,
 } from 'lucide-react';
 import {
   type AiLogEntry,
@@ -29,13 +30,15 @@ import {
   setAiTtsConfig,
   getAiMusicConfig,
   setAiMusicConfig,
+  getAiVideoConfig,
+  setAiVideoConfig,
   validateAiConfig,
   listAiLogs,
   clearAiLogs,
   getAiLogPath,
 } from '../lib/ai-ipc';
 
-type AiSettingsTab = 'chat' | 'image' | 'tts' | 'music';
+type AiSettingsTab = 'chat' | 'image' | 'tts' | 'music' | 'video';
 
 // Base URL is deliberately left empty: the backend falls back to the
 // provider's built-in endpoint, and a provider that has none shows the
@@ -79,6 +82,7 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
   const [imageConfig, setImageConfig] = useState<AiProviderConfig | null>(null);
   const [ttsConfig, setTtsConfig] = useState<AiProviderConfig | null>(null);
   const [musicConfig, setMusicConfig] = useState<AiProviderConfig | null>(null);
+  const [videoConfig, setVideoConfig] = useState<AiProviderConfig | null>(null);
   const [saving, setSaving] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [logsLoading, setLogsLoading] = useState(false);
@@ -105,14 +109,16 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
       getAiImageConfig(),
       getAiTtsConfig(),
       getAiMusicConfig(),
+      getAiVideoConfig(),
     ])
-      .then(([providers, chat, image, tts, music]) => {
+      .then(([providers, chat, image, tts, music, video]) => {
         setCatalog(providers);
         setConfig(chat);
         configRef.current = chat;
         setImageConfig(normalizeConfig(image, providers.image));
         setTtsConfig(normalizeConfig(tts, providers.tts));
         setMusicConfig(normalizeConfig(music, providers.music));
+        setVideoConfig(normalizeConfig(video, providers.video));
       })
       .catch((e) => setError(String(e)));
   }, [open]);
@@ -138,6 +144,9 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
 
   const updateMusic = (patch: Partial<AiProviderConfig>) =>
     setMusicConfig((c) => (c ? { ...c, ...patch } : c));
+
+  const updateVideo = (patch: Partial<AiProviderConfig>) =>
+    setVideoConfig((c) => (c ? { ...c, ...patch } : c));
 
   const handleProviderChange = (
     value: string,
@@ -227,7 +236,7 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
   };
 
   const handleSave = async () => {
-    if (!config || !imageConfig || !ttsConfig || !musicConfig) return;
+    if (!config || !imageConfig || !ttsConfig || !musicConfig || !videoConfig) return;
     setSaving(true);
     setError(null);
     try {
@@ -236,6 +245,7 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
         setAiImageConfig(imageConfig),
         setAiTtsConfig(ttsConfig),
         setAiMusicConfig(musicConfig),
+        setAiVideoConfig(videoConfig),
       ]);
       onSaved?.();
       onClose();
@@ -246,7 +256,7 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
     }
   };
 
-  const loaded = catalog && config && imageConfig && ttsConfig && musicConfig;
+  const loaded = catalog && config && imageConfig && ttsConfig && musicConfig && videoConfig;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
@@ -270,6 +280,7 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
             <TabButton active={activeTab === 'image'} icon={<Image className="h-4 w-4" />} label="图片" onClick={() => setActiveTab('image')} />
             <TabButton active={activeTab === 'tts'} icon={<Volume2 className="h-4 w-4" />} label="音频" onClick={() => setActiveTab('tts')} />
             <TabButton active={activeTab === 'music'} icon={<Music className="h-4 w-4" />} label="音乐" onClick={() => setActiveTab('music')} />
+            <TabButton active={activeTab === 'video'} icon={<Film className="h-4 w-4" />} label="视频" onClick={() => setActiveTab('video')} />
           </div>
         </div>
 
@@ -334,6 +345,16 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
                   options={catalog.music}
                   onUpdate={updateMusic}
                   onProviderChange={(value) => handleProviderChange(value, musicConfig, catalog.music, updateMusic)}
+                />
+              )}
+
+              {activeTab === 'video' && videoConfig && (
+                <ProviderConfigPanel
+                  title="视频生成配置"
+                  config={videoConfig}
+                  options={catalog.video}
+                  onUpdate={updateVideo}
+                  onProviderChange={(value) => handleProviderChange(value, videoConfig, catalog.video, updateVideo)}
                 />
               )}
 

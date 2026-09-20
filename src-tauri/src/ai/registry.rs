@@ -750,10 +750,7 @@ mod tests {
     fn every_modality_entry_offers_its_default_model() {
         for provider in PROVIDERS {
             for modality in [
-                Modality::Chat,
-                Modality::Image,
-                Modality::Tts,
-                Modality::Music,
+                Modality::Chat, Modality::Image, Modality::Tts, Modality::Music, Modality::Video,
             ] {
                 let Some(spec) = provider.modality(modality) else {
                     continue;
@@ -779,10 +776,7 @@ mod tests {
     fn base_url_requirement_matches_the_built_in_default() {
         for provider in PROVIDERS {
             for modality in [
-                Modality::Chat,
-                Modality::Image,
-                Modality::Tts,
-                Modality::Music,
+                Modality::Chat, Modality::Image, Modality::Tts, Modality::Music, Modality::Video,
             ] {
                 let Some(spec) = provider.modality(modality) else {
                     continue;
@@ -809,10 +803,7 @@ mod tests {
     fn placeholders_never_contain_the_rejected_example_host() {
         for provider in PROVIDERS {
             for modality in [
-                Modality::Chat,
-                Modality::Image,
-                Modality::Tts,
-                Modality::Music,
+                Modality::Chat, Modality::Image, Modality::Tts, Modality::Music, Modality::Video,
             ] {
                 let Some(spec) = provider.modality(modality) else {
                     continue;
