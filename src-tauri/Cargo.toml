@@ -25,7 +25,7 @@ mime_guess = "2"
 percent-encoding = "2"
 urlencoding = "2"
 base64 = "0.22"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
 tokio-tungstenite = { version = "0.21", default-features = false, features = ["connect", "handshake", "rustls-tls-webpki-roots"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 ort = "2.0.0-rc.12"
