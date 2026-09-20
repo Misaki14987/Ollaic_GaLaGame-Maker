@@ -2455,7 +2455,9 @@ function AssetAiGenerateDialog({
               effectiveModel,
               targetFilename.split('.').pop() || 'mp3',
             );
-      const asset = await saveGeneratedAsset(projectPath, targetCategory, targetFilename, media.base64Data);
+      const requestedStem = targetFilename.replace(/\.[^.]+$/, '');
+      const actualExtension = media.extension?.replace(/^\./, '') || targetFilename.split('.').pop() || 'bin';
+      const asset = await saveGeneratedAsset(projectPath, targetCategory, `${requestedStem}.${actualExtension}`, media.base64Data);
       await onGenerated(asset, isMusicGeneration ? promptSource : undefined);
       onClose();
     } catch (e) {

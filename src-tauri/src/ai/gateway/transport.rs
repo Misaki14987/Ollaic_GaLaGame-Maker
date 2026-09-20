@@ -11,6 +11,7 @@ use std::time::Duration;
 use base64::Engine;
 
 use super::types::GeneratedMedia;
+use super::types::extension_from_mime;
 use crate::ai::commands::log_provider_event;
 use crate::ai::config::AiProviderConfig;
 use crate::ai::registry::{self, Modality};
@@ -169,11 +170,18 @@ pub async fn response_to_generated_media(
         log_provider_event(action, cfg, model, endpoint, false, &text);
         return Err(format!("音频生成失败 ({status}): {text}"));
     }
+    let actual_extension = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .map(|mime| extension_from_mime(mime.trim(), extension))
+        .unwrap_or_else(|| extension.to_string());
     let bytes = collect_media_response(response, MediaKind::Audio).await?;
     log_provider_event(action, cfg, model, endpoint, true, "audio generated");
     Ok(GeneratedMedia {
         base64_data: base64::engine::general_purpose::STANDARD.encode(bytes),
-        extension: extension.to_string(),
+        extension: actual_extension,
     })
 }
 
