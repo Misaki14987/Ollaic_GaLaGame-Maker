@@ -19,15 +19,11 @@ pub async fn generate_tts(
 ) -> Result<GeneratedMedia, String> {
     let voice_id = voice_id_from_prompt(request.voice_prompt);
     let endpoint = endpoint_for(cfg, &voice_id);
-    let body = serde_json::json!({
-        "text": request.text,
-        "model_id": request.model,
-        "output_format": output_format(request.format)
-    });
+    let body = serde_json::json!({ "text": request.text, "model_id": request.model });
     let body =
         serde_json::to_string(&body).map_err(|e| format!("序列化 ElevenLabs 请求失败: {e}"))?;
     let response = http_client()
-        .post(&endpoint)
+        .post(format!("{}?output_format={}", endpoint, output_format(request.format)))
         .header("Content-Type", "application/json")
         .header("xi-api-key", cfg.api_key.trim())
         .body(body)
@@ -39,7 +35,7 @@ pub async fn generate_tts(
         cfg,
         request.model,
         &endpoint,
-        request.format,
+        actual_extension(request.format),
         "tts_generate",
     )
     .await
@@ -59,9 +55,14 @@ fn endpoint_for(cfg: &AiProviderConfig, voice_id: &str) -> String {
 
 fn output_format(format: &str) -> &'static str {
     match format {
-        "pcm" | "wav" => "pcm_44100",
+        "pcm" => "pcm_44100",
+        "wav" => "wav_44100",
         _ => "mp3_44100_128",
     }
+}
+
+fn actual_extension(format: &str) -> &'static str {
+    match format { "pcm" => "pcm", "wav" => "wav", _ => "mp3" }
 }
 
 /// Pull an ElevenLabs voice id out of a free-text voice prompt. Ids are long
@@ -121,9 +122,10 @@ mod tests {
     }
 
     #[test]
-    fn wav_and_pcm_both_request_raw_pcm() {
-        assert_eq!(output_format("wav"), "pcm_44100");
+    fn formats_match_containers() {
+        assert_eq!(output_format("wav"), "wav_44100");
         assert_eq!(output_format("pcm"), "pcm_44100");
         assert_eq!(output_format("mp3"), "mp3_44100_128");
+        assert_eq!(actual_extension("wav"), "wav");
     }
 }

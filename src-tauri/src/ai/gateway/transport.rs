@@ -14,6 +14,7 @@ use super::types::GeneratedMedia;
 use crate::ai::commands::log_provider_event;
 use crate::ai::config::AiProviderConfig;
 use crate::ai::registry::{self, Modality};
+use crate::ai::safe_media_fetch::{collect_media_response, MediaKind};
 
 pub const HTTP_REQUEST_TIMEOUT_SECS: u64 = 180;
 
@@ -168,10 +169,7 @@ pub async fn response_to_generated_media(
         log_provider_event(action, cfg, model, endpoint, false, &text);
         return Err(format!("音频生成失败 ({status}): {text}"));
     }
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|e| format!("读取音频生成响应失败: {e}"))?;
+    let bytes = collect_media_response(response, MediaKind::Audio).await?;
     log_provider_event(action, cfg, model, endpoint, true, "audio generated");
     Ok(GeneratedMedia {
         base64_data: base64::engine::general_purpose::STANDARD.encode(bytes),
