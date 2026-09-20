@@ -12,7 +12,7 @@ use base64::Engine;
 
 use super::types::GeneratedMedia;
 use super::types::extension_from_mime;
-use crate::ai::commands::log_provider_event;
+use crate::ai::media_support::log_provider_event;
 use crate::ai::config::AiProviderConfig;
 use crate::ai::registry::{self, Modality};
 use crate::ai::safe_media_fetch::{collect_media_response, MediaKind};

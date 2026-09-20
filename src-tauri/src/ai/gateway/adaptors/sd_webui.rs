@@ -3,7 +3,7 @@
 //! The model is selected inside the WebUI itself rather than per request, so
 //! the configured model name is only carried into the log line.
 
-use crate::ai::commands::log_provider_event;
+use crate::ai::media_support::log_provider_event;
 use crate::ai::config::AiProviderConfig;
 use crate::ai::gateway::transport::{media_endpoint, post_json_text};
 use crate::ai::gateway::types::{strip_data_url_prefix, GeneratedMedia, ImageRequest};

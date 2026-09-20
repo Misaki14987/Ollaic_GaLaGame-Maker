@@ -12,7 +12,7 @@ use futures::{SinkExt, StreamExt};
 use serde::Deserialize;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::ai::commands::{download_generated_media, log_provider_event};
+use crate::ai::media_support::{download_generated_media, log_provider_event};
 use crate::ai::config::AiProviderConfig;
 use crate::ai::gateway::transport::{
     encode_base64, http_client, media_endpoint, post_json_text, resolved_base_url,

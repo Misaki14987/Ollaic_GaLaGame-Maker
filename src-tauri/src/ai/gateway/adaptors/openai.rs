@@ -8,7 +8,7 @@
 
 use serde::Deserialize;
 
-use crate::ai::commands::download_generated_media;
+use crate::ai::media_support::download_generated_media;
 use crate::ai::config::AiProviderConfig;
 use crate::ai::gateway::transport::{
     bearer_post, media_endpoint, post_audio_bytes, post_json_text, response_to_generated_media,
@@ -82,7 +82,7 @@ pub async fn parse_image_response(
         .next()
         .ok_or_else(|| "图片生成响应中没有图片数据".to_string())?;
     if let Some(b64) = item.b64_json {
-        crate::ai::commands::log_provider_event(
+        crate::ai::media_support::log_provider_event(
             "image_generate",
             cfg,
             model,
@@ -177,7 +177,7 @@ pub async fn generate_music(
         .await
         .map_err(|e| format!("读取音乐生成响应失败: {e}"))?;
     if !status.is_success() {
-        crate::ai::commands::log_provider_event(
+        crate::ai::media_support::log_provider_event(
             "music_generate",
             cfg,
             request.model,
@@ -204,7 +204,7 @@ async fn parse_music_json_response(
     let value: serde_json::Value = serde_json::from_str(text)
         .map_err(|e| format!("解析音乐生成响应失败: {e}; 响应: {}", truncate(text)))?;
     if let Some(b64) = find_audio_base64(&value) {
-        crate::ai::commands::log_provider_event(
+        crate::ai::media_support::log_provider_event(
             "music_generate",
             cfg,
             model,
@@ -221,7 +221,7 @@ async fn parse_music_json_response(
         return download_generated_media(cfg, model, endpoint, &url, fallback_ext, "music_generate")
             .await;
     }
-    crate::ai::commands::log_provider_event("music_generate", cfg, model, endpoint, false, text);
+    crate::ai::media_support::log_provider_event("music_generate", cfg, model, endpoint, false, text);
     Err(format!(
         "音乐生成响应中未找到音频数据。请让自定义端点直接返回音频字节（Content-Type: audio/*），或返回含 data/audio/b64_json/url 字段的 JSON。响应: {}",
         truncate(text)
@@ -229,7 +229,7 @@ async fn parse_music_json_response(
 }
 
 fn truncate(value: &str) -> String {
-    crate::ai::commands::truncate_log_field(value)
+    crate::ai::media_support::truncate_log_field(value)
 }
 
 /// Locate base64-encoded audio in common custom-gateway JSON shapes.

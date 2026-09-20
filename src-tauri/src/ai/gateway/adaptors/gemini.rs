@@ -6,7 +6,7 @@
 
 use serde::Deserialize;
 
-use crate::ai::commands::log_provider_event;
+use crate::ai::media_support::log_provider_event;
 use crate::ai::config::AiProviderConfig;
 use crate::ai::gateway::transport::{gemini_endpoint, http_client};
 use crate::ai::gateway::types::{extension_from_mime, GeneratedMedia, ImageRequest};

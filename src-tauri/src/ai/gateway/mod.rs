@@ -149,12 +149,13 @@ pub async fn generate_tts_with(
     model: &str,
     format: &str,
 ) -> Result<GeneratedMedia, String> {
+    let model = prepare(cfg, model, text, Modality::Tts, "音频", "语音文本")?;
     let ctx = MediaCtx {
         cfg,
         app_handle: None,
     };
     let request = TtsRequest {
-        model,
+        model: &model,
         text,
         voice_prompt,
         format: types::normalize_audio_format(format),
@@ -173,7 +174,7 @@ fn prepare(
     capability_label: &str,
     input_label: &str,
 ) -> Result<String, String> {
-    crate::ai::commands::validate_provider_config_basics(cfg, capability_label)?;
+    crate::ai::media_support::validate_provider_config_basics(cfg, capability_label)?;
     require_media_capability(cfg, media_capability(modality))?;
     let model = model.trim();
     if model.is_empty() {
