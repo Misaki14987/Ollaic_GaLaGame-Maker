@@ -6,6 +6,7 @@ use super::gateway::types::ImageReference;
 // media result type from here rather than reaching into the gateway.
 pub use super::gateway::types::GeneratedMedia;
 use super::gateway::{self};
+use super::media_support;
 use super::provider_capability::{capability_for_config, ProviderCapability, RequiredCapability};
 use super::registry::{self, Modality, ProviderCatalog};
 use base64::Engine;
@@ -753,7 +754,8 @@ fn read_image_reference(path: &str) -> Result<ImageReference, String> {
     })
 }
 
-pub(crate) async fn download_generated_media(
+#[allow(dead_code)]
+pub(crate) async fn download_generated_media_legacy(
     cfg: &AiProviderConfig,
     model: &str,
     endpoint: &str,
@@ -804,7 +806,7 @@ pub(crate) async fn download_generated_media(
         },
     )
     .await?;
-    log_provider_event(action, cfg, model, endpoint, true, "media generated");
+    media_support::log_provider_event(action, cfg, model, endpoint, true, "media generated");
     Ok(GeneratedMedia {
         base64_data: base64::engine::general_purpose::STANDARD.encode(bytes),
         extension: extension.to_string(),
@@ -839,7 +841,8 @@ fn requires_api_key(provider: &str) -> bool {
     registry::find(provider).is_none_or(|spec| spec.requires_api_key)
 }
 
-pub(crate) fn log_provider_event(
+#[allow(dead_code)]
+pub(crate) fn log_provider_event_legacy(
     action: &str,
     cfg: &AiProviderConfig,
     model: &str,

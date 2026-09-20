@@ -228,6 +228,26 @@ mod tests {
         );
     }
 
+    #[test]
+    fn builtin_media_contract_endpoints_are_stable() {
+        assert_eq!(media_endpoint(&cfg("openai", ""), Modality::Image, "images/generations"), "https://api.openai.com/v1/images/generations");
+        assert_eq!(media_endpoint(&cfg("openai", ""), Modality::Tts, "audio/speech"), "https://api.openai.com/v1/audio/speech");
+        assert_eq!(media_endpoint(&cfg("custom", "https://gateway.test/v1"), Modality::Music, "audio/music"), "https://gateway.test/v1/audio/music");
+        assert_eq!(media_endpoint(&cfg("aliyun", ""), Modality::Image, "tasks/abc"), "https://dashscope.aliyuncs.com/api/v1/tasks/abc");
+        assert_eq!(media_endpoint(&cfg("elevenlabs", ""), Modality::Tts, "v1/text-to-speech/voice"), "https://api.elevenlabs.io/v1/text-to-speech/voice");
+    }
+
+    #[test]
+    fn bearer_contract_includes_auth_only_when_configured() {
+        let request = bearer_post(&cfg("openai", "https://gateway.test"), "https://gateway.test/audio/speech", "{}".into()).build().unwrap();
+        assert_eq!(request.headers().get("authorization").unwrap(), "Bearer key");
+        assert_eq!(request.headers().get("content-type").unwrap(), "application/json");
+        let mut local_cfg = cfg("custom", "https://gateway.test");
+        local_cfg.api_key.clear();
+        let local = bearer_post(&local_cfg, "https://gateway.test/audio/speech", "{}".into()).build().unwrap();
+        assert!(local.headers().get("authorization").is_none());
+    }
+
     /// A Base URL that already points at the full endpoint must not have the
     /// path appended a second time.
     #[test]
