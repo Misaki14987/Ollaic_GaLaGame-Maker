@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use sha2::{Digest, Sha256};
 
 /// 抠图模型（BiRefNet-lite fp16，MIT）的下载候选地址与预期大小。
 /// 模型不入 git 仓库（115MB），改由构建时下载到 `models/`，再由 Tauri 打进安装包。
@@ -7,6 +8,7 @@ const DEFAULT_MODEL_URLS: &[&str] = &[
     "https://huggingface.co/onnx-community/BiRefNet_lite-ONNX/resolve/main/onnx/model_fp16.onnx",
 ];
 const MODEL_EXPECTED_BYTES: u64 = 114_538_221;
+const MODEL_SHA256: &str = "3577c6271cc2333089950dd91a4eca03818d636514ef03557a9678db61644821";
 const MODEL_FILENAME: &str = "birefnet-lite-fp16.onnx";
 /// 下载读取上限（略高于预期大小，绕过 ureq 默认 10MB 限制）。
 const DOWNLOAD_LIMIT_BYTES: u64 = 150 * 1024 * 1024;
@@ -49,7 +51,7 @@ fn ensure_matting_model() -> Result<(), String> {
 
     // 已存在且大小匹配 → 认为完好，跳过。
     if let Ok(meta) = std::fs::metadata(&model_path) {
-        if meta.len() == MODEL_EXPECTED_BYTES {
+        if meta.len() == MODEL_EXPECTED_BYTES && sha256_file(&model_path)? == MODEL_SHA256 {
             return Ok(());
         }
         // 大小不符：可能是半截/损坏文件，删除后重新下载。
@@ -99,7 +101,8 @@ fn ensure_matting_model() -> Result<(), String> {
                 {
                     Ok(bytes) => {
                         let downloaded = bytes.len() as u64;
-                        if downloaded == MODEL_EXPECTED_BYTES {
+                        let digest = hex_sha256(&bytes);
+                        if downloaded == MODEL_EXPECTED_BYTES && digest == MODEL_SHA256 {
                             downloaded_bytes = Some(bytes);
                             break;
                         } else {
@@ -130,4 +133,14 @@ fn ensure_matting_model() -> Result<(), String> {
 
     println!("cargo:warning=抠图模型下载完成：{}", model_path.display());
     Ok(())
+}
+
+fn hex_sha256(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    digest.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn sha256_file(path: &PathBuf) -> Result<String, String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("读取模型哈希失败: {e}"))?;
+    Ok(hex_sha256(&bytes))
 }
