@@ -50,6 +50,10 @@ jobs:
     name: Rust checks
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # CI only type-checks and runs tests; the 115 MB runtime matting model
+      # is not needed and should not make the build depend on Hugging Face.
+      MATTING_SKIP_MODEL_DOWNLOAD: "1"
 
     steps:
       - name: Checkout
@@ -71,6 +75,11 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
+
+      - name: Setup dummy model for Tauri resource check
+        run: |
+          mkdir -p src-tauri/models
+          touch src-tauri/models/birefnet-lite-fp16.onnx
 
       - name: Check Rust tests
         run: cargo check --tests --manifest-path src-tauri/Cargo.toml

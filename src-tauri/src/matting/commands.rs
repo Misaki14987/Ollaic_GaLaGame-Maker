@@ -307,8 +307,8 @@ mod tests {
     fn matte_image_produces_transparent_png() {
         let model_path =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("models/{MODEL_FILENAME}"));
-        if !model_path.is_file() {
-            eprintln!("跳过：未找到模型 {}", model_path.display());
+        if !model_path.is_file() || std::fs::metadata(&model_path).map(|m| m.len()).unwrap_or(0) == 0 {
+            eprintln!("跳过：未找到有效模型 {}", model_path.display());
             return;
         }
 
