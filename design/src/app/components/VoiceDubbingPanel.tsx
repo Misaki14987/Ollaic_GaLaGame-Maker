@@ -294,7 +294,13 @@ export function VoiceDubbingPanel({
   // Single generate
   const handleSingleGenerate = useCallback(async (card: VoiceAssetCard) => {
     const ttsConfig = await getAiTtsConfig().catch(() => null);
-    if (!ttsConfig || !ttsConfig.model) {
+    if (!ttsConfig || !ttsConfig.model.trim()) {
+      alert('请先在 AI 设置中配置 TTS 供应商和模型。');
+      return;
+    }
+    const configuredModels = parseConfiguredModels(ttsConfig.model);
+    const modelToUse = batchModel || configuredModels[0] || ttsConfig.model.trim();
+    if (!modelToUse) {
       alert('请先在 AI 设置中配置 TTS 供应商和模型。');
       return;
     }
@@ -302,15 +308,15 @@ export function VoiceDubbingPanel({
     const items: BatchTtsItem[] = [{
       voiceCardId: card.id,
       text: card.text,
-      voicePrompt: [card.character, card.emotion].filter(Boolean).join(' '),
+      voicePrompt: timbreForCard(card) || [card.character, card.emotion].filter(Boolean).join(' '),
     }];
+    let unlisten: (() => void) | null = null;
     try {
       setBatchProgress(new Map());
-      const unlisten = await listenBatchTtsProgress((p) => {
+      unlisten = await listenBatchTtsProgress((p) => {
         setBatchProgress((prev) => { const n = new Map(prev); n.set(p.voiceCardId, p); return n; });
       });
-      const results = await generateBatchTts(projectPath, items, ttsConfig.model, 'mp3');
-      unlisten();
+      const results = await generateBatchTts(projectPath, items, modelToUse, 'mp3');
       const done = results.find((r) => r.voiceCardId === card.id && r.status === 'done');
       if (done?.assetName) await writeVoiceFlagToScenes(projectPath, card, done.assetName);
       onVoiceCardsChanged();
@@ -318,10 +324,11 @@ export function VoiceDubbingPanel({
       console.error('Single TTS failed:', e);
       alert(`生成失败: ${e}`);
     } finally {
+      unlisten?.();
       setGeneratingId(null);
       setBatchProgress(new Map());
     }
-  }, [projectPath, onVoiceCardsChanged]);
+  }, [batchModel, projectPath, onVoiceCardsChanged, timbreForCard]);
 
   // Import file to fill voice card
   const handleImportFill = useCallback(async (card: VoiceAssetCard) => {

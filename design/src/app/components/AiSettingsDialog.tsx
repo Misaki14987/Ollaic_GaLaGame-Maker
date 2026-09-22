@@ -61,12 +61,19 @@ function configFromOption(option: ProviderOption): AiProviderConfig {
 function normalizeConfig(
   config: AiProviderConfig,
   options: ProviderOption[],
+  singleModel = false,
 ): AiProviderConfig {
   if (options.length === 0) return config;
-  if (options.some((option) => option.value === config.provider)) {
-    return config;
+  const current = options.some((option) => option.value === config.provider)
+    ? config
+    : configFromOption(options[0]);
+  if (singleModel && current.model) {
+    const first = current.model.split(/[\n,，]/)[0]?.trim();
+    if (first && first !== current.model) {
+      return { ...current, model: first };
+    }
   }
-  return configFromOption(options[0]);
+  return current;
 }
 
 interface Props {
@@ -116,7 +123,7 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
         setConfig(chat);
         configRef.current = chat;
         setImageConfig(normalizeConfig(image, providers.image));
-        setTtsConfig(normalizeConfig(tts, providers.tts));
+        setTtsConfig(normalizeConfig(tts, providers.tts, true));
         setMusicConfig(normalizeConfig(music, providers.music));
         setVideoConfig(normalizeConfig(video, providers.video));
       })
@@ -240,10 +247,14 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
     setSaving(true);
     setError(null);
     try {
+      const normalizedTtsConfig = {
+        ...ttsConfig,
+        model: ttsConfig.model.split(/[\n,，]/)[0]?.trim() || ttsConfig.model.trim(),
+      };
       await Promise.all([
         setAiConfig(config),
         setAiImageConfig(imageConfig),
-        setAiTtsConfig(ttsConfig),
+        setAiTtsConfig(normalizedTtsConfig),
         setAiMusicConfig(musicConfig),
         setAiVideoConfig(videoConfig),
       ]);
@@ -333,6 +344,7 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
                   title="音频 / TTS 配置"
                   config={ttsConfig}
                   options={catalog.tts}
+                  multiModel={false}
                   onUpdate={updateTts}
                   onProviderChange={(value) => handleProviderChange(value, ttsConfig, catalog.tts, updateTts)}
                 />
@@ -424,12 +436,14 @@ function ProviderConfigPanel({
   title,
   config,
   options,
+  multiModel = true,
   onUpdate,
   onProviderChange,
 }: {
   title: string;
   config: AiProviderConfig;
   options: ProviderOption[];
+  multiModel?: boolean;
   onUpdate: (patch: Partial<AiProviderConfig>) => void;
   onProviderChange: (value: string) => void;
 }) {
@@ -444,7 +458,7 @@ function ProviderConfigPanel({
       <ConfigFields
         config={config}
         options={options}
-        multiModel
+        multiModel={multiModel}
         onProviderChange={onProviderChange}
         onUpdate={onUpdate}
       />
