@@ -42,13 +42,6 @@ fn ensure_matting_model() -> Result<(), String> {
     }
     // 显式跳过开关（离线构建、已确认模型就位时使用）。
     if std::env::var("MATTING_SKIP_MODEL_DOWNLOAD").is_ok() {
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let models_dir = manifest_dir.join("models");
-        let model_path = models_dir.join(MODEL_FILENAME);
-        if !model_path.exists() {
-            let _ = std::fs::create_dir_all(&models_dir);
-            let _ = std::fs::write(&model_path, b"");
-        }
         return Ok(());
     }
 
