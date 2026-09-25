@@ -125,4 +125,76 @@ describe('VoiceDubbingPanel single TTS generation', () => {
       expect(onVoiceCardsChanged).toHaveBeenCalled();
     });
   });
+
+  it('does not let stale batch dialog model override single TTS after config changes', async () => {
+    const user = userEvent.setup();
+    // Initially user has OpenAI configured
+    vi.mocked(getAiTtsConfig).mockResolvedValue({
+      provider: 'openai',
+      model: 'tts-1',
+      api_key: 'test-key',
+      base_url: '',
+    });
+
+    vi.mocked(generateBatchTts).mockResolvedValue([
+      {
+        voiceCardId: mockVoiceCard.id,
+        index: 1,
+        total: 1,
+        status: 'done',
+        message: 'done',
+        assetName: 'vocal_alice_01.mp3',
+      },
+    ]);
+
+    const onVoiceCardsChanged = vi.fn();
+    const onSelectVoiceCard = vi.fn();
+
+    render(
+      <VoiceDubbingPanel
+        projectPath="/tmp/project"
+        voiceCards={[mockVoiceCard]}
+        selectedVoiceCard={null}
+        onSelectVoiceCard={onSelectVoiceCard}
+        onVoiceCardsChanged={onVoiceCardsChanged}
+      />
+    );
+
+    // Select card and open batch generate dialog
+    const selectAllBtn = screen.getByRole('button', { name: /全选待配音/ });
+    await user.click(selectAllBtn);
+    const batchBtn = await screen.findByRole('button', { name: '生成选中 (1)' });
+    await user.click(batchBtn);
+
+    // Wait for batch dialog to open and show model selection
+    await waitFor(() => {
+      expect(screen.getByText('AI 配音生成')).toBeInTheDocument();
+    });
+
+    // Close batch dialog
+    const cancelBtn = screen.getByRole('button', { name: '取消' });
+    await user.click(cancelBtn);
+
+    // Now user switches TTS provider in settings to Volcengine seed-tts-2.0
+    vi.mocked(getAiTtsConfig).mockResolvedValue({
+      provider: 'volcengine',
+      model: 'seed-tts-2.0',
+      api_key: 'volc-key',
+      base_url: '',
+    });
+
+    // Click single generate on the card
+    const generateBtn = screen.getByTitle('AI 生成');
+    await user.click(generateBtn);
+
+    await waitFor(() => {
+      // Must use newly configured 'seed-tts-2.0', NOT stale 'tts-1' from batch dialog
+      expect(generateBatchTts).toHaveBeenCalledWith(
+        '/tmp/project',
+        expect.any(Array),
+        'seed-tts-2.0',
+        'mp3',
+      );
+    });
+  });
 });

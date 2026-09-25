@@ -2279,7 +2279,10 @@ export function AssetManager() {
               persistMetadata(setAssetDescription(metadataRef.current, 'bgm', asset.name, prompt.trim()));
             }
             setBgmReferences((current) =>
-              current.map((ref) => ref.filename === asset.name ? { ...ref, exists: true } : ref));
+              current.map((ref) =>
+                (ref.filename === asset.name || (aiMusicFilename && ref.filename === aiMusicFilename))
+                  ? { ...ref, filename: asset.name, exists: true }
+                  : ref));
             setAiMusicFilename(null);
           }
         }}
@@ -2457,7 +2460,10 @@ function AssetAiGenerateDialog({
             );
       const requestedStem = targetFilename.replace(/\.[^.]+$/, '');
       const actualExtension = media.extension?.replace(/^\./, '') || targetFilename.split('.').pop() || 'bin';
-      const asset = await saveGeneratedAsset(projectPath, targetCategory, `${requestedStem}.${actualExtension}`, media.base64Data);
+      const resolvedFilename = isMusicGeneration && initialMusicFilename?.trim()
+        ? initialMusicFilename.trim()
+        : `${requestedStem}.${actualExtension}`;
+      const asset = await saveGeneratedAsset(projectPath, targetCategory, resolvedFilename, media.base64Data);
       await onGenerated(asset, isMusicGeneration ? promptSource : undefined);
       onClose();
     } catch (e) {

@@ -234,7 +234,7 @@ export function VoiceDubbingPanel({
     }
     const models = parseConfiguredModels(ttsConfig.model);
     setBatchConfig(ttsConfig);
-    setBatchModel((current) => current || models[0] || ttsConfig.model.trim());
+    setBatchModel((current) => (models.includes(current) ? current : models[0] || ttsConfig.model.trim()));
   }, [batchRunning, isGenerated, selectedIds, voiceCards]);
 
   // Batch generate
@@ -299,7 +299,7 @@ export function VoiceDubbingPanel({
       return;
     }
     const configuredModels = parseConfiguredModels(ttsConfig.model);
-    const modelToUse = batchModel || configuredModels[0] || ttsConfig.model.trim();
+    const modelToUse = configuredModels[0] || ttsConfig.model.trim();
     if (!modelToUse) {
       alert('请先在 AI 设置中配置 TTS 供应商和模型。');
       return;
@@ -328,7 +328,7 @@ export function VoiceDubbingPanel({
       setGeneratingId(null);
       setBatchProgress(new Map());
     }
-  }, [batchModel, projectPath, onVoiceCardsChanged, timbreForCard]);
+  }, [projectPath, onVoiceCardsChanged, timbreForCard]);
 
   // Import file to fill voice card
   const handleImportFill = useCallback(async (card: VoiceAssetCard) => {
