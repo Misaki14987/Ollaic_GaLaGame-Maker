@@ -53,7 +53,9 @@ pub fn adaptor_for(provider: &str, modality: Modality) -> Option<MediaAdaptor> {
         ("aliyun", Modality::Tts) => Some(MediaAdaptor::DashScope),
         ("volcengine", Modality::Tts) => Some(MediaAdaptor::Volcengine),
 
-        ("custom" | "siliconflow", Modality::Music) => Some(MediaAdaptor::OpenAiCompatible),
+        ("openai" | "custom" | "siliconflow", Modality::Music) => {
+            Some(MediaAdaptor::OpenAiCompatible)
+        }
 
         _ => None,
     }

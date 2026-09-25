@@ -317,7 +317,13 @@ pub const PROVIDERS: &[ProviderSpec] = &[
             default_base_url: "https://api.openai.com/v1",
             base_url_placeholder: "(默认 https://api.openai.com/v1)",
         }),
-        music: None,
+        music: Some(ModalitySpec {
+            label: "OpenAI 兼容",
+            default_model: "music-1",
+            models: MUSIC_MODELS,
+            default_base_url: "",
+            base_url_placeholder: "必填，指向 OpenAI 兼容的 /audio/music 接口",
+        }),
         video: None,
     },
     ProviderSpec {

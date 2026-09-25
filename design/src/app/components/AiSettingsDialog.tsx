@@ -66,7 +66,12 @@ function normalizeConfig(
   if (options.length === 0) return config;
   const current = options.some((option) => option.value === config.provider)
     ? config
-    : configFromOption(options[0]);
+    : {
+        provider: options[0].value,
+        model: options[0].defaultModel,
+        api_key: config.api_key,
+        base_url: config.base_url,
+      };
   if (singleModel && current.model) {
     const first = current.model.split(/[\n,，]/)[0]?.trim();
     if (first && first !== current.model) {

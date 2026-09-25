@@ -115,4 +115,83 @@ describe('AiSettingsDialog TTS configuration', () => {
       expect(onClose).toHaveBeenCalled();
     });
   });
+
+  it('preserves existing OpenAI music configs and custom endpoints', async () => {
+    vi.mocked(listAiProviders).mockResolvedValue({
+      ...mockCatalog,
+      music: [
+        { value: 'openai', label: 'OpenAI 兼容', defaultModel: 'music-1', models: ['music-1'], requiresApiKey: true, needsBaseUrl: true },
+        { value: 'custom', label: '自定义', defaultModel: 'music-1', models: ['music-1'], requiresApiKey: false, needsBaseUrl: true },
+      ],
+    } as any);
+    vi.mocked(getAiMusicConfig).mockResolvedValue({
+      provider: 'openai',
+      model: 'music-1',
+      api_key: 'custom-music-key',
+      base_url: 'https://proxy.example.com/v1',
+    });
+
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    const onSaved = vi.fn();
+
+    render(<AiSettingsDialog open={true} onClose={onClose} onSaved={onSaved} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('AI 设置')).toBeInTheDocument();
+    });
+
+    const saveButton = screen.getByRole('button', { name: '保存 AI 配置' });
+    await user.click(saveButton);
+
+    await waitFor(() => {
+      expect(setAiMusicConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: 'openai',
+          model: 'music-1',
+          api_key: 'custom-music-key',
+          base_url: 'https://proxy.example.com/v1',
+        }),
+      );
+    });
+  });
+
+  it('preserves api_key and base_url when normalizing unknown music provider', async () => {
+    vi.mocked(listAiProviders).mockResolvedValue({
+      ...mockCatalog,
+      music: [
+        { value: 'custom', label: '自定义', defaultModel: 'music-1', models: ['music-1'], requiresApiKey: false, needsBaseUrl: true },
+      ],
+    } as any);
+    vi.mocked(getAiMusicConfig).mockResolvedValue({
+      provider: 'retired-provider',
+      model: 'music-1',
+      api_key: 'existing-key',
+      base_url: 'https://my-music-endpoint.test/v1',
+    });
+
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    const onSaved = vi.fn();
+
+    render(<AiSettingsDialog open={true} onClose={onClose} onSaved={onSaved} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('AI 设置')).toBeInTheDocument();
+    });
+
+    const saveButton = screen.getByRole('button', { name: '保存 AI 配置' });
+    await user.click(saveButton);
+
+    await waitFor(() => {
+      expect(setAiMusicConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: 'custom',
+          model: 'music-1',
+          api_key: 'existing-key',
+          base_url: 'https://my-music-endpoint.test/v1',
+        }),
+      );
+    });
+  });
 });
