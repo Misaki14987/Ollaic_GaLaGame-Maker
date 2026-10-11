@@ -76,7 +76,7 @@ export function FlowBoardView({ projectPath, onOpenArtifact, controller, embedde
     state, prompt, setPrompt, allowLocalFallback, setAllowLocalFallback, plan, assetQueue, events,
     busy, loading, detached, error, loadLatest, start, pause, resume, stepOnce, stop,
     togglePinned, clearHistory, exportHistory, retryStep, updatePromptAndRetry, skipStep,
-    updateDependencies, previewAssetArtifact, updateAssetArtifact,
+    updateDependencies, previewAssetArtifact, updateAssetArtifact, bindImportedAudio, importedAudioByDir,
   } = controller;
   const [selectedIds, setSelectedIds] = useState<string[]>(CONTENT_STEPS);
   const [newConfiguration, setNewConfiguration] = useState(false);
@@ -293,7 +293,7 @@ export function FlowBoardView({ projectPath, onOpenArtifact, controller, embedde
                 <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-semibold">运行前检查</h2><Button variant="ghost" size="sm" onClick={() => setSettingsOpen(true)}><Settings2 /> AI 设置</Button></div>
                 {checking ? <p className="mt-2 flex items-center gap-2 text-muted-foreground"><Loader2 className="size-3 animate-spin" />正在检查接口配置</p> : capabilityError || !capabilities ? <div role="alert" className="mt-2 text-destructive">接口检查失败：{capabilityError ?? '未读取到配置'}<Button variant="outline" size="sm" className="ml-2" onClick={checkCapabilities}>重新检查</Button></div> : <>
                   <p className={`mt-2 ${capabilities.chatError ? 'text-amber-700 dark:text-amber-300' : 'text-muted-foreground'}`}>内容生成：{capabilities.chatError ?? '对话模型已配置'}</p>
-                  <p className="mt-2 leading-5 text-muted-foreground">{assetSelected ? `素材制作：${capabilities.assetError ?? '图片、语音、音乐及立绘抠图能力已配置'}` : '本次不制作素材，无需图片、语音或音乐接口。场景中的素材可之后手动补充。'}</p>
+                  <p className="mt-2 leading-5 text-muted-foreground">{assetSelected ? `素材制作：${capabilities.assetError ?? '图片、语音及立绘抠图能力已配置；BGM 和音效需手动导入'}` : '本次不制作素材，无需图片或语音接口。场景中的素材可之后手动补充。'}</p>
                   <p className="mt-2 text-[11px] text-muted-foreground">这里只检查本地配置，接口连通性可在 AI 设置中测试。</p>
                 </>}
                 {missingInputs.length > 0 && <div role="alert" className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-amber-800 dark:text-amber-300">
@@ -346,7 +346,8 @@ export function FlowBoardView({ projectPath, onOpenArtifact, controller, embedde
             steps={state.steps} canEditDependencies={paused && !detached} onUpdateDependencies={updateDependencies}
             events={events} assetQueue={assetQueue} onPreviewAssetArtifact={previewAssetArtifact}
             onDeleteAssetArtifact={(taskId, attempt) => updateAssetArtifact(assetQueueDeleteArtifact, taskId, attempt)}
-            onPromoteAssetArtifact={(taskId, attempt) => updateAssetArtifact(assetQueuePromoteArtifact, taskId, attempt)} />
+            onPromoteAssetArtifact={(taskId, attempt) => updateAssetArtifact(assetQueuePromoteArtifact, taskId, attempt)}
+            onBindImportedAudio={bindImportedAudio} importedAudioByDir={importedAudioByDir} />
         </div>}
       </div>
       <AiSettingsDialog open={settingsOpen} onClose={() => { setSettingsOpen(false); void checkCapabilities(); }} onSaved={() => { void checkCapabilities(); }} />

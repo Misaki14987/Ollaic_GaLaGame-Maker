@@ -250,7 +250,7 @@ P1 已实现前六类内容职责；Reviewer 属于 P3 Quality Gate。各 Agent 
 |---|---|
 | 运行前勾选 | 保存本次选定的 recipe，未选择的步骤不进入运行与进度分母 |
 | 缺少前置输入 | 阻止准备；用户明确选择补选前置步骤或取消相关后续步骤 |
-| 素材制作 | 默认关闭；未选择时不要求图片、语音、音乐接口和抠图能力 |
+| 素材制作 | 默认关闭；未选择时不要求图片、语音接口和抠图能力；BGM/音效仍通过手动导入补齐 |
 | 点步骤 | 详情面板显示要求、输出、记录与日志；完成步骤默认查看输出 |
 | 依赖表单 | 暂停时调整 pending 步骤的等待关系，后端检查环路 |
 | 运行控制 | 准备流程后再开始生产；保留暂停、停止、续跑与单步执行 |
@@ -275,15 +275,15 @@ P1 已实现前六类内容职责；Reviewer 属于 P3 Quality Gate。各 Agent 
 
 ### 3.5 AssetTaskQueue ⭐ 资产闭环（P2 已实现）
 
-**作用**：把 image / TTS / music 的零散调用变成统一队列，自动绑定到 scene / character，自带重试 / 验收。
+**作用**：把 image / TTS 的生成调用与手动音频任务统一纳入队列，自动绑定到 scene / character，自带重试 / 验收。
 
 **目标源码**：
 - `src-tauri/src/asset_queue/types.rs` / `store.rs` — 状态机与 `.ollaic/assets/queue.json` 持久化
-- `src-tauri/src/asset_queue/scheduler.rs` — 并发池（默认 2 image + 4 tts + 1 music，可配置）
+- `src-tauri/src/asset_queue/scheduler.rs` — 并发池（默认 2 image + 4 tts + 1 audio，可配置）
 - `src-tauri/src/asset_queue/binder.rs` — 按 `AssetTask.sceneRef` 自动写到 `game/background/*`、`game/figure/*`、`game/bgm/*`、`game/vocal/*`，并更新脚本引用
 - 可选 AI 自评（构图、口型匹配、风格一致）留到质量评估需求明确后接入，不属于 P2 阻断项
 
-**收敛现有能力**：`ai_generate_image / ai_generate_tts / generate_music / generate_batch_tts` 收敛为队列单一入口。
+**收敛现有能力**：`ai_generate_image / ai_generate_tts / generate_batch_tts` 收敛为队列单一入口；BGM/音效保持本地导入。
 
 **用户可见**：Flow 画布上 Asset 节点展开后是进度列表，每条资产显示 prompt / 缩略图 / 重试次数 / 绑定 scene。
 
@@ -404,5 +404,5 @@ P0 是地基，其余切片可以基于 P0 并行。**强烈建议先实现 P0**
 - [x] Pipeline 持久化粒度：每 step 状态转换一次（ADR 0054）
 - [x] 事件总线传输：Tauri event（ADR 0055）
 - [x] P1 多 Agent 上下文按职责显式投影；长篇作品的动态裁剪留待质量与成本测试后扩展
-- [x] AssetTaskQueue 默认按能力分别限流：2 image / 4 TTS / 1 music，队列持久化且可继续运行
+- [x] AssetTaskQueue 默认按能力分别限流：2 image / 4 TTS / 1 audio，队列持久化且可继续运行
 - [ ] Quality Gate 中的「致命 vs 警告」分级阈值

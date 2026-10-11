@@ -3,7 +3,7 @@ import { DEFAULT_RECIPE_STEPS } from './flow-state';
 export const FLOW_PHASES = [
   { title: '故事与角色', description: '确定故事骨架和人物', ids: ['plan', 'memory', 'outline', 'character'] },
   { title: '对白与场景', description: '把故事写成可编辑的场景', ids: ['dialogist', 'assetPlan', 'scene'] },
-  { title: '素材制作', description: '按需生成并绑定图片、语音和音乐', ids: ['assetQueue'] },
+  { title: '素材制作', description: '生成图片和语音，绑定导入的音频', ids: ['assetQueue'] },
 ];
 
 const STEP_INFO: Record<string, { title: string; description: string }> = {
