@@ -613,7 +613,7 @@ export function ScriptCommandStream({
     : nodes.map((node, index) => ({ node, index })).filter(({ node }) => !isMetadataComment(node));
 
   return (
-    <section className="relative flex min-w-0 flex-1 flex-col bg-background">
+    <section className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
       <div className="pointer-events-none absolute inset-0 opacity-[0.03] ollaic-dot-grid" />
       <div className="relative z-10 flex h-10 shrink-0 items-center justify-between border-b border-outline-variant/20 bg-surface-bright/50 px-4">
         <div className="flex min-w-0 items-center gap-4">

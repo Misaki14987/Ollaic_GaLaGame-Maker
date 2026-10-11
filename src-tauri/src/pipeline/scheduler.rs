@@ -70,6 +70,10 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
+    pub(crate) fn asset_capability_error(&self) -> Option<String> {
+        self.asset_generators.preflight_run(false).err()
+    }
+
     #[cfg(test)]
     pub fn new(agents: AgentRegistry) -> Self {
         Self::with_dependencies(

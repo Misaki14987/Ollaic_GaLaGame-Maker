@@ -74,8 +74,8 @@ export function FullScreenWorldline({
   return (
     <div className="flex h-full flex-col bg-surface-container-lowest">
       {/* Header bar */}
-      <div className="flex h-12 shrink-0 items-center justify-between border-b border-border bg-surface-container-low px-4">
-        <div className="flex items-center gap-3">
+      <div className="flex min-h-12 shrink-0 flex-wrap items-center justify-between border-b border-border bg-surface-container-low px-4">
+        <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
             onClick={onClose}
@@ -87,7 +87,7 @@ export function FullScreenWorldline({
           </button>
           <div className="h-5 w-px bg-border/60" />
           <span className="flex items-center gap-2 font-mono-family text-xs font-semibold uppercase tracking-widest text-on-surface-variant">
-            <GitBranch className="h-4 w-4 text-secondary" /> 场景关系图 · 全屏
+            <GitBranch className="h-4 w-4 text-secondary" /> 场景关系图
           </span>
           <span className="rounded bg-secondary/10 px-2 py-0.5 font-mono text-[10px] text-secondary">
             {scenes.length} 场景
@@ -182,7 +182,7 @@ export function FullScreenWorldline({
         </div>
 
         {/* Right sidebar: node index */}
-        <div className="flex w-72 shrink-0 flex-col border-l border-border bg-surface-container-lowest">
+        <div className="hidden w-60 shrink-0 flex-col border-l xl:flex border-border bg-surface-container-lowest">
           <div className="flex h-10 shrink-0 items-center justify-between border-b border-border px-3">
             <span className="font-mono-family text-[10px] font-semibold uppercase tracking-widest text-on-surface-variant">当前场景索引</span>
             <span className="font-mono-family text-[10px] text-muted-foreground">{visibleNodes.length}</span>

@@ -9,7 +9,6 @@ import {
   FileDown,
   FileUp,
   FolderOpen,
-  GitBranch,
   Home,
   Loader2,
   Play,
@@ -20,13 +19,12 @@ import {
   Settings,
   Upload,
   UserCircle,
-  Workflow,
   type LucideIcon,
 } from 'lucide-react';
 
 import { Switch } from './ui/switch';
 
-type OllaicSection = 'home' | 'flow' | 'script' | 'world' | 'characters' | 'assets' | 'preview' | 'build';
+type OllaicSection = 'home' | 'edit' | 'flow' | 'script' | 'world' | 'characters' | 'assets' | 'preview' | 'build';
 
 export type OllaicSaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -71,9 +69,7 @@ interface OllaicPanelProps {
 
 const navItems: Array<{ id: OllaicSection; label: string; icon: LucideIcon }> = [
   { id: 'home', label: '首页', icon: Home },
-  { id: 'flow', label: '生产流', icon: Workflow },
-  { id: 'script', label: '脚本流', icon: BookOpen },
-  { id: 'world', label: '场景', icon: GitBranch },
+  { id: 'edit', label: '编辑', icon: BookOpen },
   { id: 'assets', label: '资源库', icon: Boxes },
 ];
 
@@ -149,7 +145,7 @@ export function OllaicTopBar({
         )}
       </div>
 
-      <nav className="hidden items-center gap-1 md:flex">
+      <nav className="hidden items-center gap-1 lg:flex">
         {topActions.map(({ label, icon: Icon, handler, primary, dimWhenAutoSave }) => (
           <button
             key={label}
@@ -196,7 +192,7 @@ export function OllaicTopBar({
           </button>
         )}
         {onSearchChange && (
-          <div className="ollaic-top-search">
+          <div className="ollaic-top-search hidden xl:flex">
             <Search className="h-4 w-4 text-muted-foreground" />
             <input
               type="text"
@@ -217,7 +213,7 @@ export function OllaicTopBar({
                 onCheckedChange={onAutoSaveChange}
                 className="scale-75"
               />
-              <span>自动保存</span>
+              <span className="hidden sm:inline">自动保存</span>
             </label>
             {saveStatus !== 'idle' && (
               <span
@@ -255,8 +251,8 @@ export function OllaicSideNav({ active, projectId, projectLabel = 'ALPHA', onBef
       return;
     }
     if (target === 'flow') {
-      navigate(`/flow/${projectId}`);
-    } else if (target === 'script') {
+      navigate(`/editor/${projectId}?agent=workflow`);
+    } else if (target === 'edit' || target === 'script') {
       navigate(`/editor/${projectId}`);
     } else if (target === 'characters') {
       navigate(`/editor/${projectId}/assets?tab=character`);
@@ -297,8 +293,8 @@ export function OllaicSideNav({ active, projectId, projectLabel = 'ALPHA', onBef
             type="button"
             key={id}
             onClick={() => handleNavigate(id)}
-            className={`ollaic-nav-item ${active === id ? 'ollaic-nav-item-active' : ''}`}
-            aria-current={active === id ? 'page' : undefined}
+            className={`ollaic-nav-item ${(active === id || (id === 'edit' && ['flow', 'script', 'world'].includes(active))) ? 'ollaic-nav-item-active' : ''}`}
+            aria-current={active === id || (id === 'edit' && ['flow', 'script', 'world'].includes(active)) ? 'page' : undefined}
           >
             <Icon className="h-5 w-5" />
             <span>{label}</span>

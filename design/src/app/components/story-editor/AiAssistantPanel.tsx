@@ -23,6 +23,8 @@ interface AiAssistantPanelProps {
   sceneHeaders: Record<string, SceneHeader>;
   onOpenSettings: () => void;
   onSend: (text: string) => void;
+  embedded?: boolean;
+  disabled?: boolean;
 }
 
 interface AiInputBoxProps {
@@ -95,6 +97,8 @@ export function AiAssistantPanel({
   sceneHeaders,
   onOpenSettings,
   onSend,
+  embedded = false,
+  disabled = false,
 }: AiAssistantPanelProps) {
   const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
   const [renameTarget, setRenameTarget] = useState<{ id: string; title: string } | null>(null);
@@ -114,7 +118,7 @@ export function AiAssistantPanel({
         : '等待输入';
 
   return (
-    <aside className="flex w-80 shrink-0 flex-col border-l border-border bg-surface-container-lowest">
+    <aside className={`flex min-h-0 flex-1 flex-col bg-surface-container-lowest ${embedded ? 'w-full' : 'w-80 shrink-0 border-l border-border'}`}>
       <div className="flex h-10 items-center justify-between border-b border-border px-3">
         <div className="flex min-w-0 items-center gap-2">
           <div className="flex h-6 w-6 items-center justify-center rounded-full bg-secondary-container/35 text-[var(--nav-active)]">
@@ -270,13 +274,13 @@ export function AiAssistantPanel({
       <div className="border-t border-border bg-surface-container-low p-4">
         <AiMemoryPanel
           memory={aiAgent.memory}
-          disabled={!projectPath}
+          disabled={!projectPath || disabled}
           onSave={aiAgent.saveMemory}
         />
         <AiInputBox
           value={aiAgent.input}
           busy={aiAgent.busy}
-          locked={aiAgent.committing}
+          locked={aiAgent.committing || disabled}
           pending={aiAgent.pendingChangeSet?.status === 'pending'}
           onSubmit={onSend}
           onStop={aiAgent.stop}
@@ -286,7 +290,7 @@ export function AiAssistantPanel({
               attachedIds={aiAgent.attachedIds}
               busy={aiAgent.uploadBusy}
               error={aiAgent.uploadError}
-              disabled={!projectPath}
+              disabled={!projectPath || disabled}
               onAdd={aiAgent.addUploads}
               onAttach={aiAgent.attachUpload}
               onDetach={aiAgent.detachUpload}

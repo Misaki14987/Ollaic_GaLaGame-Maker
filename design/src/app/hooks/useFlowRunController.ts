@@ -117,6 +117,8 @@ export function useFlowRunController(projectPath: string) {
       setPlan(storyPlan);
       const latest = runs[0];
       if (!latest) {
+        setPrompt('');
+        setAllowLocalFallback(false);
         dispatch({ type: 'reset' });
         setEvents([]);
         setAssetQueue(null);
@@ -141,6 +143,7 @@ export function useFlowRunController(projectPath: string) {
       }
       dispatch({ type: 'stateHydrated', state: snapshot });
       setPrompt(snapshot.prompt);
+      setAllowLocalFallback(snapshot.allowLocalFallback ?? false);
       setEvents(recordsFromSnapshot(snapshot));
       runIdRef.current = snapshot.runId;
       setDetached(!live);
@@ -178,21 +181,24 @@ export function useFlowRunController(projectPath: string) {
   }, [assetQueueStep, refreshAssetQueue]);
 
   const runCommand = useCallback(async (command: () => Promise<void>) => {
-    if (busy) return;
+    if (busy) return false;
     setBusy(true);
     setError(null);
     try {
       await command();
+      return true;
     } catch (err) {
       setError(String(err));
+      return false;
     } finally {
       setBusy(false);
     }
   }, [busy]);
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (selectedStepIds: string[]) => {
     if (!prompt.trim()) return;
-    await runCommand(async () => {
+    return runCommand(async () => {
+      const runId = await pipelineStart(projectPath, prompt.trim(), allowLocalFallback, selectedStepIds);
       setEvents([]);
       planRequestRef.current += 1;
       runIdRef.current = null;
@@ -201,7 +207,6 @@ export function useFlowRunController(projectPath: string) {
       unlistenRef.current = null;
       dispatch({ type: 'reset' });
       setAssetQueue(null);
-      const runId = await pipelineStart(projectPath, prompt.trim(), allowLocalFallback);
       await subscribe(runId);
       setDetached(false);
       await Promise.all([refresh(runId), refreshPlan()]);

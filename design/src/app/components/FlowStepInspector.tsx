@@ -18,6 +18,7 @@ import {
   X,
 } from 'lucide-react';
 import type { FlowStepView } from '../lib/flow-state';
+import { stepTitle } from '../lib/flow-presentation';
 import { isAssetQueueStep } from '../lib/pipeline-types';
 import type { AssetQueueState, AssetTaskStatus, StepStatus } from '../lib/pipeline-types';
 import type { PipelineEventRecord } from './PipelineEventLedger';
@@ -58,6 +59,9 @@ export interface FlowStepInspectorProps {
   onPreviewAssetArtifact?: (taskId: string, attempt: number) => Promise<string>;
   onDeleteAssetArtifact?: (taskId: string, attempt: number) => Promise<void>;
   onPromoteAssetArtifact?: (taskId: string, attempt: number) => Promise<void>;
+  steps?: readonly FlowStepView[];
+  canEditDependencies?: boolean;
+  onUpdateDependencies?: (stepId: string, dependsOn: string[]) => void;
 }
 
 function formatted(value: string | null | undefined) {
@@ -110,8 +114,12 @@ export function FlowStepInspector({
   onPreviewAssetArtifact,
   onDeleteAssetArtifact,
   onPromoteAssetArtifact,
+  steps = [],
+  canEditDependencies = false,
+  onUpdateDependencies,
 }: FlowStepInspectorProps) {
   const [promptDraft, setPromptDraft] = useState(selected?.prompt ?? '');
+  const [dependencies, setDependencies] = useState(selected?.dependsOn ?? []);
   const [artifactBusy, setArtifactBusy] = useState<string | null>(null);
   const [artifactError, setArtifactError] = useState<string | null>(null);
   const [artifactPreviews, setArtifactPreviews] = useState<Record<string, string>>({});
@@ -122,6 +130,10 @@ export function FlowStepInspector({
     setArtifactError(null);
     setArtifactPreviews({});
   }, [selected?.id, selected?.prompt]);
+
+  useEffect(() => {
+    setDependencies(selected?.dependsOn ?? []);
+  }, [selected?.id, selected?.dependsOn]);
 
   if (!selected) return null;
 
@@ -154,8 +166,7 @@ export function FlowStepInspector({
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center gap-2">
-              <h2 className="truncate text-sm font-semibold">{selected.id}</h2>
-              <span className="shrink-0 font-mono-family text-[10px] text-muted-foreground">{selected.kind}</span>
+              <h2 className="truncate text-sm font-semibold">{stepTitle(selected.id)}</h2>
             </div>
             <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
               <span className={cn('size-1.5 shrink-0 rounded-full', state.className)} aria-hidden="true" />
@@ -170,7 +181,7 @@ export function FlowStepInspector({
         </div>
       </header>
 
-      <Tabs defaultValue="details" className="min-h-0 flex-1 gap-0">
+      <Tabs key={selected.id} defaultValue={selected.status === 'succeeded' ? 'output' : 'details'} className="min-h-0 flex-1 gap-0">
         <TabsList className="h-10 w-full shrink-0 justify-start rounded-none border-b border-border bg-surface-container-lowest p-0">
           <TabsTrigger value="details" className="h-10 rounded-none border-0 px-4 text-xs data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
             <GitBranch /> 详情
@@ -195,21 +206,43 @@ export function FlowStepInspector({
                   <div className="flex flex-wrap gap-1.5">
                     {selected.dependsOn.map((dependency) => (
                       <code key={dependency} className="border border-border bg-surface-container-low px-2 py-1 text-[11px] text-foreground">
-                        {dependency}
+                        {stepTitle(dependency)}
                       </code>
                     ))}
                   </div>
                 ) : (
                   <p className="text-xs text-muted-foreground">无</p>
                 )}
+                {onUpdateDependencies && (
+                  <details className="mt-3 text-xs">
+                    <summary className="cursor-pointer text-muted-foreground">调整前置步骤</summary>
+                    <p className="mt-2 leading-5 text-muted-foreground">仅可在暂停时调整待运行步骤。取消等待关系不会补齐缺少的故事数据。</p>
+                    <div className="mt-2 space-y-2">
+                      {steps.filter((step) => step.id !== selected.id).map((step) => (
+                        <label key={step.id} className="flex items-center gap-2">
+                          <input type="checkbox" aria-label={`等待${stepTitle(step.id)}`} className="size-3.5 accent-primary"
+                            checked={dependencies.includes(step.id)}
+                            disabled={busy || !canEditDependencies || selected.status !== 'pending'}
+                            onChange={(event) => setDependencies((current) => event.target.checked
+                              ? [...current, step.id] : current.filter((id) => id !== step.id))} />
+                          {stepTitle(step.id)}
+                        </label>
+                      ))}
+                    </div>
+                    <Button variant="outline" size="sm" className="mt-3"
+                      disabled={busy || !canEditDependencies || selected.status !== 'pending'
+                        || JSON.stringify([...dependencies].sort()) === JSON.stringify([...selected.dependsOn].sort())}
+                      onClick={() => onUpdateDependencies(selected.id, dependencies)}>保存前置步骤</Button>
+                  </details>
+                )}
               </section>
 
               <section>
-                <SectionLabel>Prompt</SectionLabel>
+                <SectionLabel>步骤要求</SectionLabel>
                 <Textarea
                   value={promptDraft}
                   onChange={(event) => setPromptDraft(event.target.value)}
-                  placeholder="留空时沿用 Production Brief"
+                  placeholder="留空时沿用生产目标"
                   aria-label={`${selected.id} 步骤 Prompt`}
                   className="min-h-28 rounded-sm bg-surface-container-lowest font-mono-family text-[11px] leading-5"
                   disabled={selected.status === 'running' || busy}

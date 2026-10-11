@@ -3,6 +3,8 @@
 /node_modules
 /design/node_modules
 /design/dist
+/design/test-results
+/design/playwright-report
 /design/package-lock.json
 /src-tauri/target
 /src-tauri/runtime

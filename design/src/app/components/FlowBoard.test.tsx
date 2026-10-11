@@ -3,66 +3,11 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import * as React from 'react';
 import type { PipelineEvent, RunState } from '../lib/pipeline-types';
-import { flowLayoutStorageKey } from '../lib/flow-layout';
+import { DEFAULT_RECIPE_STEPS } from '../lib/flow-state';
 import { FlowBoard } from './FlowBoard';
 
-// React Flow's real renderer needs DOM measurements jsdom doesn't provide.
-// Mock it as a passthrough that renders each node through its `nodeTypes`
-// component, so we test our wiring + StepNode, not the library.
-vi.mock('reactflow', () => ({
-  default: ({ nodes, edges, nodeTypes, onNodeClick, onNodesChange, onNodeDragStop, onEdgesDelete }: { nodes: any[]; edges: any[]; nodeTypes: Record<string, any>; onNodeClick?: Function; onNodesChange?: Function; onNodeDragStop?: Function; onEdgesDelete?: Function }) =>
-    React.createElement(
-      'div',
-      { 'data-testid': 'reactflow-mock' },
-      ...nodes.flatMap((n) => nodeTypes?.[n.type] ? [
-        React.createElement(
-          'button',
-          { key: `open-${n.id}`, 'aria-label': `open-${n.id}`, onClick: (event) => onNodeClick?.(event, n) },
-          React.createElement(nodeTypes[n.type], { data: n.data }),
-        ),
-        React.createElement('button', {
-          key: `move-${n.id}`,
-          'aria-label': `move-${n.id}`,
-          onClick: () => {
-            const moved = { ...n, position: { x: 410, y: 220 } };
-            onNodesChange?.([{ id: n.id, type: 'position', position: moved.position }]);
-            onNodeDragStop?.({}, moved);
-          },
-        }),
-      ] : []),
-      edges[0] ? React.createElement('button', {
-        key: 'delete-edge',
-        'aria-label': 'delete-first-edge',
-        onClick: () => onEdgesDelete?.([edges[0]]),
-      }) : null,
-      nodes[1] ? React.createElement('button', {
-        key: 'drop-node',
-        'aria-label': 'drop-second-on-first',
-        onClick: () => {
-          const moved = { ...nodes[1], position: nodes[0].position };
-          onNodesChange?.([{ id: moved.id, type: 'position', position: moved.position }]);
-          onNodeDragStop?.({}, moved);
-        },
-      }) : null,
-    ),
-  useNodesState: (initialNodes: any[]) => {
-    const [nodes, setNodes] = React.useState(initialNodes);
-    const onNodesChange = React.useCallback((changes: any[]) => {
-      setNodes((current: any[]) => current.map((node) => {
-        const change = changes.find((candidate) => candidate.id === node.id);
-        return change?.position ? { ...node, position: change.position } : node;
-      }));
-    }, []);
-    return [nodes, setNodes, onNodesChange];
-  },
-  Handle: () => null,
-  Background: () => null,
-  Controls: () => null,
-  Position: { Top: 'top', Bottom: 'bottom', Left: 'left', Right: 'right' },
-}));
-
+const CONTENT_STEP_IDS = DEFAULT_RECIPE_STEPS.filter((step) => step.id !== 'assetQueue').map((step) => step.id);
 const mockedInvoke = vi.mocked(invoke);
 const mockedListen = vi.mocked(listen);
 
@@ -109,6 +54,7 @@ beforeEach(() => {
   mockedInvoke.mockReset();
   mockedListen.mockReset();
   mockedInvoke.mockImplementation((cmd: string) => {
+    if (cmd === 'pipeline_get_capabilities') return Promise.resolve({ chatError: null, assetError: '未配置素材接口' } as unknown);
     if (cmd === 'pipeline_start') return Promise.resolve('run_1' as unknown);
     if (cmd === 'pipeline_get_state') return Promise.resolve(runState() as unknown);
     if (cmd === 'pipeline_list_runs') return Promise.resolve([] as unknown);
@@ -135,12 +81,91 @@ function stepStatus(id: string): string | null {
 }
 
 describe('FlowBoard', () => {
+  it('only requires media capabilities when material production is selected', async () => {
+    const user = userEvent.setup();
+    render(<FlowBoard projectPath="/tmp/proj" />);
+    await vi.waitFor(() => expect(screen.getByLabelText('production brief')).toBeEnabled());
+    await user.type(screen.getByLabelText('production brief'), '只生成故事与场景');
+    const prepare = screen.getByRole('button', { name: '准备流程' });
+    await vi.waitFor(() => expect(prepare).toBeEnabled());
+    expect(screen.getByLabelText('执行素材生成与绑定')).not.toBeChecked();
+    await user.click(screen.getByLabelText('执行素材生成与绑定'));
+    expect(prepare).toBeDisabled();
+    expect(screen.getByText('素材制作：未配置素材接口')).toBeInTheDocument();
+    await user.click(screen.getByLabelText('执行素材生成与绑定'));
+    expect(prepare).toBeEnabled();
+    await user.click(prepare);
+    expect(mockedInvoke).toHaveBeenCalledWith('pipeline_start', expect.objectContaining({
+      selectedStepIds: CONTENT_STEP_IDS, allowLocalFallback: false,
+    }));
+  });
+
+  it('keeps a deselected prerequisite off and requires an explicit dependency repair', async () => {
+    const user = userEvent.setup();
+    render(<FlowBoard projectPath="/tmp/proj" />);
+    await vi.waitFor(() => expect(screen.getByLabelText('production brief')).toBeEnabled());
+    await user.type(screen.getByLabelText('production brief'), '先做故事规划');
+    await user.click(screen.getByLabelText('执行世界观设定'));
+    expect(screen.getByLabelText('执行世界观设定')).not.toBeChecked();
+    expect(screen.getByLabelText('执行章节大纲')).toBeChecked();
+    expect(screen.getByRole('button', { name: '准备流程' })).toBeDisabled();
+    expect(screen.getByRole('alert')).toHaveTextContent('章节大纲需要世界观设定的结果');
+    await user.click(screen.getByRole('button', { name: '取消相关后续步骤' }));
+    expect(screen.getByLabelText('执行世界观设定')).not.toBeChecked();
+    expect(screen.getByLabelText('执行章节大纲')).not.toBeChecked();
+    await user.click(screen.getByRole('button', { name: '准备流程' }));
+    expect(mockedInvoke).toHaveBeenCalledWith('pipeline_start', expect.objectContaining({ selectedStepIds: ['plan'] }));
+  });
+
+  it('can explicitly restore the prerequisites before preparation', async () => {
+    const user = userEvent.setup();
+    render(<FlowBoard projectPath="/tmp/proj" />);
+    await vi.waitFor(() => expect(screen.getByLabelText('production brief')).toBeEnabled());
+    await user.type(screen.getByLabelText('production brief'), '完整内容');
+    await user.click(screen.getByLabelText('执行故事规划'));
+    await user.click(screen.getByRole('button', { name: '补选前置步骤' }));
+    expect(screen.getByLabelText('执行故事规划')).toBeChecked();
+    expect(screen.getByRole('button', { name: '准备流程' })).toBeEnabled();
+  });
+
+  it('blocks missing chat configuration until local fallback is explicitly allowed', async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'pipeline_get_capabilities') return Promise.resolve({ chatError: '未配置对话模型', assetError: '未配置素材接口' } as unknown);
+      if (cmd === 'pipeline_list_runs') return Promise.resolve([] as unknown);
+      return Promise.resolve(undefined);
+    });
+    const user = userEvent.setup();
+    render(<FlowBoard projectPath="/tmp/proj" />);
+    await vi.waitFor(() => expect(screen.getByLabelText('production brief')).toBeEnabled());
+    await user.type(screen.getByLabelText('production brief'), '本地草稿');
+    expect(screen.getByRole('button', { name: '准备流程' })).toBeDisabled();
+    await user.click(screen.getByText('高级选项'));
+    await user.click(screen.getByLabelText('允许本地内容降级'));
+    expect(screen.getByRole('button', { name: '准备流程' })).toBeEnabled();
+  });
+
+  it('preserves the draft when preparation fails', async () => {
+    const initial = mockedInvoke.getMockImplementation()!;
+    mockedInvoke.mockImplementation((cmd: string, args) => cmd === 'pipeline_start'
+      ? Promise.reject(new Error('项目已有故事内容')) : initial(cmd, args));
+    const user = userEvent.setup();
+    render(<FlowBoard projectPath="/tmp/proj" />);
+    await vi.waitFor(() => expect(screen.getByLabelText('production brief')).toBeEnabled());
+    await user.type(screen.getByLabelText('production brief'), '保留这份目标');
+    await user.click(screen.getByLabelText('执行场景编排'));
+    await user.click(screen.getByRole('button', { name: '准备流程' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('项目已有故事内容');
+    expect(screen.getByLabelText('production brief')).toHaveValue('保留这份目标');
+    expect(screen.getByLabelText('执行场景编排')).not.toBeChecked();
+  });
+
   it('starts a run and updates step statuses from streamed events', async () => {
     const user = userEvent.setup();
     render(<FlowBoard projectPath="/tmp/proj" />);
 
+    await vi.waitFor(() => expect(screen.getByLabelText('production brief')).toBeEnabled());
     await user.type(screen.getByLabelText('production brief'), '赛博朋克校园恋爱');
-    await user.click(screen.getByRole('button', { name: '创建流程' }));
+    await user.click(screen.getByRole('button', { name: '准备流程' }));
 
     // pipeline_start was invoked with the brief; an event subscription opened.
     await vi.waitFor(() => expect(mockedListen).toHaveBeenCalled());
@@ -148,6 +173,7 @@ describe('FlowBoard', () => {
       projectPath: '/tmp/proj',
       prompt: '赛博朋克校园恋爱',
       allowLocalFallback: false,
+      selectedStepIds: CONTENT_STEP_IDS,
     });
     expect(mockedListen).toHaveBeenCalledWith('pipeline:run_1', expect.any(Function));
 
@@ -184,6 +210,7 @@ describe('FlowBoard', () => {
       finishedAt: null,
     });
     mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'pipeline_get_capabilities') return Promise.resolve({ chatError: null, assetError: '未配置素材接口' } as unknown);
       if (cmd === 'pipeline_list_runs') return Promise.resolve([queued] as unknown);
       if (cmd === 'pipeline_get_state') return Promise.resolve(queued as unknown);
       if (cmd === 'asset_queue_get' || cmd === 'asset_queue_promote_artifact') return Promise.resolve({
@@ -206,7 +233,7 @@ describe('FlowBoard', () => {
     expect(await screen.findByText('1/2 已处理')).toBeInTheDocument();
     expect(mockedInvoke).toHaveBeenCalledWith('asset_queue_get', { projectPath: '/tmp/proj' });
     expect(screen.getByLabelText('media-production 步骤进度')).toHaveAttribute('aria-valuenow', '50');
-    await user.click(screen.getByRole('button', { name: 'open-media-production' }));
+    await user.click(screen.getByRole('button', { name: '查看media-production' }));
     await user.click(screen.getByRole('tab', { name: '输出' }));
     await user.click(screen.getByRole('button', { name: '提升 bg 候选 1' }));
     expect(mockedInvoke).toHaveBeenCalledWith('asset_queue_promote_artifact', {
@@ -222,24 +249,28 @@ describe('FlowBoard', () => {
 
   it('disables run while the brief is empty', () => {
     render(<FlowBoard projectPath="/tmp/proj" />);
-    expect(screen.getByRole('button', { name: '创建流程' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '准备流程' })).toBeDisabled();
   });
 
   it('requires an explicit user choice before allowing local fallback', async () => {
     const user = userEvent.setup();
     render(<FlowBoard projectPath="/tmp/proj" />);
+    await vi.waitFor(() => expect(screen.getByLabelText('production brief')).toBeEnabled());
     await user.type(screen.getByLabelText('production brief'), '校园悬疑');
+    await user.click(screen.getByText('高级选项'));
     await user.click(screen.getByLabelText('允许本地内容降级'));
-    await user.click(screen.getByRole('button', { name: '创建流程' }));
+    await user.click(screen.getByRole('button', { name: '准备流程' }));
     expect(mockedInvoke).toHaveBeenCalledWith('pipeline_start', {
       projectPath: '/tmp/proj',
       prompt: '校园悬疑',
       allowLocalFallback: true,
+      selectedStepIds: CONTENT_STEP_IDS,
     });
   });
 
   it('prepares a paused flow before the user starts execution', async () => {
     mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'pipeline_get_capabilities') return Promise.resolve({ chatError: null, assetError: '未配置素材接口' } as unknown);
       if (cmd === 'pipeline_start') return Promise.resolve('run_1' as unknown);
       if (cmd === 'pipeline_get_state') return Promise.resolve(runState('paused') as unknown);
       if (cmd === 'pipeline_list_runs') return Promise.resolve([] as unknown);
@@ -248,9 +279,10 @@ describe('FlowBoard', () => {
     const user = userEvent.setup();
     render(<FlowBoard projectPath="/tmp/proj" />);
 
+    await vi.waitFor(() => expect(screen.getByLabelText('production brief')).toBeEnabled());
     await user.type(screen.getByLabelText('production brief'), 'x');
-    await user.click(screen.getByRole('button', { name: '创建流程' }));
-    await user.click(await screen.findByRole('button', { name: '运行' }));
+    await user.click(screen.getByRole('button', { name: '准备流程' }));
+    await user.click(await screen.findByRole('button', { name: '开始生产' }));
 
     expect(mockedInvoke).toHaveBeenCalledWith('pipeline_resume', {
       runId: 'run_1',
@@ -261,13 +293,14 @@ describe('FlowBoard', () => {
   it('switches to pause/resume controls while running and paused', async () => {
     const user = userEvent.setup();
     render(<FlowBoard projectPath="/tmp/proj" />);
+    await vi.waitFor(() => expect(screen.getByLabelText('production brief')).toBeEnabled());
     await user.type(screen.getByLabelText('production brief'), 'x');
-    await user.click(screen.getByRole('button', { name: '创建流程' }));
+    await user.click(screen.getByRole('button', { name: '准备流程' }));
     await vi.waitFor(() => expect(mockedListen).toHaveBeenCalled());
 
     emit({ type: 'runStarted', runId: 'run_1' });
     expect(screen.getByRole('button', { name: '暂停' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '创建流程' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '准备流程' })).not.toBeInTheDocument();
 
     emit({ type: 'stepStarted', runId: 'run_1', stepId: 'plan', kind: 'plan' });
     emit({ type: 'runPaused', runId: 'run_1' });
@@ -276,6 +309,7 @@ describe('FlowBoard', () => {
 
   it('hydrates completed state when fast steps finished before event subscription', async () => {
     mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'pipeline_get_capabilities') return Promise.resolve({ chatError: null, assetError: '未配置素材接口' } as unknown);
       if (cmd === 'pipeline_start') return Promise.resolve('run_1' as unknown);
       if (cmd === 'pipeline_get_state') return Promise.resolve(runState('completed') as unknown);
       if (cmd === 'pipeline_list_runs') return Promise.resolve([] as unknown);
@@ -284,8 +318,9 @@ describe('FlowBoard', () => {
     const user = userEvent.setup();
     render(<FlowBoard projectPath="/tmp/proj" />);
 
+    await vi.waitFor(() => expect(screen.getByLabelText('production brief')).toBeEnabled());
     await user.type(screen.getByLabelText('production brief'), 'x');
-    await user.click(screen.getByRole('button', { name: '创建流程' }));
+    await user.click(screen.getByRole('button', { name: '准备流程' }));
 
     await vi.waitFor(() => expect(screen.getByTestId('flow-run-status')).toHaveTextContent('已完成'));
     expect(stepStatus('plan')).toBe('succeeded');
@@ -294,6 +329,7 @@ describe('FlowBoard', () => {
 
   it('discovers a persisted paused run and resumes it through crash recovery', async () => {
     mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'pipeline_get_capabilities') return Promise.resolve({ chatError: null, assetError: '未配置素材接口' } as unknown);
       if (cmd === 'pipeline_list_runs') return Promise.resolve([runState('paused')] as unknown);
       return Promise.resolve(undefined);
     });
@@ -315,6 +351,7 @@ describe('FlowBoard', () => {
 
   it('recognizes a run that is still live in the current process', async () => {
     mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'pipeline_get_capabilities') return Promise.resolve({ chatError: null, assetError: '未配置素材接口' } as unknown);
       if (cmd === 'pipeline_list_runs') return Promise.resolve([runState('paused')] as unknown);
       if (cmd === 'pipeline_get_state') return Promise.resolve(runState('paused') as unknown);
       return Promise.resolve(undefined);
@@ -322,7 +359,7 @@ describe('FlowBoard', () => {
     const user = userEvent.setup();
     render(<FlowBoard projectPath="/tmp/proj" />);
 
-    await user.click(await screen.findByRole('button', { name: '运行' }));
+    await user.click(await screen.findByRole('button', { name: '开始生产' }));
 
     expect(mockedInvoke).toHaveBeenCalledWith('pipeline_resume', {
       runId: 'run_1',
@@ -336,6 +373,7 @@ describe('FlowBoard', () => {
     failed.steps[0].status = 'failed';
     failed.steps[0].error = 'boom';
     mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'pipeline_get_capabilities') return Promise.resolve({ chatError: null, assetError: '未配置素材接口' } as unknown);
       if (cmd === 'pipeline_list_runs') return Promise.resolve([failed] as unknown);
       if (cmd === 'pipeline_get_state') return Promise.resolve(failed as unknown);
       return Promise.resolve(undefined);
@@ -343,7 +381,7 @@ describe('FlowBoard', () => {
     const user = userEvent.setup();
     render(<FlowBoard projectPath="/tmp/proj" />);
 
-    await user.click(await screen.findByRole('button', { name: 'open-plan' }));
+    await user.click(await screen.findByRole('button', { name: '查看故事规划' }));
     await user.click(screen.getByRole('button', { name: '从此步重跑' }));
 
     expect(mockedInvoke).toHaveBeenCalledWith('pipeline_retry_step', {
@@ -353,19 +391,9 @@ describe('FlowBoard', () => {
     });
   });
 
-  it('persists a dragged node position for the current project and run', async () => {
-    const user = userEvent.setup();
-    render(<FlowBoard projectPath="/tmp/proj" />);
-
-    await user.click(await screen.findByRole('button', { name: 'move-plan' }));
-
-    expect(JSON.parse(localStorage.getItem(flowLayoutStorageKey('/tmp/proj', null)) ?? '{}')).toMatchObject({
-      plan: { x: 410, y: 220 },
-    });
-  });
-
   it('supports dependency deletion while a prepared run is locally paused', async () => {
     mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'pipeline_get_capabilities') return Promise.resolve({ chatError: null, assetError: '未配置素材接口' } as unknown);
       if (cmd === 'pipeline_start') return Promise.resolve('run_1' as unknown);
       if (cmd === 'pipeline_get_state') return Promise.resolve(runState('paused') as unknown);
       if (cmd === 'pipeline_list_runs') return Promise.resolve([] as unknown);
@@ -374,9 +402,13 @@ describe('FlowBoard', () => {
     const user = userEvent.setup();
     render(<FlowBoard projectPath="/tmp/proj" />);
 
+    await vi.waitFor(() => expect(screen.getByLabelText('production brief')).toBeEnabled());
     await user.type(screen.getByLabelText('production brief'), 'x');
-    await user.click(screen.getByRole('button', { name: '创建流程' }));
-    await user.click(await screen.findByRole('button', { name: 'delete-first-edge' }));
+    await user.click(screen.getByRole('button', { name: '准备流程' }));
+    await user.click(await screen.findByRole('button', { name: '查看章节大纲' }));
+    await user.click(screen.getByText('调整前置步骤'));
+    await user.click(screen.getByLabelText('等待故事规划'));
+    await user.click(screen.getByRole('button', { name: '保存前置步骤' }));
 
     expect(mockedInvoke).toHaveBeenCalledWith('pipeline_update_dependencies', {
       runId: 'run_1',
@@ -386,10 +418,11 @@ describe('FlowBoard', () => {
     });
   });
 
-  it('adds a dependency when a pending node is dropped onto another node', async () => {
+  it('adds a dependency through the pending step form', async () => {
     const prepared = runState('paused');
     prepared.steps[1].def.dependsOn = [];
     mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'pipeline_get_capabilities') return Promise.resolve({ chatError: null, assetError: '未配置素材接口' } as unknown);
       if (cmd === 'pipeline_start') return Promise.resolve('run_1' as unknown);
       if (cmd === 'pipeline_get_state') return Promise.resolve(prepared as unknown);
       if (cmd === 'pipeline_list_runs') return Promise.resolve([] as unknown);
@@ -398,9 +431,13 @@ describe('FlowBoard', () => {
     const user = userEvent.setup();
     render(<FlowBoard projectPath="/tmp/proj" />);
 
+    await vi.waitFor(() => expect(screen.getByLabelText('production brief')).toBeEnabled());
     await user.type(screen.getByLabelText('production brief'), 'x');
-    await user.click(screen.getByRole('button', { name: '创建流程' }));
-    await user.click(await screen.findByRole('button', { name: 'drop-second-on-first' }));
+    await user.click(screen.getByRole('button', { name: '准备流程' }));
+    await user.click(await screen.findByRole('button', { name: '查看章节大纲' }));
+    await user.click(screen.getByText('调整前置步骤'));
+    await user.click(screen.getByLabelText('等待故事规划'));
+    await user.click(screen.getByRole('button', { name: '保存前置步骤' }));
 
     expect(mockedInvoke).toHaveBeenCalledWith('pipeline_update_dependencies', {
       runId: 'run_1',
@@ -412,6 +449,7 @@ describe('FlowBoard', () => {
 
   it('exposes stop and single-step execution as deterministic controls', async () => {
     mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'pipeline_get_capabilities') return Promise.resolve({ chatError: null, assetError: '未配置素材接口' } as unknown);
       if (cmd === 'pipeline_start') return Promise.resolve('run_1' as unknown);
       if (cmd === 'pipeline_get_state') return Promise.resolve(runState('paused') as unknown);
       if (cmd === 'pipeline_list_runs') return Promise.resolve([] as unknown);
@@ -420,8 +458,9 @@ describe('FlowBoard', () => {
     const user = userEvent.setup();
     render(<FlowBoard projectPath="/tmp/proj" />);
 
+    await vi.waitFor(() => expect(screen.getByLabelText('production brief')).toBeEnabled());
     await user.type(screen.getByLabelText('production brief'), 'x');
-    await user.click(screen.getByRole('button', { name: '创建流程' }));
+    await user.click(screen.getByRole('button', { name: '准备流程' }));
     await user.click(await screen.findByRole('button', { name: '单步' }));
     expect(mockedInvoke).toHaveBeenCalledWith('pipeline_step_once', {
       runId: 'run_1',
@@ -441,6 +480,7 @@ describe('FlowBoard', () => {
     failed.steps[0].status = 'failed';
     failed.steps[0].def.prompt = '旧提示词';
     mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'pipeline_get_capabilities') return Promise.resolve({ chatError: null, assetError: '未配置素材接口' } as unknown);
       if (cmd === 'pipeline_list_runs') return Promise.resolve([failed] as unknown);
       if (cmd === 'pipeline_get_state') return Promise.resolve(failed as unknown);
       return Promise.resolve(undefined);
@@ -448,7 +488,7 @@ describe('FlowBoard', () => {
     const user = userEvent.setup();
     render(<FlowBoard projectPath="/tmp/proj" />);
 
-    await user.click(await screen.findByRole('button', { name: 'open-plan' }));
+    await user.click(await screen.findByRole('button', { name: '查看故事规划' }));
     const promptEditor = screen.getByLabelText('plan 步骤 Prompt');
     await user.clear(promptEditor);
     await user.type(promptEditor, '突出女主冲突与选择');
@@ -469,6 +509,7 @@ describe('FlowBoard', () => {
 
   it('shows StoryPlan summary and a recoverable loading error', async () => {
     mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'pipeline_get_capabilities') return Promise.resolve({ chatError: null, assetError: '未配置素材接口' } as unknown);
       if (cmd === 'pipeline_list_runs') return Promise.reject(new Error('disk unavailable'));
       return Promise.resolve(undefined);
     });
@@ -477,6 +518,7 @@ describe('FlowBoard', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('disk unavailable');
     mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'pipeline_get_capabilities') return Promise.resolve({ chatError: null, assetError: '未配置素材接口' } as unknown);
       if (cmd === 'pipeline_list_runs') return Promise.resolve([runState('completed')] as unknown);
       if (cmd === 'pipeline_get_plan') return Promise.resolve({
         version: 2,
@@ -497,6 +539,7 @@ describe('FlowBoard', () => {
 
   it('pins, exports, and manually clears retained run history', async () => {
     mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'pipeline_get_capabilities') return Promise.resolve({ chatError: null, assetError: '未配置素材接口' } as unknown);
       if (cmd === 'pipeline_list_runs') return Promise.resolve([runState('completed')] as unknown);
       if (cmd === 'pipeline_get_state') return Promise.resolve(runState('completed') as unknown);
       return Promise.resolve(undefined);
@@ -505,7 +548,8 @@ describe('FlowBoard', () => {
     const user = userEvent.setup();
     render(<FlowBoard projectPath="/tmp/proj" />);
 
-    await user.click(await screen.findByRole('button', { name: '固定运行记录' }));
+    await user.click(await screen.findByText('运行信息与记录管理'));
+    await user.click(screen.getByRole('button', { name: '固定运行记录' }));
     expect(mockedInvoke).toHaveBeenCalledWith('pipeline_set_run_pinned', {
       runId: 'run_1', pinned: true, projectPath: '/tmp/proj',
     });
@@ -538,12 +582,12 @@ describe('FlowBoard', () => {
 
     const view = render(<FlowBoard projectPath="/tmp/old" />);
     view.rerender(<FlowBoard projectPath="/tmp/current" />);
-    expect(await screen.findByDisplayValue('current brief')).toBeInTheDocument();
+    expect(await screen.findByText('current brief')).toBeInTheDocument();
     await vi.waitFor(() => expect(listenHandlers.length).toBe(1));
 
     resolveOldRuns([old]);
     await act(async () => { await Promise.resolve(); });
-    expect(screen.getByDisplayValue('current brief')).toBeInTheDocument();
+    expect(screen.getByText('current brief')).toBeInTheDocument();
     expect(screen.queryByText('old brief')).not.toBeInTheDocument();
 
     act(() => {
@@ -578,9 +622,9 @@ describe('FlowBoard', () => {
     const user = userEvent.setup();
 
     const view = render(<FlowBoard projectPath="/tmp/old" />);
-    expect(await screen.findByDisplayValue('old brief')).toBeInTheDocument();
+    expect(await screen.findByText('old brief')).toBeInTheDocument();
     view.rerender(<FlowBoard projectPath="/tmp/current" />);
-    expect(await screen.findByDisplayValue('current brief')).toBeInTheDocument();
+    expect(await screen.findByText('current brief')).toBeInTheDocument();
     mockedInvoke.mockClear();
 
     await user.click(screen.getByRole('button', { name: '暂停' }));
@@ -591,7 +635,7 @@ describe('FlowBoard', () => {
       runId: 'run_current', projectPath: '/tmp/current',
     });
 
-    await user.click(await screen.findByRole('button', { name: 'open-plan' }));
+    await user.click(await screen.findByRole('button', { name: '查看故事规划' }));
     await user.click(screen.getByRole('button', { name: '跳过' }));
     expect(mockedInvoke).toHaveBeenCalledWith('pipeline_skip_step', {
       runId: 'run_current', stepId: 'plan', projectPath: '/tmp/current',
@@ -599,7 +643,12 @@ describe('FlowBoard', () => {
 
     currentStatus = 'paused';
     emit({ type: 'runPaused', runId: 'run_current' });
-    await user.click(screen.getByRole('button', { name: 'delete-first-edge' }));
+    await user.click(screen.getByRole('button', { name: '关闭步骤检查器' }));
+    await user.click(screen.getByRole('button', { name: '查看章节大纲' }));
+    await user.click(screen.getByText('调整前置步骤'));
+    await user.click(screen.getByLabelText('等待故事规划'));
+    await user.click(screen.getByRole('button', { name: '保存前置步骤' }));
+    await user.click(screen.getByRole('button', { name: '关闭步骤检查器' }));
     expect(mockedInvoke).toHaveBeenCalledWith('pipeline_update_dependencies', {
       runId: 'run_current', stepId: 'outline', dependsOn: [], projectPath: '/tmp/current',
     });

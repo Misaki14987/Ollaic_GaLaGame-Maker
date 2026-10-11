@@ -120,6 +120,10 @@ async fn handle_socket(socket: WebSocket, server: RuntimeServer) {
 async fn static_handler(State(server): State<RuntimeServer>, uri: Uri) -> Response {
     let raw_path = uri.path();
     let decoded = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
+    let embedded_preview = matches!(decoded.as_str(), "/" | "/index.html")
+        && uri
+            .query()
+            .is_some_and(|query| query.split('&').any(|part| part == "ollaicPreview=1"));
 
     let (base, rel) = if let Some(stripped) = decoded.strip_prefix("/game/") {
         match server.project_dir.read().await.clone() {
@@ -136,10 +140,10 @@ async fn static_handler(State(server): State<RuntimeServer>, uri: Uri) -> Respon
         (server.template_dir.read().await.clone(), rel.to_string())
     };
 
-    serve_file(base, rel).await
+    serve_file(base, rel, embedded_preview).await
 }
 
-async fn serve_file(base: PathBuf, rel: String) -> Response {
+async fn serve_file(base: PathBuf, rel: String, embedded_preview: bool) -> Response {
     let candidate = base.join(&rel);
 
     let canonical_base = match tokio::fs::canonicalize(&base).await {
@@ -156,6 +160,17 @@ async fn serve_file(base: PathBuf, rel: String) -> Response {
 
     match tokio::fs::read(&canonical).await {
         Ok(bytes) => {
+            let bytes = if embedded_preview {
+                // Preview uses the existing browser language, or Chinese on first
+                // use. This bypasses the engine's first-run language overlay
+                // without changing config.txt, scripts, or the installed engine.
+                let bootstrap = "<script>try{if(!localStorage.getItem('lang'))localStorage.setItem('lang','0')}catch(e){}</script>";
+                String::from_utf8_lossy(&bytes)
+                    .replacen("</head>", &format!("{bootstrap}</head>"), 1)
+                    .into_bytes()
+            } else {
+                bytes
+            };
             let mime = mime_guess::from_path(&canonical)
                 .first_or_octet_stream()
                 .to_string();
@@ -168,6 +183,45 @@ async fn serve_file(base: PathBuf, rel: String) -> Response {
             (StatusCode::OK, headers, bytes).into_response()
         }
         Err(_) => not_found("read failed"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn embedded_preview_bootstraps_language_without_modifying_engine_files() {
+        let dir = std::env::temp_dir().join(format!(
+            "ollaic-runtime-preview-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        let html = b"<!doctype html><html><head></head><body>WebGAL</body></html>";
+        tokio::fs::write(dir.join("index.html"), html)
+            .await
+            .unwrap();
+        let preview = serve_file(dir.clone(), "index.html".into(), true).await;
+        assert_eq!(preview.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(preview.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body = String::from_utf8(bytes.to_vec()).unwrap();
+        assert!(body.contains("if(!localStorage.getItem('lang'))"));
+        assert!(body.contains("localStorage.setItem('lang','0')"));
+        let ordinary = serve_file(dir.clone(), "index.html".into(), false).await;
+        let ordinary_bytes = axum::body::to_bytes(ordinary.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(ordinary_bytes.as_ref(), html);
+        assert_eq!(
+            tokio::fs::read(dir.join("index.html")).await.unwrap(),
+            html.to_vec()
+        );
+        tokio::fs::remove_dir_all(&dir).await.unwrap();
     }
 }
 

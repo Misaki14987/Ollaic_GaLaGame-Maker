@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0059
+---
+
 # FlowBoard uses React Flow
 
 The V2 FlowBoard is the project-first workspace that renders an Agent Flow as an interactive DAG. We render it with the **React Flow** library rather than a self-built lightweight canvas.

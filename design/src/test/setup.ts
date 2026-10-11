@@ -1,8 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { vi } from 'vitest';
 
-// React Flow (and other libs) rely on ResizeObserver, which jsdom does not
-// provide. Polyfill it for the test environment.
+// Radix components rely on ResizeObserver, which jsdom does not provide.
 if (typeof globalThis.ResizeObserver === 'undefined') {
   class ResizeObserverPolyfill {
     observe() {}
