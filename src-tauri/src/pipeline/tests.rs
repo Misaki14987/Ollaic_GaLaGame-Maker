@@ -16,7 +16,9 @@ use crate::agents::{
 };
 use crate::asset_queue::{AssetGenerator, AssetTask, GeneratedArtifact};
 use crate::pipeline::asset_executor::AssetGeneratorFactory;
-use crate::pipeline::dsl::{default_recipe, FlowRecipe, RecipeError, StepDef, StepKind};
+use crate::pipeline::dsl::{
+    default_recipe, selected_recipe, FlowRecipe, RecipeError, StepDef, StepKind,
+};
 use crate::pipeline::events::{EventSink, PipelineEvent, RecordingSink};
 use crate::pipeline::project_state::project_has_story_content;
 use crate::pipeline::recovery::cleanup_rollback_snapshots;
@@ -370,6 +372,46 @@ fn media_capability_gap_rejects_asset_recipe_before_run_creation() {
             .is_none()
     );
     assert!(crate::story_plan::load_plan(&project).unwrap().is_none());
+}
+
+#[test]
+fn content_only_selection_ignores_missing_media_and_survives_reload() {
+    let project = fresh_project("selected_content_only");
+    let sink = RecordingSink::new();
+    let clock = StepClock::new();
+    let pipeline = Pipeline::with_default_agents()
+        .with_asset_generators_for_test(Arc::new(MissingMediaCapabilityFactory));
+    let ids = default_recipe()
+        .steps
+        .into_iter()
+        .filter(|step| step.id != "assetQueue")
+        .map(|step| step.id)
+        .collect::<Vec<_>>();
+    let recipe = selected_recipe(Some(&ids)).unwrap();
+    pipeline
+        .create_run_with_options(RunCreation {
+            project_path: &project,
+            run_id: "run_selected",
+            prompt: "brief",
+            recipe: &recipe,
+            allow_local_fallback: false,
+            step_timeout: Some(DEFAULT_STEP_TIMEOUT),
+            clock: &clock,
+            sink: &sink,
+        })
+        .expect("unselected media must not block content production");
+    let saved = crate::pipeline::load_run_state(&project, "run_selected")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        saved
+            .steps
+            .iter()
+            .map(|step| step.def.id.as_str())
+            .collect::<Vec<_>>(),
+        ids.iter().map(String::as_str).collect::<Vec<_>>()
+    );
+    assert!(!saved.allow_local_fallback);
 }
 
 #[test]
@@ -2733,7 +2775,9 @@ async fn snapshot_cleanup_failure_keeps_diagnostic_and_drops_pending_notice() {
         .warnings;
     assert_eq!(persisted.pending_snapshot_cleanup, vec!["../invalid"]);
     assert!(
-        warnings.iter().any(|warning| warning.contains("../invalid")),
+        warnings
+            .iter()
+            .any(|warning| warning.contains("../invalid")),
         "cleanup failure must stay visible: {warnings:?}"
     );
     assert!(

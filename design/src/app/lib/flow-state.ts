@@ -1,7 +1,6 @@
 /**
  * Pure event->state reducer for the FlowBoard. This is the testable behavior
- * core: how pipeline events map to step/run statuses. The React Flow canvas
- * is presentation on top of this state.
+ * core: how pipeline events map to step/run statuses.
  */
 
 import type { PipelineEvent, PipelineEventRecord, RunState, RunStatus, StepRunHistory, StepStatus } from './pipeline-types';

@@ -10,8 +10,18 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { AssetQueueState, PipelineEvent, RunState, StoryPlan } from './pipeline-types';
 
 /** Start an Agent Flow for a project. Returns the new run id. */
-export async function pipelineStart(projectPath: string, prompt: string, allowLocalFallback: boolean): Promise<string> {
-  return invoke<string>('pipeline_start', { projectPath, prompt, allowLocalFallback });
+export async function pipelineStart(projectPath: string, prompt: string, allowLocalFallback: boolean, selectedStepIds?: string[]): Promise<string> {
+  return invoke<string>('pipeline_start', { projectPath, prompt, allowLocalFallback, selectedStepIds: selectedStepIds ?? null });
+}
+
+export interface FlowCapabilities {
+  chatError: string | null;
+  assetError: string | null;
+}
+
+/** Local configuration checks use the same backend validators as run creation. */
+export async function pipelineGetCapabilities(): Promise<FlowCapabilities> {
+  return invoke<FlowCapabilities>('pipeline_get_capabilities');
 }
 
 /** Pause a live (in-memory) run before the next step. */

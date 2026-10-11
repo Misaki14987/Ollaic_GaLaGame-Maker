@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use tauri::Emitter;
 
-use crate::pipeline::dsl::default_recipe;
+use crate::pipeline::dsl::selected_recipe;
 use crate::pipeline::events::{EventSink, PipelineEvent};
 use crate::pipeline::project_state::record_run_summary;
 use crate::pipeline::recovery::{
@@ -117,13 +117,34 @@ fn spawn_driver(
 }
 
 #[tauri::command]
+pub fn pipeline_get_capabilities(orchestrator: tauri::State<'_, Orchestrator>) -> FlowCapabilities {
+    FlowCapabilities {
+        chat_error: if crate::ai::commands::has_agent_chat_config() {
+            orchestrator.validate_flow_step_capability().err()
+        } else {
+            Some("未配置可用的对话模型，请在 AI 设置中填写模型和接口信息".into())
+        },
+        asset_error: orchestrator.pipeline.asset_capability_error(),
+    }
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlowCapabilities {
+    chat_error: Option<String>,
+    asset_error: Option<String>,
+}
+
+#[tauri::command]
 pub async fn pipeline_start(
     orchestrator: tauri::State<'_, Orchestrator>,
     app: tauri::AppHandle,
     project_path: String,
     prompt: String,
     allow_local_fallback: Option<bool>,
+    selected_step_ids: Option<Vec<String>>,
 ) -> Result<String, String> {
+    let recipe = selected_recipe(selected_step_ids.as_deref())?;
     if !crate::ai::commands::has_agent_chat_config() && allow_local_fallback != Some(true) {
         return Err("未配置可用的对话模型。请先配置 AI，或明确允许本地内容降级。".to_string());
     }
@@ -132,7 +153,6 @@ pub async fn pipeline_start(
     orchestrator.validate_flow_step_capability()?;
     let project_path = PathBuf::from(project_path);
     let run_id = new_run_id();
-    let recipe = default_recipe();
     let sink = make_sink(&app);
     // Read the live Provider capability on every new Flow so a settings edit
     // (provider/model/custom `flow_step_deadline_ms`) takes effect immediately

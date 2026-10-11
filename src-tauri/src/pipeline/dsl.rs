@@ -221,6 +221,34 @@ pub fn default_recipe() -> FlowRecipe {
         )
 }
 
+/// Snapshot the user's production scope before creating any run or plan.
+/// Missing inputs are rejected rather than silently enabling an omitted step.
+pub fn selected_recipe(step_ids: Option<&[String]>) -> Result<FlowRecipe, String> {
+    let mut recipe = default_recipe();
+    let Some(step_ids) = step_ids else {
+        return Ok(recipe);
+    };
+    if step_ids.is_empty() {
+        return Err("请至少选择一个生产步骤".into());
+    }
+    let selected: HashSet<&str> = step_ids.iter().map(String::as_str).collect();
+    if selected.len() != step_ids.len() {
+        return Err("生产步骤不能重复选择".into());
+    }
+    for id in &selected {
+        if !recipe.steps.iter().any(|step| step.id == *id) {
+            return Err(format!("未知生产步骤：{id}"));
+        }
+    }
+    recipe
+        .steps
+        .retain(|step| selected.contains(step.id.as_str()));
+    recipe
+        .validate()
+        .map_err(|error| format!("生产范围缺少前置步骤：{error}"))?;
+    Ok(recipe)
+}
+
 impl StepDef {
     pub fn depends_on(mut self, id: impl Into<String>) -> Self {
         self.depends_on.push(id.into());
@@ -253,7 +281,26 @@ impl std::error::Error for RecipeError {}
 
 #[cfg(test)]
 mod tests {
-    use super::{StepDef, StepExecutor};
+    use super::{selected_recipe, StepDef, StepExecutor};
+
+    #[test]
+    fn selection_preserves_order_and_rejects_missing_inputs() {
+        let ids = vec!["memory".into(), "plan".into()];
+        let recipe = selected_recipe(Some(&ids)).unwrap();
+        assert_eq!(
+            recipe
+                .steps
+                .iter()
+                .map(|step| step.id.as_str())
+                .collect::<Vec<_>>(),
+            ["plan", "memory"]
+        );
+        assert!(selected_recipe(Some(&["scene".into()])).is_err());
+        assert!(selected_recipe(Some(&[])).is_err());
+        assert!(selected_recipe(Some(&["unknown".into()])).is_err());
+        assert!(selected_recipe(Some(&["plan".into(), "plan".into()])).is_err());
+        assert_eq!(selected_recipe(None).unwrap().steps.len(), 8);
+    }
 
     #[test]
     fn step_executor_round_trips_the_existing_agent_json_contract() {

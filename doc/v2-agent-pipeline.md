@@ -214,17 +214,20 @@ P1 已实现前六类内容职责；Reviewer 属于 P3 Quality Gate。各 Agent 
 
 ---
 
-### 3.4 Flow 可视化画布 ⭐⭐ 用户最大改变
+### 3.4 Flow 生产步骤清单 ⭐⭐ 用户最大改变
 
-**作用**：取代当前 ProjectHome / StoryEditor 的首屏地位，所有交互从这张画布发出。
+**作用**：生产流、脚本流和场景图合并为「编辑」工作区。右侧切换 Workflow Agent 和编辑 Agent；生产步骤、进度与结果集中在 Workflow Agent 面板中。界面按「故事与角色」「对白与场景」「素材制作」分组；后端继续用 DAG 调度，前端不要求用户操作画布（ADR 0059）。
+
+右上角提供场景图与实时预览入口。场景图支持缩放、重置和按 Esc 返回编辑；打开右键菜单时，Esc 优先关闭菜单。预览支持分屏和大屏，可同步当前草稿而不写入项目文件；切换布局保留运行画面。两种 Agent 面板保持挂载，切换时保留输入、步骤选择及运行进度。Workflow 管理项目时暂停脚本写入，生产结果读取成功后再恢复编辑。旧 `/flow/:projectId` 链接自动打开编辑区的 Workflow Agent。
 
 **目标组件**：
-- `design/src/app/components/FlowBoard.tsx` — 画布主视图（候选 React Flow 或自研轻量方案）
-- `design/src/app/components/StepNode.tsx` — 节点渲染（status / 名称 / 进度 / 摘要 / cost 角标）
-- `design/src/app/components/FlowToolbar.tsx` — 运行 / 暂停 / 重跑 / 跳转
-- `design/src/app/components/StepDetailDrawer.tsx` — 点击节点看 prompt / 输出 / 日志 / diff / 重试
-- `design/src/app/components/FlowEventStream.tsx` — 实时事件流（订阅 `pipeline_events`）
-- 复用并升级现有的 `MiniNodeCard.tsx` / `PerformanceTimeline.tsx`
+- `design/src/app/components/StoryEditor.tsx` — 统一编辑区、Agent 模式与项目写入协调
+- `design/src/app/components/story-editor/RuntimePreviewPanel.tsx` — WebGAL 分屏、大屏预览与重连
+- `design/src/app/hooks/useRuntimePreview.ts` — 等待运行页和引擎连接，使用 TEMP_SCENE 同步草稿
+- `design/src/app/components/FlowBoard.tsx` — 运行前勾选、接口检查、分组步骤清单与运行控制
+- `design/src/app/components/FlowStepInspector.tsx` — 步骤要求、输出、记录、日志、素材候选与前置依赖表单
+- `design/src/app/components/PipelineEventLedger.tsx` — 可折叠的实时事件记录
+- `design/src/app/lib/flow-presentation.ts` — 用户可见名称与明确触发的依赖修复操作
 
 #### 节点类型 / 状态
 
@@ -245,14 +248,16 @@ P1 已实现前六类内容职责；Reviewer 属于 P3 Quality Gate。各 Agent 
 
 | 操作 | 反馈 |
 |---|---|
-| 点节点 | 抽屉显示 step 详情、prompt、输出摘要、cost、duration |
-| 拖节点 | 改变 DAG 依赖（仅 pending 内生效，已运行节点只读） |
-| 右键节点 | 重跑 / 跳过 / 编辑 prompt 重跑 / 跳到目标 scene / 资产 |
-| 画布操作 | 滚轮缩放、拖动平移 |
-| 工具栏 | 推进到下一可玩等级 / 暂停 / 停止 / 续跑 / 时间倒带 |
-| 顶栏 | 当前 IR 摘要、总体进度、token 总成本、当前 runId |
+| 运行前勾选 | 保存本次选定的 recipe，未选择的步骤不进入运行与进度分母 |
+| 缺少前置输入 | 阻止准备；用户明确选择补选前置步骤或取消相关后续步骤 |
+| 素材制作 | 默认关闭；未选择时不要求图片、语音接口和抠图能力；BGM/音效仍通过手动导入补齐 |
+| 点步骤 | 详情面板显示要求、输出、记录与日志；完成步骤默认查看输出 |
+| 依赖表单 | 暂停时调整 pending 步骤的等待关系，后端检查环路 |
+| 运行控制 | 准备流程后再开始生产；保留暂停、停止、续跑与单步执行 |
+| 结果操作 | 重跑、修改要求并重跑、素材候选管理、跳转场景或素材编辑器 |
+| 记录管理 | 折叠展示 token、成本、runId、固定、导出与清理 |
 
-FlowBoard 的主按钮随当前状态变化：初始为「生成草稿试玩」，Draft Playable 完成后变为「推进到审阅版」，Review Playable 完成后变为「推进到发布候选」。用户仍可在高级操作中选择运行单个 step、从某 step 重跑或跳过 pending step。
+当前主按钮随状态变化为「准备流程」「开始生产」「暂停」「继续运行」或「恢复运行」。新建故事没有可复用的前置结果，因此取消内容步骤时必须处理依赖它的后续步骤；接口检查仅检查本地配置，连通性测试在 AI 设置中执行。推进到不同可玩等级仍属于后续生产门控规划。
 
 **与现有 UI 的关系**：
 
@@ -332,7 +337,7 @@ Release Candidate 可以被结构性叙事问题阻断，例如分支缺乏动�
 ```
                 ┌──────────────────────────────────────────────┐
                 │              FlowBoard (React)               │
-                │   DAG 渲染 / 状态镜像 / 用户操作              │
+                │   步骤选择 / 状态镜像 / 结果检查              │
                 └──────────────┬───────────────────────────────┘
                                │ Tauri event / IPC
                                ▼
@@ -394,7 +399,7 @@ P0 是地基，其余切片可以基于 P0 并行。**强烈建议先实现 P0**
 
 落地 P0 前需要明确的事项：
 
-- [x] Flow 画布技术栈：React Flow（ADR 0053）
+- [x] Flow 生产界面：可选择的分组步骤清单（ADR 0059，取代 ADR 0053）
 - [x] IR 落盘格式：JSON（ADR 0054）
 - [x] Pipeline 持久化粒度：每 step 状态转换一次（ADR 0054）
 - [x] 事件总线传输：Tauri event（ADR 0055）

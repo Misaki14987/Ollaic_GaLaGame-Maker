@@ -351,6 +351,7 @@ export const SceneGraph = memo(function SceneGraph({
               tabIndex={0}
               title={titleParts.join('\n')}
               onClick={() => onSwitchScene?.(name)}
+              onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSwitchScene?.(name); } }}
               onContextMenu={onNodeContextMenu ? (ev) => { ev.preventDefault(); onNodeContextMenu(name, ev); } : undefined}
               style={{
                 left: `${((pos.x - pos.w / 2) / width) * 100}%`,

@@ -1,8 +1,8 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import { useParams, useSearchParams } from 'react-router';
+import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
-import { Loader2 } from 'lucide-react';
+import { Bot, FileText, FolderOpen, GitBranch, Loader2, PanelRightClose, PanelRightOpen, Play, X } from 'lucide-react';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { AiSettingsDialog } from './AiSettingsDialog';
@@ -12,9 +12,9 @@ import { SnapshotManagerDialog } from './SnapshotManagerDialog';
 import { SceneManagerPanel } from './SceneManagerPanel';
 import type { WebGalNode } from '../lib/webgal-types';
 import {
-  parseScene, serializeScene, saveScene, loadScene,
+  parseScene, serializeScene, saveScene, loadScene, sceneDisplayName,
   openProject, getScenePath, createScene,
-  setRuntimeProject, setRuntimeTemplateDir, getRuntimeUrl, jumpToSentence, openInBrowser,
+  setRuntimeTemplateDir,
   writeFileText, deleteScene, renameScene,
   type ProjectInfo,
 } from '../lib/webgal-ipc';
@@ -45,8 +45,12 @@ import {
 } from './ui/alert-dialog';
 import { OllaicSideNav, OllaicTopBar } from './OllaicChrome';
 import { PerformanceTimeline } from './PerformanceTimeline';
+import { FlowBoardView } from './FlowBoard';
+import { useFlowRunController } from '../hooks/useFlowRunController';
+import { useRuntimePreview } from '../hooks/useRuntimePreview';
+import { RuntimePreviewPanel, type PreviewLayout } from './story-editor/RuntimePreviewPanel';
 import { AiAssistantPanel } from './story-editor/AiAssistantPanel';
-import { FullScreenWorldline, SceneWorldlinePanel } from './story-editor/SceneWorldline';
+import { FullScreenWorldline } from './story-editor/SceneWorldline';
 import { ScriptCommandStream } from './story-editor/ScriptCommandStream';
 import { NewSceneDialog } from './story-editor/NewSceneDialog';
 import { useSceneDocument } from './story-editor/useSceneDocument';
@@ -61,14 +65,44 @@ const AUTO_SAVE_INTERVAL_MS = 3_000;
 
 export function StoryEditor() {
   const { projectId } = useParams();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedScene = searchParams.get('scene');
   const requestedSceneName = requestedScene || 'start.txt';
-  const viewMode = searchParams.get('view'); // 'worldline' = full-screen scene graph
+  const viewMode = searchParams.get('view');
+  const agentMode = searchParams.get('agent') === 'workflow' ? 'workflow' : 'edit';
+  const [agentOpen, setAgentOpen] = useState(true);
+  const [previewLayout, setPreviewLayout] = useState<PreviewLayout>('hidden');
+  const [previewStarted, setPreviewStarted] = useState(false);
+  const changePreviewLayout = useCallback((layout: PreviewLayout) => {
+    setPreviewLayout(layout);
+    if (layout !== 'hidden') setPreviewStarted(true);
+  }, []);
+  const setAgentMode = (mode: 'workflow' | 'edit') => {
+    const next = new URLSearchParams(searchParams);
+    next.set('agent', mode);
+    setSearchParams(next, { replace: true });
+  };
+  const toggleSceneGraph = () => {
+    const next = new URLSearchParams(searchParams);
+    if (viewMode === 'worldline') next.delete('view');
+    else { next.set('view', 'worldline'); changePreviewLayout('hidden'); }
+    setSearchParams(next, { replace: true });
+  };
 
   // Project state
   const [projectPath, setProjectPath] = useState<string | null>(null);
   const [projectInfo, setProjectInfo] = useState<ProjectInfo | null>(null);
+  const flow = useFlowRunController(projectPath ?? '');
+  const [workflowPreparing, setWorkflowPreparing] = useState(false);
+  const [workflowRefreshing, setWorkflowRefreshing] = useState(false);
+  const [workflowSyncRequired, setWorkflowSyncRequired] = useState(false);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const workflowOwnsProject = workflowSyncRequired || flow.loading || flow.busy || workflowPreparing || workflowRefreshing
+    || flow.state.runStatus === 'running' || flow.state.runStatus === 'paused';
+  const workflowOwnsProjectRef = useRef(workflowOwnsProject);
+  workflowOwnsProjectRef.current = workflowOwnsProject;
+  const editAgentBusyRef = useRef(false);
   const [currentSceneName, setCurrentSceneName] = useState('start.txt');
 
   // Editor state
@@ -95,6 +129,7 @@ export function StoryEditor() {
   const [showScript, setShowScript] = useState(false);
   const [commandSearchQuery, setCommandSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
+  const runtimePreview = useRuntimePreview(projectPath, scriptSource, previewStarted);
 
   // AI state
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
@@ -176,19 +211,6 @@ export function StoryEditor() {
       });
     }
   }, []);
-
-  useEffect(() => {
-    getRuntimeUrl()
-      .then((url) => console.info(`[runtime] preview URL: ${url}`))
-      .catch((e) => console.warn('[runtime] URL unavailable:', e));
-    (window as unknown as { __jumpTo?: typeof jumpToSentence }).__jumpTo = jumpToSentence;
-  }, []);
-
-  useEffect(() => {
-    setRuntimeProject(projectPath).catch((e) =>
-      console.warn('[runtime] failed to sync project path:', e),
-    );
-  }, [projectPath]);
 
   // ---------------------------------------------------------------------------
   // Initialization: try to load project from localStorage or URL params
@@ -288,18 +310,11 @@ export function StoryEditor() {
       setLoading(false);
     };
     init();
-  }, [projectId, requestedSceneName]);
+  }, [projectId, requestedSceneName, requestedScene, chooseInitialScene, loadCharacterColors, refreshSceneGraph, setDirty, setNodes, setScriptSource]);
 
   // ---------------------------------------------------------------------------
   // 同步节点到脚本文本
   // ---------------------------------------------------------------------------
-  const jumpToNode = useCallback((index: number) => {
-    if (!currentSceneName) return;
-    void jumpToSentence(currentSceneName, index + 1).catch((e) =>
-      console.warn('[runtime] jumpToSentence failed:', e),
-    );
-  }, [currentSceneName]);
-
   const syncSceneBackgroundCard = useCallback(async (sceneFile: string, sceneNodes: WebGalNode[]) => {
     if (!projectPath) return;
     try {
@@ -326,7 +341,8 @@ export function StoryEditor() {
   // ---------------------------------------------------------------------------
   // Save
   // ---------------------------------------------------------------------------
-  const handleSave = useCallback(async (): Promise<boolean> => {
+  const handleSave = useCallback(async (forWorkflow = false): Promise<boolean> => {
+    if (workflowOwnsProjectRef.current && !forWorkflow) return false;
     const finishSave = editorCommitCoordinator.startSave(currentSceneName);
     if (!finishSave) return false;
     setSaveStatus('saving');
@@ -391,8 +407,14 @@ export function StoryEditor() {
     projectPath,
     scriptSource,
     showScript,
-    syncSceneBackgroundCard,
+    syncSceneBackgroundCard, nodesRef, setDirty, setNodes, setSaveStatus, setSelectedNode,
   ]);
+
+  const jumpToNode = useCallback(async (index: number) => {
+    if (dirtyRef.current && !await handleSave()) return;
+    changePreviewLayout('split');
+    runtimePreview.jump(currentSceneName, index + 1);
+  }, [dirtyRef, handleSave, changePreviewLayout, runtimePreview, currentSceneName]);
 
   // Guard navigation that would discard unsaved changes (back to home, window close)
   const guardedNavigate = useCallback((action: () => void) => {
@@ -419,7 +441,7 @@ export function StoryEditor() {
     setDirty(false);
     setUnsavedConfirmOpen(false);
     action?.();
-  }, []);
+  }, [setDirty]);
 
   const handleUnsavedCancel = useCallback(() => {
     setUnsavedConfirmOpen(false);
@@ -470,6 +492,7 @@ export function StoryEditor() {
   // Undo/Redo shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (workflowOwnsProjectRef.current) return;
       if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
         e.preventDefault();
         if (e.shiftKey) {
@@ -486,6 +509,7 @@ export function StoryEditor() {
   // Clipboard shortcuts (Ctrl+C/X/V)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (workflowOwnsProjectRef.current) return;
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey) {
         if (e.key === 'c' && selectedNode) {
           e.preventDefault();
@@ -520,7 +544,7 @@ export function StoryEditor() {
     return () => {
       if (autoSaveRef.current) clearInterval(autoSaveRef.current);
     };
-  }, [autoSaveEnabled, projectPath]);
+  }, [autoSaveEnabled, projectPath, dirtyRef]);
 
   // Clear the export-toast dismissal timer on unmount.
   useEffect(() => () => {
@@ -577,7 +601,7 @@ export function StoryEditor() {
     } catch (e) {
       console.error('Open project failed:', e);
     }
-  }, [projectId, refreshSceneGraph, chooseInitialScene]);
+  }, [projectId, refreshSceneGraph, chooseInitialScene, loadCharacterColors, setDirty, setNodes, setScriptSource]);
 
   // ---------------------------------------------------------------------------
   // Switch scene within project
@@ -621,7 +645,7 @@ export function StoryEditor() {
       setNodes([]);
       setScriptSource('');
     }
-  }, [projectPath, currentSceneName, dirty, editorCommitCoordinator, nodes]);
+  }, [projectPath, currentSceneName, dirty, editorCommitCoordinator, nodes, setDirty, setNodes, setScriptSource, setSelectedNode]);
 
   // Stable wrapper for child components (SceneGraph) so they can be memoized —
   // the underlying handleSwitchScene closes over `nodes`/`dirty` and changes
@@ -715,7 +739,7 @@ export function StoryEditor() {
       markDirty();
     };
     input.click();
-  }, [markDirty]);
+  }, [markDirty, setNodes, setScriptSource, setSelectedNode]);
 
   const handleExport = useCallback(async () => {
     try {
@@ -760,61 +784,38 @@ export function StoryEditor() {
   }, [nodes, currentSceneName]);
 
   // Handle node selection from scene index with auto-scroll to the node
-  const handleSelectNodeWithScroll = useCallback((node: WebGalNode) => {
-    setSelectedNode(node);
-
-    // Scroll to the corresponding node in the command stream
-    // Use a small delay to ensure the selection state is updated first
-    setTimeout(() => {
-      const cardElement = document.querySelector(`[data-node-id="${node.id}"]`);
-      if (cardElement) {
-        cardElement.scrollIntoView({
-          behavior: 'smooth',
-          block: 'center',
-        });
-      }
-    }, 50);
-  }, []);
-
   const handleApplyScript = useCallback(async () => {
     const parsed = await parseScene(scriptSource);
     setNodes(parsed);
     setSelectedNode(null);
     setShowScript(false);
     markDirty();
-  }, [scriptSource, markDirty]);
+  }, [scriptSource, markDirty, setNodes, setSelectedNode]);
 
   const projectName = projectInfo?.config.Game_name || projectPath?.split('/').pop() || '未命名项目';
 
   const reloadAfterSnapshot = useCallback(async () => {
     if (!projectPath) return;
+    const token = ++sceneLoadTokenRef.current;
     const info = await openProject(projectPath);
-    setProjectInfo(info);
-    await refreshSceneGraph(projectPath, info.scenes);
     const restoredSceneName = info.scenes.includes(currentSceneName)
-      ? currentSceneName
-      : (info.scenes[0] ?? 'start.txt');
-    setCurrentSceneName(restoredSceneName);
+      ? currentSceneName : (info.scenes[0] ?? 'start.txt');
     const scenePath = await getScenePath(projectPath, restoredSceneName);
     const loaded = await loadScene(scenePath);
+    const source = await serializeScene(loaded);
+    if (sceneLoadTokenRef.current !== token) return;
+    setProjectInfo(info);
+    setCurrentSceneName(restoredSceneName);
+    nodesRef.current = loaded;
     setNodes(loaded);
-    setScriptSource(await serializeScene(loaded));
+    setScriptSource(source);
     editorCommitCoordinator.clearDrafts();
     setDirty(false);
     setSelectedNode(null);
     setAiUploadsRevision((revision) => revision + 1);
-    await refreshCharactersForAi();
-  }, [
-    currentSceneName,
-    editorCommitCoordinator,
-    projectPath,
-    refreshCharactersForAi,
-    refreshSceneGraph,
-    setDirty,
-    setNodes,
-    setScriptSource,
-    setSelectedNode,
-  ]);
+    await Promise.all([refreshSceneGraph(projectPath, info.scenes), refreshCharactersForAi()]);
+  }, [currentSceneName, editorCommitCoordinator, projectPath, refreshCharactersForAi,
+    refreshSceneGraph, setDirty, setNodes, setScriptSource, setSelectedNode, nodesRef]);
 
   const ensureSaved = useCallback(
     async () => !dirty || handleSave(),
@@ -852,15 +853,7 @@ export function StoryEditor() {
     ensureSaved,
     onRestored: reloadAfterSnapshot,
   });
-  const handleOpenRuntime = useCallback(async () => {
-    try {
-      const url = await getRuntimeUrl();
-      await openInBrowser(url);
-    } catch (e) {
-      console.warn('[runtime] failed to open browser:', e);
-      alert(`无法打开预览窗口: ${e}`);
-    }
-  }, []);
+  const handleOpenRuntime = useCallback(() => changePreviewLayout('large'), [changePreviewLayout]);
 
   useEffect(() => {
     const action = searchParams.get('action');
@@ -959,7 +952,79 @@ export function StoryEditor() {
     return computeFullNodeDiff(sceneEdit.beforeNodes, sceneEdit.afterNodes);
   }, [aiAgent.pendingChangeSet, currentSceneName]);
 
-  const handleAiSend = useCallback((text: string) => { void aiAgent.sendPrompt(text); }, [aiAgent.sendPrompt]);
+  const editingAgentBlocked = aiAgent.busy || aiAgent.committing || aiAgent.pendingChangeSet?.status === 'pending';
+  editAgentBusyRef.current = Boolean(editingAgentBlocked);
+  const handleAiSend = useCallback((text: string) => {
+    if (!workflowOwnsProjectRef.current) void aiAgent.sendPrompt(text);
+  }, [aiAgent]);
+
+  const prepareWorkflow = async (stepIds: string[]) => {
+    if (workflowOwnsProjectRef.current || editAgentBusyRef.current) return false;
+    workflowOwnsProjectRef.current = true;
+    setWorkflowPreparing(true);
+    setWorkspaceError(null);
+    try {
+      if (dirtyRef.current && !await handleSave(true)) return false;
+      for (const scene of projectInfo?.scenes ?? []) {
+        const draft = editorCommitCoordinator.getDraft<WebGalNode[]>(scene);
+        if (!draft || !projectPath) continue;
+        await saveScene(await getScenePath(projectPath, scene), draft);
+        editorCommitCoordinator.deleteDraft(scene);
+      }
+      await editorCommitCoordinator.beginCommit(projectInfo?.scenes ?? [currentSceneName]);
+      return await flow.start(stepIds);
+    } catch (err) {
+      setWorkspaceError(`准备生产失败：${String(err)}`);
+      return false;
+    } finally {
+      editorCommitCoordinator.settleCommit();
+      setWorkflowPreparing(false);
+    }
+  };
+
+  // Both Agent panels stay mounted. One project writer is admitted at a time,
+  // regardless of which panel is visible; production output refreshes the editor.
+  const previousWorkflow = useRef<{ project: string | null; key: string; active: boolean } | null>(null);
+  const workflowOutputKey = JSON.stringify([
+    flow.state.steps.filter((step) => step.status === 'succeeded' && ['character', 'scene', 'assetQueue'].includes(step.id))
+      .map((step) => [step.id, step.status, step.attempt, step.finishedAt]),
+    flow.assetQueue?.tasks.map((task) => [task.id, task.assetFile]),
+  ]);
+  const reloadWorkflowRef = useRef(reloadAfterSnapshot);
+  reloadWorkflowRef.current = reloadAfterSnapshot;
+  const workflowRefreshToken = useRef(0);
+  useEffect(() => {
+    workflowRefreshToken.current += 1;
+    previousWorkflow.current = null;
+    setWorkflowRefreshing(false);
+    setWorkflowSyncRequired(false);
+    setWorkspaceError(null);
+  }, [projectPath]);
+  useEffect(() => {
+    if (loading || flow.loading || !projectPath) return;
+    const active = flow.state.runStatus === 'running' || flow.state.runStatus === 'paused';
+    const previous = previousWorkflow.current;
+    previousWorkflow.current = { project: projectPath, key: workflowOutputKey, active };
+    if (!previous || previous.project !== projectPath || (previous.key === workflowOutputKey && !(previous.active && !active))) return;
+    if (dirtyRef.current || editAgentBusyRef.current) {
+      setWorkflowSyncRequired(true);
+      setWorkspaceError('生产结果与未保存的编辑同时存在。请先复制当前草稿，再读取生产结果。');
+      return;
+    }
+    const token = ++workflowRefreshToken.current;
+    workflowOwnsProjectRef.current = true;
+    setWorkflowRefreshing(true);
+    void reloadWorkflowRef.current().catch((err) => {
+      if (token === workflowRefreshToken.current) { setWorkflowSyncRequired(true); setWorkspaceError(`生产结果刷新失败：${String(err)}`); }
+    }).finally(() => { if (token === workflowRefreshToken.current) setWorkflowRefreshing(false); });
+  }, [flow.loading, flow.state.runStatus, loading, projectPath, workflowOutputKey, dirtyRef]);
+
+  const workflowController = {
+    ...flow,
+    start: prepareWorkflow,
+    busy: flow.busy || workflowPreparing || workflowRefreshing,
+  };
+
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
@@ -986,17 +1051,15 @@ export function StoryEditor() {
           </div>
         )}
         <OllaicTopBar
-          onUndo={undo}
-          onRedo={redo}
-          onRun={handleOpenRuntime}
+          title="编辑"
+          onUndo={workflowOwnsProject ? undefined : undo}
+          onRedo={workflowOwnsProject ? undefined : redo}
           onPublish={handleExportProject}
-          onSave={handleSave}
-          onImport={() => guardedNavigate(handleImport)}
+          onSave={workflowOwnsProject ? undefined : () => { void handleSave(); }}
+          onImport={workflowOwnsProject ? undefined : () => guardedNavigate(handleImport)}
           onExport={handleExport}
           onOpenProject={() => guardedNavigate(handleOpenProject)}
-          onSnapshots={handleOpenSnapshotManager}
-          onToggleScript={() => setShowScript(!showScript)}
-          scriptMode={showScript}
+          onSnapshots={workflowOwnsProject ? undefined : handleOpenSnapshotManager}
           onSearchChange={setCommandSearchQuery}
           searchValue={commandSearchQuery}
           searchPlaceholder="搜索指令 / 角色 / 内容..."
@@ -1005,151 +1068,90 @@ export function StoryEditor() {
           onAutoSaveChange={setAutoSaveEnabled}
           onSettings={() => setAppSettingsOpen(true)}
         />
-        <OllaicSideNav
-          active={viewMode === 'worldline' ? 'world' : 'script'}
-          projectId={projectId}
-          projectLabel={gameName}
-          onCreate={handleNewScene}
-          onBeforeNavigate={guardedNavigate}
-        />
+        <OllaicSideNav active="edit" projectId={projectId} projectLabel={gameName} onBeforeNavigate={guardedNavigate} />
 
-        <div className="ollaic-workspace flex flex-col">
-        {viewMode === 'worldline' ? (
-          <FullScreenWorldline
-            scenes={projectInfo?.scenes ?? [currentSceneName]}
-            currentSceneName={currentSceneName}
-            sceneHeaders={sceneHeaders}
-            sceneLinkMap={sceneLinkMap}
-            nodes={nodes}
-            selectedNode={selectedNode}
-            onSelectNode={setSelectedNode}
-            onOpenScene={stableSwitchScene}
-            onClose={() => {
-              const next = new URLSearchParams(searchParams);
-              next.delete('view');
-              setSearchParams(next, { replace: true });
-            }}
-            characterColors={characterColors}
-            onNewScene={handleNewScene}
-            onDeleteScene={handleDeleteScene}
-            onRenameScene={handleRenameScene}
-            onOpenSceneManager={() => setSceneManagerOpen(true)}
-            onDeleteNode={deleteNode}
-            onJumpToIndex={jumpToNode}
-          />
-        ) : (
-          <>
-        {/* Main Content */}
-        <div className="relative flex-1 flex overflow-hidden">
-          <SceneWorldlinePanel
-            scenes={projectInfo?.scenes ?? [currentSceneName]}
-            currentSceneName={currentSceneName}
-            sceneHeaders={sceneHeaders}
-            sceneLinkMap={sceneLinkMap}
-            nodes={nodes}
-            selectedNode={selectedNode}
-            onSelectNode={handleSelectNodeWithScroll}
-            onOpenScene={stableSwitchScene}
-            onOpenSceneManager={() => setSceneManagerOpen(true)}
-            characterColors={characterColors}
-            onDeleteNode={deleteNode}
-            onJumpToIndex={jumpToNode}
-          />
-
-          {/* Center - Script Command Stream / Script Source */}
-          {showScript ? (
-            <div className="flex-1 flex flex-col bg-background/50">
-              <div className="p-3 border-b border-border flex items-center justify-between">
-                <span className="text-sm text-muted-foreground font-mono-family">
-                  WebGAL 脚本编辑器 - {currentSceneName}
-                </span>
-                <button
-                  onClick={handleApplyScript}
-                  className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground hover:opacity-90 transition-all text-sm"
-                >
-                  应用更改
-                </button>
+        <main className="ollaic-workspace flex min-w-0 flex-col">
+          <header className="editor-workspace-toolbar">
+            <div className="flex min-w-0 items-center gap-2">
+              <select aria-label="当前场景" value={currentSceneName} disabled={workflowOwnsProject} onChange={(event) => stableSwitchScene(event.target.value)} className="min-w-0 max-w-48 rounded-md border border-border bg-surface-container-lowest px-2 py-1.5 text-xs">
+                {(projectInfo?.scenes.length ? projectInfo.scenes : [currentSceneName]).map((scene) => <option key={scene} value={scene}>{sceneHeaders[scene]?.chapter || sceneHeaders[scene]?.outline ? `${sceneDisplayName(scene, sceneHeaders[scene])} · ${scene}` : scene}</option>)}
+              </select>
+              <button type="button" className="ollaic-icon-button" disabled={workflowOwnsProject} onClick={() => setSceneManagerOpen(true)} aria-label="场景管理" title="场景管理"><FolderOpen className="size-4" /></button>
+              <button type="button" className="ollaic-top-action" onClick={() => setShowScript((value) => !value)} aria-label={showScript ? '切换到指令流视图' : '切换到脚本编辑器'}><FileText className="size-4 sm:hidden" /><span className="hidden sm:inline">{showScript ? '指令视图' : '脚本源码'}</span></button>
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              <button type="button" className={`ollaic-top-action ${previewLayout !== 'hidden' ? 'bg-primary/10 text-primary' : ''}`} aria-pressed={previewLayout !== 'hidden'} onClick={() => changePreviewLayout(previewLayout === 'hidden' ? 'split' : 'hidden')}><Play className="size-4" /><span className="hidden sm:inline">实时预览</span><span className="sr-only sm:hidden">实时预览</span></button>
+              <button type="button" className={`ollaic-top-action ${viewMode === 'worldline' ? 'bg-primary/10 text-primary' : ''}`} aria-pressed={viewMode === 'worldline'} onClick={toggleSceneGraph}><GitBranch className="size-4" /><span className="hidden sm:inline">场景图</span><span className="sr-only sm:hidden">场景图</span></button>
+              <button type="button" className="ollaic-icon-button" onClick={() => setAgentOpen((value) => !value)} aria-label={agentOpen ? '收起 Agent 面板' : '打开 Agent 面板'} aria-expanded={agentOpen} title={agentOpen ? '收起 Agent 面板' : '打开 Agent 面板'}>{agentOpen ? <PanelRightClose className="size-4" /> : <PanelRightOpen className="size-4" />}</button>
+            </div>
+          </header>
+          {workspaceError && <div role="alert" className="border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-xs text-destructive">{workspaceError}{dirty && <button type="button" className="ml-3 underline" onClick={() => { void navigator.clipboard.writeText(scriptSource).catch((err) => setWorkspaceError(`复制草稿失败：${String(err)}`)); }}>复制当前草稿</button>}<button type="button" className="ml-3 underline" onClick={() => { void reloadAfterSnapshot().then(() => { setWorkspaceError(null); setWorkflowSyncRequired(false); }).catch((err) => setWorkspaceError(String(err))); }}>{dirty ? '读取生产结果（放弃当前草稿）' : '重新读取'}</button>{!workflowSyncRequired && <button type="button" className="ml-3 underline" onClick={() => setWorkspaceError(null)}>关闭提示</button>}</div>}
+          <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+              {workflowOwnsProject && <div role="status" className="shrink-0 border-b border-primary/15 bg-primary/5 px-4 py-2 text-xs text-muted-foreground">{workflowSyncRequired ? '请先处理上方提示，再继续编辑。' : workflowRefreshing ? '正在同步生产结果…' : 'Workflow 正在管理项目，脚本暂时只读。停止生产后可继续编辑。'}</div>}
+              <div className={`editor-stage editor-stage-${previewLayout}`}>
+                <div className={`relative min-h-0 min-w-0 flex-1 flex-col ${previewLayout === 'large' ? 'hidden' : 'flex'}`}>
+                  <div className={`min-h-0 flex-1 flex-col ${viewMode === 'worldline' ? 'hidden' : 'flex'}`} ref={(element) => { element?.toggleAttribute('inert', workflowOwnsProject); }}>
+                    {showScript ? (
+                      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background/50">
+                        <div className="flex items-center justify-between gap-2 border-b border-border p-3 text-xs">
+                          <span className="truncate text-muted-foreground">脚本源码 · {currentSceneName}</span>
+                          <button type="button" onClick={handleApplyScript} className="shrink-0 rounded-md bg-primary px-3 py-1.5 text-primary-foreground">应用更改</button>
+                        </div>
+                        <textarea value={scriptSource} onChange={(event) => { setScriptSource(event.target.value); markDirty(); }} className="min-h-0 w-full flex-1 resize-none bg-transparent p-4 text-sm leading-relaxed outline-none font-mono-family" spellCheck={false} aria-label="WebGAL 脚本编辑器" />
+                      </div>
+                    ) : (
+                      <ScriptCommandStream nodes={nodes} selectedNode={selectedNode} currentSceneName={currentSceneName} sceneHeaders={sceneHeaders}
+                        onSelectNode={setSelectedNode} onInsertNode={insertNode} onDeleteNode={deleteNode} onCopyNode={copyNode} onCutNode={cutNode} onPasteNode={pasteNode} onReorderNodes={reorderNodes} onJumpToIndex={jumpToNode} onCreateUnlockNode={createUnlockNode}
+                        clipboardNode={clipboardNode} characterColors={characterColors} characters={charactersForAi} searchQuery={commandSearchQuery} previewEntries={aiPreviewEntries} projectPath={projectPath ?? undefined} />
+                    )}
+                    {selectedNode && !showScript && <div className="absolute inset-y-0 right-0 z-30 w-full max-w-80 border-l border-border bg-surface-container-lowest shadow-[-8px_0_24px_var(--shadow-soft)]">
+                      <DetailPanel node={selectedNode} onUpdateNode={updateSelectedNode} onDeleteNode={deleteSelectedNode} onClose={() => setSelectedNode(null)} characterNames={charactersForAi.map((character) => character.name)} projectPath={projectPath ?? undefined} characters={charactersForAi} projectId={projectId} scenes={projectInfo?.scenes ?? []} sceneHeaders={sceneHeaders} />
+                    </div>}
+                    <PerformanceTimeline nodes={nodes} selectedNodeId={selectedNode?.id} onSelectNode={(id) => { const found = nodes.find((node) => node.id === id); if (found) setSelectedNode(found); }} />
+                  </div>
+                  {viewMode === 'worldline' && <div className="min-h-0 flex-1" ref={(element) => { element?.toggleAttribute('inert', workflowOwnsProject); }}>
+                    <FullScreenWorldline scenes={projectInfo?.scenes ?? [currentSceneName]} currentSceneName={currentSceneName} sceneHeaders={sceneHeaders} sceneLinkMap={sceneLinkMap} nodes={nodes} selectedNode={selectedNode} onSelectNode={setSelectedNode} onOpenScene={stableSwitchScene} onClose={toggleSceneGraph}
+                      characterColors={characterColors} onNewScene={handleNewScene} onDeleteScene={handleDeleteScene} onRenameScene={handleRenameScene} onOpenSceneManager={() => setSceneManagerOpen(true)} onDeleteNode={deleteNode} onJumpToIndex={jumpToNode} />
+                  </div>}
+                </div>
+                {previewStarted && <RuntimePreviewPanel preview={runtimePreview} layout={previewLayout} sceneName={currentSceneName} dirty={dirty} onLayoutChange={changePreviewLayout} onSettings={() => setAppSettingsOpen(true)} />}
               </div>
-              <textarea
-                value={scriptSource}
-                onChange={(e) => {
-                  setScriptSource(e.target.value);
-                  markDirty();
-                }}
-                className="flex-1 p-4 bg-transparent resize-none focus:outline-none text-sm leading-relaxed font-mono-family"
-                spellCheck={false}
-                aria-label="WebGAL 脚本编辑器"
-              />
+              <footer className="flex h-7 shrink-0 items-center gap-3 border-t border-border px-4 text-[10px] text-muted-foreground"><span>{scriptSource.length.toLocaleString()} 字</span><span className="hidden sm:inline">约 {Math.max(1, Math.ceil(scriptSource.length / 380))} 分钟阅读</span><span className="ml-auto">WebGAL</span></footer>
             </div>
-          ) : (
-            <ScriptCommandStream
-              nodes={nodes}
-              selectedNode={selectedNode}
-              currentSceneName={currentSceneName}
-              sceneHeaders={sceneHeaders}
-              onSelectNode={setSelectedNode}
-              onInsertNode={insertNode}
-              onDeleteNode={deleteNode}
-              onCopyNode={copyNode}
-              onCutNode={cutNode}
-              onPasteNode={pasteNode}
-              onReorderNodes={reorderNodes}
-              onJumpToIndex={jumpToNode}
-              onCreateUnlockNode={createUnlockNode}
-              clipboardNode={clipboardNode}
-              characterColors={characterColors}
-              characters={charactersForAi}
-              searchQuery={commandSearchQuery}
-              previewEntries={aiPreviewEntries}
-              projectPath={projectPath ?? undefined}
-            />
-          )}
-
-          <AiAssistantPanel
-            aiAgent={aiAgent}
-            projectPath={projectPath}
-            sceneHeaders={sceneHeaders}
-            onOpenSettings={() => setAiSettingsOpen(true)}
-            onSend={handleAiSend}
-          />
-
-          {selectedNode && !showScript && (
-            <div className="absolute bottom-0 right-80 top-0 z-30 w-80 border-l border-border bg-surface-container-lowest shadow-[-8px_0_24px_var(--shadow-soft)]">
-              <DetailPanel
-                node={selectedNode}
-                onUpdateNode={updateSelectedNode}
-                onDeleteNode={deleteSelectedNode}
-                onClose={() => setSelectedNode(null)}
-                characterNames={charactersForAi.map((character) => character.name)}
-                projectPath={projectPath ?? undefined}
-                characters={charactersForAi}
-                projectId={projectId}
-                scenes={projectInfo?.scenes ?? []}
-                sceneHeaders={sceneHeaders}
-              />
-            </div>
-          )}
-        </div>
-
-          <PerformanceTimeline
-            nodes={nodes}
-            selectedNodeId={selectedNode?.id}
-            onSelectNode={(id) => {
-              const found = nodes.find((node) => node.id === id);
-              if (found) setSelectedNode(found);
-            }}
-          />
-          <footer className="flex h-8 shrink-0 items-center justify-between border-t border-outline-variant bg-surface-container px-4 text-[10px] text-on-surface-variant/40">
-            <div className="flex items-center gap-4">
-              <span>{scriptSource.length.toLocaleString()} 字</span>
-              <span>约 {Math.max(1, Math.ceil(scriptSource.length / 380))} 分钟阅读量</span>
-              <span className="h-3 w-px bg-outline-variant/30" />
-              <span>UTF-8 | LF | Engine: WebGAL</span>
-            </div>
-          </footer>
-          </>
-        )}
-        </div>
+            <aside aria-label="Agent 面板" className={`editor-agent-dock ${agentOpen ? '' : 'hidden'}`}>
+              <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3">
+                <Bot className="size-4 shrink-0 text-primary" />
+                <div className="flex min-w-0 flex-1 gap-1 rounded-lg bg-surface-container-low p-1" role="tablist" aria-label="Agent 模式" onKeyDown={(event) => {
+                  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+                  event.preventDefault();
+                  const mode = event.key === 'Home' ? 'workflow' : event.key === 'End' ? 'edit' : agentMode === 'edit' ? 'workflow' : 'edit';
+                  setAgentMode(mode);
+                  document.getElementById(mode === 'workflow' ? 'workflow-agent-tab' : 'editing-agent-tab')?.focus();
+                }}>
+                  <button id="workflow-agent-tab" role="tab" type="button" aria-selected={agentMode === 'workflow'} tabIndex={agentMode === 'workflow' ? 0 : -1} aria-controls="workflow-agent-panel" onClick={() => setAgentMode('workflow')} className={`flex-1 whitespace-nowrap rounded-md px-2 py-1.5 text-xs ${agentMode === 'workflow' ? 'bg-surface-container-lowest font-semibold text-primary shadow-sm' : 'text-muted-foreground'}`}>Workflow Agent</button>
+                  <button id="editing-agent-tab" role="tab" type="button" aria-selected={agentMode === 'edit'} tabIndex={agentMode === 'edit' ? 0 : -1} aria-controls="editing-agent-panel" onClick={() => setAgentMode('edit')} className={`flex-1 whitespace-nowrap rounded-md px-2 py-1.5 text-xs ${agentMode === 'edit' ? 'bg-surface-container-lowest font-semibold text-primary shadow-sm' : 'text-muted-foreground'}`}>编辑 Agent</button>
+                </div>
+                <button type="button" className="ollaic-icon-button lg:hidden" onClick={() => setAgentOpen(false)} aria-label="关闭 Agent 面板"><X className="size-4" /></button>
+              </header>
+              <div id="workflow-agent-panel" role="tabpanel" aria-labelledby="workflow-agent-tab" className={`min-h-0 flex-1 flex-col ${agentMode === 'workflow' ? 'flex' : 'hidden'}`}>
+                {editingAgentBlocked && <p role="status" className="border-b border-border bg-primary/5 px-4 py-2 text-xs text-muted-foreground">请先完成编辑 Agent 的生成和修改确认，再运行生产。</p>}
+                {projectPath ? <FlowBoardView key={projectPath} projectPath={projectPath} controller={workflowController} embedded blocked={Boolean(editingAgentBlocked || workflowSyncRequired || (dirty && ['running', 'paused'].includes(flow.state.runStatus)))} onOpenArtifact={(step, plan) => {
+                  if (step.kind === 'character' || step.kind === 'asset') guardedNavigate(() => navigate(`/editor/${projectId}/assets${step.kind === 'character' ? '?tab=character' : ''}`));
+                  else if (step.id === 'scene') {
+                    const scene = plan?.scenePlans.find((candidate) => candidate.id === plan.branches.entryScene)?.file ?? plan?.scenes[0];
+                    if (scene) stableSwitchScene(scene);
+                    setAgentMode('edit');
+                  }
+                }} /> : <p className="p-4 text-sm text-muted-foreground">打开项目后即可安排生产。</p>}
+              </div>
+              <div id="editing-agent-panel" role="tabpanel" aria-labelledby="editing-agent-tab" className={`min-h-0 flex-1 flex-col ${agentMode === 'edit' ? 'flex' : 'hidden'}`} ref={(element) => { element?.toggleAttribute('inert', workflowOwnsProject); }}>
+                {workflowOwnsProject && <p className="border-b border-border bg-primary/5 px-4 py-2 text-xs text-muted-foreground">生产期间可查看对话。停止生产后可发送编辑请求。</p>}
+                <AiAssistantPanel embedded disabled={workflowOwnsProject} aiAgent={aiAgent} projectPath={projectPath} sceneHeaders={sceneHeaders} onOpenSettings={() => setAiSettingsOpen(true)} onSend={handleAiSend} />
+              </div>
+            </aside>
+          </div>
+        </main>
 
         <AiSettingsDialog
           open={aiSettingsOpen}
@@ -1204,7 +1206,7 @@ export function StoryEditor() {
         />
         <AppSettingsDialog
           open={appSettingsOpen}
-          onClose={() => setAppSettingsOpen(false)}
+          onClose={() => { setAppSettingsOpen(false); if (previewStarted) runtimePreview.reconnect(); }}
           onOpenAiSettings={() => setAiSettingsOpen(true)}
           onApplyRuntimeTemplateDir={(dir) => setRuntimeTemplateDir(dir)}
         />

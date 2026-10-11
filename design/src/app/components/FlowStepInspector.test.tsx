@@ -57,7 +57,7 @@ describe('FlowStepInspector', () => {
     );
 
     expect(screen.getByRole('complementary', { name: 'outline 步骤检查器' })).toBeInTheDocument();
-    expect(screen.getByText('plan')).toBeInTheDocument();
+    expect(screen.getByText('故事规划')).toBeInTheDocument();
     await user.clear(screen.getByLabelText('outline 步骤 Prompt'));
     await user.type(screen.getByLabelText('outline 步骤 Prompt'), '改成三幕式大纲');
     await user.click(screen.getByRole('button', { name: '保存并重跑' }));
