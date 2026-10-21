@@ -7,6 +7,7 @@ on:
     paths:
       - VERSION
       - scripts/version.mjs
+      - src-tauri/Cargo.toml
       - .github/workflows/release.yml
 
 permissions:
@@ -65,7 +66,18 @@ jobs:
               }));
             }
             if (release.draft && release.target_commitish !== context.sha) {
-              throw new Error(`${tag} draft belongs to another commit; increase VERSION`);
+              await github.rest.git.updateRef({
+                ...context.repo,
+                ref: `refs/tags/${tag}`,
+                sha: context.sha,
+                force: true,
+              });
+              await github.rest.repos.updateRelease({
+                ...context.repo,
+                release_id: release.id,
+                target_commitish: context.sha,
+              });
+              release.target_commitish = context.sha;
             }
             core.setOutput('build', String(release.draft));
             core.setOutput('release_id', String(release.id));

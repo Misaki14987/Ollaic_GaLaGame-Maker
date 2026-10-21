@@ -40,6 +40,7 @@ export function checkRelease(root, before, after = 'HEAD') {
   const version = parseVersion(git(root, 'show', `${commit}:VERSION`));
   const tag = `v${version}`;
   let previous;
+  let recoveringRelease = false;
   if (!/^0+$/.test(before)) {
     let baseline = before;
     try {
@@ -62,8 +63,7 @@ export function checkRelease(root, before, after = 'HEAD') {
   }
   if (previous === version) {
     // Recover a release skipped by a failed workflow when a later push still
-    // carries the untagged version increase.
-    if (git(root, 'tag', '--list', tag)) return { release: false, version, tag };
+    // carries the version increase.
     const ancestors = git(root, 'rev-list', '--first-parent', `${commit}^`).split('\n').filter(Boolean);
     for (const ancestor of ancestors) {
       const hasAncestorVersion = git(root, 'ls-tree', '--name-only', ancestor, '--', 'VERSION');
@@ -72,17 +72,20 @@ export function checkRelease(root, before, after = 'HEAD') {
         : JSON.parse(git(root, 'show', `${ancestor}:package.json`)).version);
       if (ancestorVersion !== version) {
         previous = ancestorVersion;
+        recoveringRelease = true;
         break;
       }
     }
-    if (previous === version) return { release: false, version, tag };
+    if (previous === version || (!recoveringRelease && git(root, 'tag', '--list', tag))) {
+      return { release: false, version, tag };
+    }
   }
   if (previous && compareVersions(version, previous) < 0) {
     throw new Error(`VERSION must increase: ${previous} -> ${version}`);
   }
   for (const existing of git(root, 'tag', '--list', 'v*').split('\n')) {
     if (existing === tag) {
-      if (git(root, 'rev-parse', `${tag}^{commit}`) !== commit) {
+      if (!recoveringRelease && git(root, 'rev-parse', `${tag}^{commit}`) !== commit) {
         throw new Error(`${tag} already belongs to another commit; increase VERSION`);
       }
     } else if (stableVersion.test(existing.slice(1)) && compareVersions(version, existing.slice(1)) <= 0) {
