@@ -58,6 +58,14 @@ test('an increased VERSION releases the push commit, even with subsequent commit
   assert.equal(git(root, 'status', '--porcelain'), '');
 });
 
+test('an untagged version increase can be released by a later push', (t) => {
+  const { root, setVersion, commit } = fixture(t);
+  const versionCommit = setVersion('0.1.1\n');
+  writeFileSync(join(root, 'feature.txt'), 'A follow-up fix');
+  const after = commit();
+  assert.deepEqual(checkRelease(root, versionCommit, after), { release: true, version: '0.1.1', tag: 'v0.1.1' });
+});
+
 test('adding VERSION at the existing app version does not release; increasing it does', (t) => {
   const { root, before, setVersion } = fixture(t, { legacy: true });
   const current = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
