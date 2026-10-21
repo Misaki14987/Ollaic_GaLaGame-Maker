@@ -104,6 +104,15 @@ test('a new branch with an all-zero before SHA can release its initial version',
   assert.equal(checkRelease(root, '0'.repeat(40)).release, true);
 });
 
+test('a force push with an unavailable before commit compares against the pushed commit parent', (t) => {
+  const { root, before, commit } = fixture(t);
+  writeFileSync(join(root, 'feature.txt'), 'A feature');
+  const after = commit();
+  const missingBefore = 'b341fbdabba5c5dd4c1c9abcdad29cf36d38c796';
+  assert.notEqual(missingBefore, before);
+  assert.equal(checkRelease(root, missingBefore, after).release, false);
+});
+
 test('sync updates all five app versions without changing dependencies, and is idempotent', (t) => {
   const { root } = fixture(t);
   writeFileSync(join(root, 'VERSION'), '1.2.3\n');

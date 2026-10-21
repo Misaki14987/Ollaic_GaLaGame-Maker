@@ -41,11 +41,24 @@ export function checkRelease(root, before, after = 'HEAD') {
   const tag = `v${version}`;
   let previous;
   if (!/^0+$/.test(before)) {
-    const hasVersion = git(root, 'ls-tree', '--name-only', before, '--', 'VERSION');
+    let baseline = before;
+    try {
+      baseline = git(root, 'rev-parse', '--verify', `${before}^{commit}`);
+    } catch {
+      // A force push can leave the event's before SHA unavailable in the checkout.
+      try {
+        baseline = git(root, 'rev-parse', '--verify', `${commit}^`);
+      } catch {
+        baseline = '';
+      }
+    }
+    const hasVersion = baseline ? git(root, 'ls-tree', '--name-only', baseline, '--', 'VERSION') : '';
     // Introducing VERSION at the existing app version should not release it.
-    previous = parseVersion(hasVersion
-      ? git(root, 'show', `${before}:VERSION`)
-      : JSON.parse(git(root, 'show', `${before}:package.json`)).version);
+    if (baseline) {
+      previous = parseVersion(hasVersion
+        ? git(root, 'show', `${baseline}:VERSION`)
+        : JSON.parse(git(root, 'show', `${baseline}:package.json`)).version);
+    }
   }
   if (previous === version) return { release: false, version, tag };
   if (previous && compareVersions(version, previous) < 0) {
