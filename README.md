@@ -62,3 +62,13 @@ Linux Fedora 依赖示例：
 ```bash
 sudo dnf install -y webkit2gtk4.1-devel gtk3-devel libappindicator-gtk3-devel librsvg2-devel openssl-devel pkgconf-pkg-config curl wget file
 ```
+
+### 自动发布
+
+PR 合并到 `master` 后，`release` 工作流会自动递增补丁版本（如 `0.1.0 → 0.1.1`），同步根目录和前端的 `package.json`、Tauri 配置、Rust manifest 与 `Cargo.lock`，并提交版本变更和 `v*` tag。
+
+随后构建 Windows x64、Linux x64 和 macOS arm64 安装包。三端全部成功后，自动发布 GitHub Release、上传安装包并生成更新说明。任何一端失败时，可在 Actions 中重跑失败任务；重跑同一个 PR 会复用原版本。接连合并多个 PR 时，版本提交冲突会自动重试；每个版本以升版时最新的 `master` 为基础，可能包含其间合并的其他 PR。
+
+工作流使用仓库自带的 `GITHUB_TOKEN`，不需要额外配置发布密钥。仓库策略须允许 Actions 写入内容；若 `master` 或 `v*` 有保护规则，发布身份还须有相应的提交、建 tag 权限。
+
+也可以手动推送与所有版本文件一致的 `v*` tag 来发布；在分支上通过 `workflow_dispatch` 手动运行时只构建 Actions artifacts，不升版、不发布。

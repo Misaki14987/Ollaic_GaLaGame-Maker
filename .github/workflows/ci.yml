@@ -10,6 +10,17 @@ permissions:
   contents: read
 
 jobs:
+  release-scripts:
+    name: Release automation checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node --test scripts/release-version.test.mjs
+
   frontend:
     name: Frontend checks
     runs-on: ubuntu-latest
