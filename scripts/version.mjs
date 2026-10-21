@@ -60,7 +60,23 @@ export function checkRelease(root, before, after = 'HEAD') {
         : JSON.parse(git(root, 'show', `${baseline}:package.json`)).version);
     }
   }
-  if (previous === version) return { release: false, version, tag };
+  if (previous === version) {
+    // Recover a release skipped by a failed workflow when a later push still
+    // carries the untagged version increase.
+    if (git(root, 'tag', '--list', tag)) return { release: false, version, tag };
+    const ancestors = git(root, 'rev-list', '--first-parent', `${commit}^`).split('\n').filter(Boolean);
+    for (const ancestor of ancestors) {
+      const hasAncestorVersion = git(root, 'ls-tree', '--name-only', ancestor, '--', 'VERSION');
+      const ancestorVersion = parseVersion(hasAncestorVersion
+        ? git(root, 'show', `${ancestor}:VERSION`)
+        : JSON.parse(git(root, 'show', `${ancestor}:package.json`)).version);
+      if (ancestorVersion !== version) {
+        previous = ancestorVersion;
+        break;
+      }
+    }
+    if (previous === version) return { release: false, version, tag };
+  }
   if (previous && compareVersions(version, previous) < 0) {
     throw new Error(`VERSION must increase: ${previous} -> ${version}`);
   }

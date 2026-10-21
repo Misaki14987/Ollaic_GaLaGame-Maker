@@ -6,6 +6,8 @@ on:
       - master
     paths:
       - VERSION
+      - scripts/version.mjs
+      - .github/workflows/release.yml
 
 permissions:
   contents: write
