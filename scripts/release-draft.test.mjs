@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
-import { prepareReleaseDraft } from './release-draft.mjs';
+import { prepareRelease, prepareReleaseDraft } from './release-draft.mjs';
 
 const repo = { owner: 'fixture', repo: 'fixture' };
 const first = 'a'.repeat(40);
@@ -38,6 +42,30 @@ function fixture({ releases = [], ref, tags = {} } = {}) {
     },
   };
   return { state, github, prepare: (sha = first) => prepareReleaseDraft({ github, repo, tag, sha }) };
+}
+
+function history(t) {
+  const root = mkdtempSync(join(tmpdir(), 'ollaic-draft-test-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const git = (...args) => execFileSync('git', args, {
+    cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim();
+  git('init', '--initial-branch=master');
+  git('config', 'user.name', 'Release Test');
+  git('config', 'user.email', 'release-test@example.com');
+  git('config', 'commit.gpgsign', 'false');
+  git('config', 'tag.gpgsign', 'false');
+  const commit = (version) => {
+    writeFileSync(join(root, 'VERSION'), `${version}\n`);
+    git('add', '.');
+    git('commit', '-m', `Version ${version}`);
+    return git('rev-parse', 'HEAD');
+  };
+  const before = commit('0.1.0');
+  const older = commit('0.1.1');
+  commit('0.1.2');
+  git('tag', 'v0.1.2');
+  return { root, before, older, git };
 }
 
 test('reserves a version before creating a draft and leaves it unpublished', async () => {
@@ -116,5 +144,36 @@ test('API failures are not treated as permission to create or move a tag', async
   const { state, github, prepare } = fixture();
   github.rest.git.getRef = async () => { throw apiError(503); };
   await assert.rejects(prepare(), { status: 503 });
+  assert.deepEqual(state.writes, []);
+});
+
+test('the prepare flow reuses an untagged older draft after a newer version was tagged', async (t) => {
+  const { root, before, older, git } = history(t);
+  const draft = { id: 42, tag_name: tag, target_commitish: older, draft: true, body: 'Edited notes', assets: ['installer'] };
+  const { state, github } = fixture({ releases: [draft] });
+  assert.equal(git('tag', '--list', tag), '');
+  const result = await prepareRelease({ github, repo, root, before, sha: older });
+  assert.deepEqual(result, { tag, build: true, release_id: '42' });
+  assert.equal(state.ref.sha, older);
+  assert.deepEqual(state.releases, [draft]);
+  assert.deepEqual(state.writes.map(([kind]) => kind), ['tag']);
+});
+
+test('the prepare flow still rejects creating a new version below an existing tag', async (t) => {
+  const { root, before, older } = history(t);
+  const { state, github } = fixture();
+  await assert.rejects(prepareRelease({ github, repo, root, before, sha: older }), /must be higher than existing tag/);
+  assert.deepEqual(state.writes, []);
+});
+
+test('the prepare flow skips an already published older version without altering its draft', async (t) => {
+  const { root, before, older } = history(t);
+  const { state, github } = fixture({ releases: [
+    { id: 41, tag_name: tag, target_commitish: older, draft: true },
+    { id: 42, tag_name: tag, target_commitish: older, draft: false },
+  ] });
+  assert.deepEqual(await prepareRelease({ github, repo, root, before, sha: older }), {
+    tag, build: false, release_id: '42',
+  });
   assert.deepEqual(state.writes, []);
 });

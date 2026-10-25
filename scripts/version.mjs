@@ -34,15 +34,22 @@ function git(root, ...args) {
   return execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
 
-export function checkRelease(root, before, after = 'HEAD') {
+export function readVersion(root, ref) {
+  return parseVersion(ref
+    ? git(root, 'show', `${ref}:VERSION`)
+    : readFileSync(join(root, 'VERSION'), 'utf8'));
+}
+
+export function checkRelease(root, before, after = 'HEAD', { draft } = {}) {
   if (!/^[a-f0-9]{40}$/.test(before ?? '')) throw new Error('A valid push before SHA is required');
   const commit = git(root, 'rev-parse', `${after}^{commit}`);
-  const version = parseVersion(git(root, 'show', `${commit}:VERSION`));
+  const version = readVersion(root, commit);
   const tag = `v${version}`;
   const existingTag = git(root, 'tag', '--list', tag) === tag;
   const sameCommitTag = existingTag && git(root, 'rev-parse', `${tag}^{commit}`) === commit;
+  const retryingRelease = sameCommitTag || (draft?.draft === true &&
+    draft.tag_name === tag && draft.target_commitish === commit);
   let previous;
-  let recoveringRelease = false;
   if (!/^0+$/.test(before)) {
     let baseline = before;
     try {
@@ -74,11 +81,10 @@ export function checkRelease(root, before, after = 'HEAD') {
         : JSON.parse(git(root, 'show', `${ancestor}:package.json`)).version);
       if (ancestorVersion !== version) {
         previous = ancestorVersion;
-        recoveringRelease = true;
         break;
       }
     }
-    if (previous === version && !sameCommitTag) {
+    if (previous === version && !retryingRelease) {
       return { release: false, version, tag };
     }
   }
@@ -87,10 +93,10 @@ export function checkRelease(root, before, after = 'HEAD') {
   }
   for (const existing of git(root, 'tag', '--list', 'v*').split('\n')) {
     if (existing === tag) {
-      if (!recoveringRelease && !sameCommitTag) {
+      if (!sameCommitTag) {
         throw new Error(`${tag} already belongs to another commit; increase VERSION`);
       }
-    } else if (!sameCommitTag && stableVersion.test(existing.slice(1)) && compareVersions(version, existing.slice(1)) <= 0) {
+    } else if (!retryingRelease && stableVersion.test(existing.slice(1)) && compareVersions(version, existing.slice(1)) <= 0) {
       throw new Error(`VERSION ${version} must be higher than existing tag ${existing}`);
     }
   }
@@ -98,7 +104,7 @@ export function checkRelease(root, before, after = 'HEAD') {
 }
 
 export function syncVersion(root) {
-  const version = parseVersion(readFileSync(join(root, 'VERSION'), 'utf8'));
+  const version = readVersion(root);
   // Validate every file before writing any of them. Keep dependency versions intact.
   const updates = versionFiles.map((file) => {
     const text = readFileSync(join(root, file), 'utf8');
