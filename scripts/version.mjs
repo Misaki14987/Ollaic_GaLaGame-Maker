@@ -39,6 +39,8 @@ export function checkRelease(root, before, after = 'HEAD') {
   const commit = git(root, 'rev-parse', `${after}^{commit}`);
   const version = parseVersion(git(root, 'show', `${commit}:VERSION`));
   const tag = `v${version}`;
+  const existingTag = git(root, 'tag', '--list', tag) === tag;
+  const sameCommitTag = existingTag && git(root, 'rev-parse', `${tag}^{commit}`) === commit;
   let previous;
   let recoveringRelease = false;
   if (!/^0+$/.test(before)) {
@@ -76,7 +78,7 @@ export function checkRelease(root, before, after = 'HEAD') {
         break;
       }
     }
-    if (previous === version || (!recoveringRelease && git(root, 'tag', '--list', tag))) {
+    if (previous === version && !sameCommitTag) {
       return { release: false, version, tag };
     }
   }
@@ -85,10 +87,10 @@ export function checkRelease(root, before, after = 'HEAD') {
   }
   for (const existing of git(root, 'tag', '--list', 'v*').split('\n')) {
     if (existing === tag) {
-      if (!recoveringRelease && git(root, 'rev-parse', `${tag}^{commit}`) !== commit) {
+      if (!recoveringRelease && !sameCommitTag) {
         throw new Error(`${tag} already belongs to another commit; increase VERSION`);
       }
-    } else if (stableVersion.test(existing.slice(1)) && compareVersions(version, existing.slice(1)) <= 0) {
+    } else if (!sameCommitTag && stableVersion.test(existing.slice(1)) && compareVersions(version, existing.slice(1)) <= 0) {
       throw new Error(`VERSION ${version} must be higher than existing tag ${existing}`);
     }
   }

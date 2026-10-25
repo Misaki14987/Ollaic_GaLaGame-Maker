@@ -107,6 +107,17 @@ test('reruns may reuse their own tag but cannot reuse another commit or downgrad
   assert.throws(() => checkRelease(root, before), /must be higher than existing tag/);
 });
 
+test('a tagged release can be retried after a newer version has been tagged', (t) => {
+  const { root, before, setVersion } = fixture(t);
+  const releaseCommit = setVersion('0.1.1\n');
+  git(root, 'tag', 'v0.1.1');
+  setVersion('0.1.2\n');
+  git(root, 'tag', 'v0.1.2');
+  assert.deepEqual(checkRelease(root, before, releaseCommit), {
+    release: true, version: '0.1.1', tag: 'v0.1.1',
+  });
+});
+
 test('a new branch with an all-zero before SHA can release its initial version', (t) => {
   const { root } = fixture(t);
   assert.equal(checkRelease(root, '0'.repeat(40)).release, true);
