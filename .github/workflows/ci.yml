@@ -23,7 +23,7 @@ jobs:
           node-version: '20'
 
       - name: Test release decisions and version synchronization
-        run: node --test scripts/version.test.mjs
+        run: node --test scripts/version.test.mjs scripts/release-draft.test.mjs
 
       - name: Validate VERSION and synchronize app metadata
         run: node scripts/version.mjs sync

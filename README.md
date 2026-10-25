@@ -78,12 +78,13 @@ Windows、Linux、macOS 的安装包会上传到对应的 `v版本号` Release �
 首次添加 `VERSION` 时，沿用现有应用版本也不会发布。
 
 版本号必须递增，且不能使用其他提交已有的标签。
+工作流会在构建前创建标签，将草稿固定到该提交，后续提交不能移动标签或覆盖该版本的安装包。
 构建失败时，Release 保持草稿状态；修复构建后，重新运行失败的工作流。
 如果修复需要新的代码提交，请再次升高 `VERSION`。
 
 本地可以检查发布脚本，或同步应用版本：
 
 ```bash
-node --test scripts/version.test.mjs
+node --test scripts/version.test.mjs scripts/release-draft.test.mjs
 node scripts/version.mjs sync
 ```
