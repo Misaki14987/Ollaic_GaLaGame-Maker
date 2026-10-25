@@ -1,3 +1,5 @@
+import { checkRelease, readVersion } from './version.mjs';
+
 async function findRelease(github, repo, tag) {
   const matches = (await github.paginate(github.rest.repos.listReleases, {
     ...repo, per_page: 100,
@@ -49,4 +51,13 @@ export async function prepareReleaseDraft({ github, repo, tag, sha, release }) {
     }));
   }
   return { build: true, release_id: String(release.id) };
+}
+
+export async function prepareRelease({ github, repo, root, before, sha }) {
+  const tag = `v${readVersion(root, sha)}`;
+  const release = await findRelease(github, repo, tag);
+  if (release && !release.draft) return { tag, build: false, release_id: String(release.id) };
+  const decision = checkRelease(root, before, sha, { draft: release });
+  if (!decision.release) return { tag, build: false };
+  return { tag, ...await prepareReleaseDraft({ github, repo, tag, sha, release: release ?? null }) };
 }

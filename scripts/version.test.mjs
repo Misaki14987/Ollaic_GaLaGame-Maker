@@ -118,6 +118,33 @@ test('a tagged release can be retried after a newer version has been tagged', (t
   });
 });
 
+test('an untagged draft can be retried after a newer release without permitting a new older release', (t) => {
+  const { root, before, setVersion } = fixture(t);
+  const releaseCommit = setVersion('0.1.1\n');
+  setVersion('0.1.2\n');
+  git(root, 'tag', 'v0.1.2');
+  const draft = { tag_name: 'v0.1.1', target_commitish: releaseCommit, draft: true };
+  assert.equal(git(root, 'tag', '--list', 'v0.1.1'), '');
+  assert.equal(checkRelease(root, before, releaseCommit, { draft }).release, true);
+  for (const invalid of [
+    undefined,
+    { ...draft, target_commitish: before },
+    { ...draft, tag_name: 'v0.1.0' },
+    { ...draft, draft: false },
+  ]) {
+    assert.throws(() => checkRelease(root, before, releaseCommit, { draft: invalid }), /must be higher than existing tag/);
+  }
+});
+
+test('same-version recovery cannot reuse a tag belonging to an earlier commit', (t) => {
+  const { root, setVersion, commit } = fixture(t);
+  const releaseCommit = setVersion('0.1.1\n');
+  git(root, 'tag', 'v0.1.1');
+  writeFileSync(join(root, 'feature.txt'), 'Another commit');
+  const after = commit();
+  assert.throws(() => checkRelease(root, releaseCommit, after), /already belongs to another commit/);
+});
+
 test('a new branch with an all-zero before SHA can release its initial version', (t) => {
   const { root } = fixture(t);
   assert.equal(checkRelease(root, '0'.repeat(40)).release, true);

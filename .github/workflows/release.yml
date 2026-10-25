@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       release: ${{ steps.draft.outputs.build }}
-      tag: ${{ steps.version.outputs.tag }}
+      tag: ${{ steps.draft.outputs.tag }}
       release_id: ${{ steps.draft.outputs.release_id }}
     steps:
       - name: Checkout release commit and history
@@ -39,23 +39,17 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Check VERSION against the previous push
-        id: version
-        env:
-          RELEASE_BEFORE: ${{ github.event.before }}
-        run: node scripts/version.mjs check
-
-      - name: Create or reuse release draft
-        if: steps.version.outputs.release == 'true'
+      - name: Check VERSION and prepare release draft
         id: draft
         uses: actions/github-script@v7
         env:
-          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_BEFORE: ${{ github.event.before }}
         with:
           script: |
-            const { prepareReleaseDraft } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/release-draft.mjs`);
-            const result = await prepareReleaseDraft({
-              github, repo: context.repo, tag: process.env.RELEASE_TAG, sha: context.sha,
+            const { prepareRelease } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/release-draft.mjs`);
+            const result = await prepareRelease({
+              github, repo: context.repo, root: process.env.GITHUB_WORKSPACE,
+              before: process.env.RELEASE_BEFORE, sha: context.sha,
             });
             for (const [key, value] of Object.entries(result)) core.setOutput(key, String(value));
 
