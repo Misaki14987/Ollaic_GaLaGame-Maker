@@ -178,37 +178,3 @@ jobs:
         if: startsWith(matrix.label, 'macos-')
         shell: bash
         run: codesign --verify --deep --strict --verbose=4 target/release/bundle/macos/Ollaic.app
-
-  publish:
-    name: Publish completed release
-    needs: [prepare, build]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Publish release after every platform succeeds
-        uses: actions/github-script@v7
-        env:
-          RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
-          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
-        with:
-          script: |
-            const version = (tag) => /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(tag)
-              ?.slice(1).map(BigInt);
-            const current = version(process.env.RELEASE_TAG);
-            if (!current) throw new Error(`Invalid release tag: ${process.env.RELEASE_TAG}`);
-            const releases = await github.paginate(github.rest.repos.listReleases, {
-              ...context.repo, per_page: 100,
-            });
-            const newerPublished = releases.some((release) => {
-              if (release.draft || release.prerelease) return false;
-              const other = version(release.tag_name);
-              return other?.some((part, index) => part > current[index] &&
-                other.slice(0, index).every((earlier, i) => earlier === current[i]));
-            });
-            await github.rest.repos.updateRelease({
-              ...context.repo,
-              release_id: Number(process.env.RELEASE_ID),
-              draft: false,
-              // Keep an older retry from replacing a published newer version.
-              // Legacy selection handles builds that finish concurrently.
-              make_latest: newerPublished ? 'false' : 'legacy',
-            });
