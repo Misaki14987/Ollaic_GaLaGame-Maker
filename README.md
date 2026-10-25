@@ -70,9 +70,10 @@ sudo dnf install -y webkit2gtk4.1-devel gtk3-devel libappindicator-gtk3-devel li
 1. 把 `VERSION` 升到更大的版本，例如 `0.1.1`。
 2. 提交修改并推送或合并到 `master`。
 3. 等待 `release` 工作流完成。
+4. 在 GitHub Releases 检查草稿的更新说明和三个平台的安装包，再手动点击 `Publish release`。
 
 工作流会自动同步前端、Tauri、Cargo 和锁文件中的应用版本。
-Windows、Linux、macOS 全部构建成功后，工作流会公开对应的 `v版本号` Release。
+Windows、Linux、macOS 的安装包会上传到对应的 `v版本号` Release 草稿，工作流不会自动公开发布。
 无需手动创建标签。普通代码提交、其他分支提交和仅修改版本空白不会发布。
 首次添加 `VERSION` 时，沿用现有应用版本也不会发布。
 
