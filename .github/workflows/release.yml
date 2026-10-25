@@ -56,9 +56,12 @@ jobs:
             const tag = process.env.RELEASE_TAG;
             // getReleaseByTag cannot find unpublished drafts. The authenticated
             // releases list includes them, even when the list spans pages.
-            let release = (await github.paginate(github.rest.repos.listReleases, {
+            const matches = (await github.paginate(github.rest.repos.listReleases, {
               owner, repo, per_page: 100,
-            })).find((candidate) => candidate.tag_name === tag);
+            })).filter((candidate) => candidate.tag_name === tag);
+            // An older failed run may have left drafts beside a published
+            // release. The published release means this version is complete.
+            let release = matches.find((candidate) => !candidate.draft) ?? matches[0];
             if (!release) {
               ({ data: release } = await github.rest.repos.createRelease({
                 owner, repo, tag_name: tag, target_commitish: context.sha,
@@ -67,12 +70,26 @@ jobs:
               }));
             }
             if (release.draft && release.target_commitish !== context.sha) {
-              await github.rest.git.updateRef({
-                ...context.repo,
-                ref: `refs/tags/${tag}`,
-                sha: context.sha,
-                force: true,
-              });
+              try {
+                await github.rest.git.getRef({
+                  ...context.repo,
+                  ref: `tags/${tag}`,
+                });
+                await github.rest.git.updateRef({
+                  ...context.repo,
+                  ref: `tags/${tag}`,
+                  sha: context.sha,
+                  force: true,
+                });
+              } catch (error) {
+                if (error.status !== 404) throw error;
+                // A draft may have a pending tag_name without a Git ref yet.
+                await github.rest.git.createRef({
+                  ...context.repo,
+                  ref: `refs/tags/${tag}`,
+                  sha: context.sha,
+                });
+              }
               await github.rest.repos.updateRelease({
                 ...context.repo,
                 release_id: release.id,
