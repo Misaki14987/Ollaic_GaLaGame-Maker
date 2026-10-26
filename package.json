@@ -23,10 +23,7 @@
     "android:open": "bash scripts/android-native.sh open",
     "ios:dev": "bash scripts/ios-native.sh dev",
     "ios:build": "bash scripts/ios-native.sh build",
-    "ios:open": "bash scripts/ios-native.sh open",
-    "android:tauri:dev": "pnpm tauri android dev",
-    "android:tauri:build": "pnpm tauri android build --apk --target aarch64",
-    "android:tauri:open": "pnpm tauri android dev --open"
+    "ios:open": "bash scripts/ios-native.sh open"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.10.1"

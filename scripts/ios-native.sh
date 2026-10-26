@@ -2,9 +2,10 @@
 set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ios_project_dir="$project_root/apps/ios"
 mode="${1:-build}"
-project="$project_root/ios/Ollaic.xcodeproj"
-derived_data="${IOS_DERIVED_DATA_PATH:-$project_root/ios/.build}"
+project="$ios_project_dir/Ollaic.xcodeproj"
+derived_data="${IOS_DERIVED_DATA_PATH:-$ios_project_dir/.build}"
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
   printf 'Native iOS development requires macOS and Xcode.\n' >&2
