@@ -9,6 +9,8 @@ Rust libraries, the matting model, or a Tauri runtime.
 Requires JDK 21, Android SDK 36, and access to Google Maven/Maven Central on the first build.
 An NDK and Rust toolchain are not required for this UI prototype.
 
+From `apps/android/`:
+
 ```sh
 ./gradlew :app:assembleDebug
 ```
@@ -47,8 +49,6 @@ The APK is `app/build/outputs/apk/debug/app-debug.apk`.
 
 The future integration boundary is a shared Rust core exposed through native bindings such as
 UniFFI. Desktop presentation stays in React/Tauri, and Android presentation stays in this project.
-The existing Tauri Android test harness remains under `apps/desktop/src-tauri/gen/android/` and is available
-through the root `android:tauri:*` scripts; it is not a dependency of this application.
 
 ## Focused Tests
 

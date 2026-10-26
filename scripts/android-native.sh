@@ -2,13 +2,14 @@
 set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+android_project_dir="$project_root/apps/android"
 mode="${1:-build}"
 
 if [[ "$mode" == "open" ]]; then
   if [[ "$(uname -s)" == "Darwin" ]]; then
-    exec open -a "Android Studio" "$project_root/android"
+    exec open -a "Android Studio" "$android_project_dir"
   fi
-  exec studio "$project_root/android"
+  exec studio "$android_project_dir"
 fi
 
 if [[ -z "${JAVA_HOME:-}" && -x /usr/libexec/java_home ]]; then
@@ -24,7 +25,7 @@ case "$mode" in
   *) printf 'Unknown Android command: %s\n' "$mode" >&2; exit 2 ;;
 esac
 
-"$project_root/android/gradlew" -p "$project_root/android" :app:assembleDebug
+"$android_project_dir/gradlew" -p "$android_project_dir" :app:assembleDebug
 
 if [[ "$mode" == "dev" ]]; then
   adb_command="${ANDROID_HOME:-}/platform-tools/adb"
@@ -37,6 +38,6 @@ if [[ "$mode" == "dev" ]]; then
     printf 'Start an Android emulator in Android Studio, then run pnpm android:dev again.\n' >&2
     exit 1
   fi
-  "$adb_command" -s "$device" install -r "$project_root/android/app/build/outputs/apk/debug/app-debug.apk"
+  "$adb_command" -s "$device" install -r "$android_project_dir/app/build/outputs/apk/debug/app-debug.apk"
   "$adb_command" -s "$device" shell am start -n com.ollaic.galagame_maker/.MainActivity
 fi

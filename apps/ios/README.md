@@ -39,7 +39,7 @@ pnpm ios:dev
 an iPhone or iPad simulator, then click Run.
 
 `ios:build` produces an unsigned Debug simulator app at
-`ios/.build/Build/Products/Debug-iphonesimulator/Ollaic.app`.
+`apps/ios/.build/Build/Products/Debug-iphonesimulator/Ollaic.app`.
 
 `ios:dev` first uses `IOS_SIMULATOR_UDID`, then the repository-local Git setting
 `ollaic.iosSimulatorUDID`. Without either setting, it reuses a booted regular
@@ -162,8 +162,8 @@ The editor workflow additionally covers script entry editing, scenes, undo/redo,
 writing notes, and restoring the workspace after restarting the app.
 
 ```sh
-xcodebuild test -project ios/Ollaic.xcodeproj -scheme Ollaic \
+xcodebuild test -project apps/ios/Ollaic.xcodeproj -scheme Ollaic \
   -destination 'platform=iOS Simulator,id=YOUR_SIMULATOR_UDID' \
   -collect-test-diagnostics never -parallel-testing-enabled NO \
-  -derivedDataPath ios/.build CODE_SIGNING_ALLOWED=NO
+  -derivedDataPath apps/ios/.build CODE_SIGNING_ALLOWED=NO
 ```
