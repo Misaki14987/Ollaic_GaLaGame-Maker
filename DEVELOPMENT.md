@@ -12,6 +12,7 @@ The development rules are written in English and live beside the code they gover
 | CSS and semantic tokens | [Style rules](apps/desktop/src/styles/AGENTS.md) |
 | Browser journey tests | [E2E rules](apps/desktop/e2e/AGENTS.md) |
 | Rust, Tauri security, and persistence | [apps/desktop/src-tauri/AGENTS.md](apps/desktop/src-tauri/AGENTS.md) |
+| Engineering documentation | [docs/AGENTS.md](docs/AGENTS.md) |
 | Development and release scripts | [scripts/AGENTS.md](scripts/AGENTS.md) |
 | CI quality gates and releases | [.github/AGENTS.md](.github/AGENTS.md) |
 
