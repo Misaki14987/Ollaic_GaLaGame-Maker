@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Download and install the WebGAL runtime template into src-tauri/runtime/WebGAL_Template/.
+# Download and install the WebGAL runtime template into apps/desktop/src-tauri/runtime/WebGAL_Template/.
 #
 # Run once after cloning the repo:
 #     bash scripts/setup-runtime.sh
@@ -12,7 +12,7 @@ set -euo pipefail
 VERSION="${WEBGAL_VERSION:-4.6.0}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-TARGET="$REPO_ROOT/src-tauri/runtime/WebGAL_Template"
+TARGET="$REPO_ROOT/apps/desktop/src-tauri/runtime/WebGAL_Template"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 

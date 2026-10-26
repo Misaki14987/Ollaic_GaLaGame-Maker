@@ -26,6 +26,14 @@ Ollaic GaLaGame Maker（简称 Ollaic）是一个面向 [WebGAL](https://docs.op
 
 ## 开发
 
+See [Development Standards](DEVELOPMENT.md) for the English directory-level rules, starting with [AGENTS.md](AGENTS.md).
+
+### Repository layout
+
+- `apps/desktop/`: Desktop application, with React/Vite source and frontend tooling.
+- `apps/desktop/src-tauri/`: Rust backend, native capabilities, and Tauri configuration.
+- `scripts/`: Shared development and release tooling.
+
 ### 环境要求
 
 - Node.js 20+
@@ -40,7 +48,7 @@ pnpm install --frozen-lockfile
 bash scripts/setup-runtime.sh
 ```
 
-`setup-runtime.sh` 会下载 WebGAL 运行时模板到 `src-tauri/runtime/WebGAL_Template/`。该目录不进入版本库。
+`setup-runtime.sh` 会下载 WebGAL 运行时模板到 `apps/desktop/src-tauri/runtime/WebGAL_Template/`。该目录不进入版本库。
 
 ### 本地运行
 
@@ -88,7 +96,7 @@ APK 输出到 `android/app/build/outputs/apk/debug/app-debug.apk`。也可以直
 
 点击项目卡片可进入独立原生工作区，支持场景管理、对白/旁白/备注草稿、撤销重做和创作笔记。手机使用底部导航，宽屏展开场景侧栏；草稿自动保存，返回项目库前会完成保存。当前保存的是 Android 本地工作区 JSON，运行预览、素材导入和 Agent 尚未接入 WebGAL/Rust 后端。
 
-旧 Tauri Android 测试工程仍在 `src-tauri/gen/android/`，对应命令为 `pnpm android:tauri:dev`、`pnpm android:tauri:build --debug` 和 `pnpm android:tauri:open`，需要额外的 NDK 和 Android Rust 目标。它不参与独立原生应用的构建。
+旧 Tauri Android 测试工程仍在 `apps/desktop/src-tauri/gen/android/`，对应命令为 `pnpm android:tauri:dev`、`pnpm android:tauri:build --debug` 和 `pnpm android:tauri:open`，需要额外的 NDK 和 Android Rust 目标。它不参与独立原生应用的构建。
 
 旧 Web 首页保留了移动端私有目录和 ZIP 导入适配，ZIP 最大 512 MiB、解压后最大 2 GiB。独立原生应用不会读取旧 Web 项目列表。两种 Android 构建沿用同一应用 ID，覆盖安装保留私有文件，卸载会删除私有数据。
 

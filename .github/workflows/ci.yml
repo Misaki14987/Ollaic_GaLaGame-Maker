@@ -92,18 +92,18 @@ jobs:
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri -> target
+          workspaces: . -> target
 
       - name: Setup dummy model for Tauri resource check
         run: |
-          mkdir -p src-tauri/models
-          touch src-tauri/models/birefnet-lite-fp16.onnx
+          mkdir -p apps/desktop/src-tauri/models
+          touch apps/desktop/src-tauri/models/birefnet-lite-fp16.onnx
 
       - name: Check Rust tests
-        run: cargo check --tests --manifest-path src-tauri/Cargo.toml
+        run: cargo check --tests --manifest-path apps/desktop/src-tauri/Cargo.toml
 
       - name: Test Rust
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
 
       # Replays recorded provider output through the real agents, offline.
       # Also the only build that compiles the agent-harness binary.
@@ -123,4 +123,4 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Test agent-harness (cassette replay)
-        run: cargo test --locked --features agent-harness --manifest-path src-tauri/Cargo.toml
+        run: cargo test --locked --features agent-harness --manifest-path apps/desktop/src-tauri/Cargo.toml

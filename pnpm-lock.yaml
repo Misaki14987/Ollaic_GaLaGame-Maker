@@ -15,7 +15,7 @@ importers:
         specifier: ^2.10.1
         version: 2.10.1
 
-  design:
+  apps/desktop:
     dependencies:
       '@radix-ui/react-alert-dialog':
         specifier: 1.1.6

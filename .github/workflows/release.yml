@@ -8,7 +8,7 @@ on:
       - VERSION
       - scripts/version.mjs
       - scripts/release-draft.mjs
-      - src-tauri/Cargo.toml
+      - apps/desktop/src-tauri/Cargo.toml
       - .github/workflows/release.yml
 
 permissions:
@@ -119,7 +119,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tauriScript: pnpm tauri
+          projectPath: apps/desktop
+          tauriScript: pnpm exec tauri
           releaseId: ${{ needs.prepare.outputs.release_id }}
           tagName: ${{ needs.prepare.outputs.tag }}
           releaseCommitish: ${{ github.sha }}

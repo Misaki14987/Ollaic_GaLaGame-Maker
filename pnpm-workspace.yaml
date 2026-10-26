@@ -1,5 +1,5 @@
 packages:
-  - design
+  - apps/desktop
 
 overrides:
   vite: 6.3.5
