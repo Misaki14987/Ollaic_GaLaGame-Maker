@@ -1,15 +1,15 @@
 /target
 /dist
 /node_modules
-/design/node_modules
-/design/dist
-/design/test-results
-/design/playwright-report
-/design/package-lock.json
-/src-tauri/target
-/src-tauri/runtime
+/apps/desktop/node_modules
+/apps/desktop/dist
+/apps/desktop/test-results
+/apps/desktop/playwright-report
+/apps/desktop/package-lock.json
+/apps/desktop/src-tauri/target
+/apps/desktop/src-tauri/runtime
 # 抠图模型由 build.rs 在编译时从云端下载，不纳入版本库（体积约 168MB）。
-/src-tauri/models/*.onnx
+/apps/desktop/src-tauri/models/*.onnx
 /.codex
 /.claude
 /stitch_exports
@@ -17,3 +17,4 @@
 .DS_Store
 /docs
 /skills
+/_local

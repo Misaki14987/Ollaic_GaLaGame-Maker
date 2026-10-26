@@ -1,7 +1,7 @@
 # Ollaic Android
 
 Independent Kotlin/Jetpack Compose application using Material 3 and the Ollaic brand palette.
-The Gradle project does not include `design/`, `src-tauri/`, WebView, React, a Node build,
+The Gradle project does not include `apps/desktop/`, `apps/desktop/src-tauri/`, WebView, React, a Node build,
 Rust libraries, the matting model, or a Tauri runtime.
 
 ## Build
@@ -47,7 +47,7 @@ The APK is `app/build/outputs/apk/debug/app-debug.apk`.
 
 The future integration boundary is a shared Rust core exposed through native bindings such as
 UniFFI. Desktop presentation stays in React/Tauri, and Android presentation stays in this project.
-The existing Tauri Android test harness remains under `src-tauri/gen/android/` and is available
+The existing Tauri Android test harness remains under `apps/desktop/src-tauri/gen/android/` and is available
 through the root `android:tauri:*` scripts; it is not a dependency of this application.
 
 ## Focused Tests

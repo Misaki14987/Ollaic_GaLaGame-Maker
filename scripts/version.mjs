@@ -5,9 +5,9 @@ import { pathToFileURL } from 'node:url';
 
 export const versionFiles = [
   'package.json',
-  'design/package.json',
-  'src-tauri/tauri.conf.json',
-  'src-tauri/Cargo.toml',
+  'apps/desktop/package.json',
+  'apps/desktop/src-tauri/tauri.conf.json',
+  'apps/desktop/src-tauri/Cargo.toml',
   'Cargo.lock',
 ];
 
