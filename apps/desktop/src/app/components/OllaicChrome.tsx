@@ -17,6 +17,7 @@ import {
   Save,
   Search,
   Settings,
+  Sparkles,
   Upload,
   UserCircle,
   type LucideIcon,
@@ -24,7 +25,7 @@ import {
 
 import { Switch } from './ui/switch';
 
-type OllaicSection = 'home' | 'edit' | 'flow' | 'script' | 'world' | 'characters' | 'assets' | 'preview' | 'build' | 'memory';
+type OllaicSection = 'home' | 'edit' | 'flow' | 'script' | 'world' | 'characters' | 'assets' | 'preview' | 'build' | 'memory' | 'm3proto';
 
 export type OllaicSaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -71,6 +72,7 @@ const navItems: Array<{ id: OllaicSection; label: string; icon: LucideIcon }> = 
   { id: 'home', label: '首页', icon: Home },
   { id: 'edit', label: '编辑', icon: BookOpen },
   { id: 'assets', label: '资源库', icon: Boxes },
+  { id: 'm3proto', label: 'M3原型', icon: Sparkles },
 ];
 
 export function OllaicTopBar({
@@ -244,6 +246,10 @@ export function OllaicSideNav({ active, projectId, projectLabel = 'ALPHA', onBef
   const doNavigate = (target: OllaicSection) => {
     if (target === 'home') {
       navigate('/');
+      return;
+    }
+    if (target === 'm3proto') {
+      navigate(`/editor/${projectId || 'demo'}?prototype=1&variant=A`);
       return;
     }
     if (!projectId) {

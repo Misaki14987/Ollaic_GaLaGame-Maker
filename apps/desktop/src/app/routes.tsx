@@ -9,6 +9,13 @@ export const router = createHashRouter([
     },
   },
   {
+    path: "/prototype",
+    lazy: async () => {
+      const { EditorWorkspacePrototype } = await import("./components/story-editor/EditorWorkspace.prototype");
+      return { Component: EditorWorkspacePrototype };
+    },
+  },
+  {
     path: "/flow/:projectId",
     lazy: async () => {
       const { FlowBoardPage } = await import("./components/FlowBoardPage");

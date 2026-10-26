@@ -1,110 +1,125 @@
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router';
-import { open as openDialog } from '@tauri-apps/plugin-dialog';
+import { cleanup, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { open } from '@tauri-apps/plugin-dialog';
 import { ProjectHome, type Project } from './ProjectHome';
-import { openProject, type ProjectInfo } from '../lib/webgal-ipc';
+import { openProject } from '../lib/webgal-ipc';
 
-vi.mock('@tauri-apps/api/core', () => ({ isTauri: () => false, invoke: vi.fn() }));
 vi.mock('../lib/webgal-ipc');
+vi.mock('@tauri-apps/api/core', () => ({ isTauri: () => false, invoke: vi.fn() }));
 
-const projects: Project[] = ['A', 'B'].map((id) => ({
-  id, name: `Project ${id}`, path: `/projects/${id}`, description: '',
-  lastModified: '', isFavorite: false, sceneCount: 1,
-}));
+const navigate = vi.hoisted(() => vi.fn());
+vi.mock('react-router', () => ({ useNavigate: () => navigate }));
 
-function savedProjects(): Project[] {
-  return JSON.parse(localStorage.getItem('webgal-projects')!);
-}
+const projects: Project[] = [
+  {
+    id: 'first',
+    name: '雨后站台',
+    description: '五年后的重逢',
+    lastModified: '2026/10/26 12:00',
+    path: '/stories/station',
+    isFavorite: false,
+    sceneCount: 3,
+  },
+  {
+    id: 'second',
+    name: '下一站夏天',
+    description: '海边的约定',
+    lastModified: '2026/10/25 09:00',
+    path: '/stories/summer',
+    isFavorite: true,
+    sceneCount: 8,
+  },
+  {
+    id: 'archived',
+    name: '旧日来信',
+    description: '',
+    lastModified: '',
+    path: '/stories/letter',
+    isFavorite: false,
+    sceneCount: 1,
+    deleted: true,
+  },
+];
 
-function record(id: string) {
-  return within(screen.getByText(`Project ${id}`).closest('[role="button"]') as HTMLElement);
-}
+beforeEach(() => {
+  localStorage.clear();
+  localStorage.setItem('webgal-projects', JSON.stringify(projects));
+  vi.clearAllMocks();
+  vi.mocked(openProject).mockImplementation(async (path) => ({ path, config: {}, scenes: [] }));
+});
+afterEach(cleanup);
 
-async function startOpening(entry: 'card' | 'folder') {
-  let resolve!: (info: ProjectInfo) => void;
-  vi.mocked(openProject).mockReturnValue(new Promise((done) => { resolve = done; }));
-  render(
-    <MemoryRouter>
-      <Routes>
-        <Route path="/" element={<ProjectHome />} />
-        <Route path="/editor/:id" element={<div>Editor</div>} />
-      </Routes>
-    </MemoryRouter>,
-  );
-  await act(async () => {
-    if (entry === 'folder') fireEvent.click(screen.getByRole('button', { name: /\u6253\u5f00\u5df2\u6709\u9879\u76ee/ }));
-    else fireEvent.click(screen.getByText('Project A'));
-  });
-  return async () => {
-    await act(async () => { resolve({ path: '/projects/A', config: {}, scenes: ['start.txt', 'next.txt'] }); });
-  };
-}
-
-describe.each(['card', 'folder'] as const)('ProjectHome pending %s opens', (entry) => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    localStorage.setItem('webgal-projects', JSON.stringify(projects));
-    vi.mocked(openDialog).mockResolvedValue('/projects/A');
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
-  });
-
-  afterEach(() => {
-    cleanup();
-    localStorage.clear();
-    vi.restoreAllMocks();
-  });
-
-  it.each(['A', 'B'])('preserves a favorite changed on project %s before navigation', async (id) => {
-    const finishOpening = await startOpening(entry);
-    fireEvent.click(record(id).getByRole('button', { name: '\u6536\u85cf\u9879\u76ee' }));
-    await finishOpening();
-
-    expect(screen.getByText('Editor')).toBeInTheDocument();
-    expect(savedProjects().find((p) => p.id === id)?.isFavorite).toBe(true);
-    expect(savedProjects().find((p) => p.id === 'A')?.sceneCount).toBe(2);
-    expect(localStorage.getItem('project-path-A')).toBe('/projects/A');
+describe('M3 project home', () => {
+  it('opens a project directly and updates its recent position', async () => {
+    const user = userEvent.setup();
+    render(<ProjectHome />);
+    await user.click(screen.getByRole('button', { name: '打开项目 下一站夏天' }));
+    expect(navigate).toHaveBeenCalledWith('/editor/second');
+    expect(localStorage.getItem('project-path-second')).toBe('/stories/summer');
+    expect(JSON.parse(localStorage.getItem('webgal-projects')!)[0].id).toBe('second');
   });
 
-  it.each(['A', 'B'])('preserves moving project %s to trash while opening', async (id) => {
-    const finishOpening = await startOpening(entry);
-    fireEvent.click(record(id).getByRole('button', { name: '\u5220\u9664\u9879\u76ee' }));
-    await finishOpening();
-
-    expect(savedProjects().find((p) => p.id === id)?.deleted).toBe(true);
-    expect(screen.queryByText('Editor') !== null).toBe(id !== 'A');
+  it('searches by path and clears unmatched results', async () => {
+    const user = userEvent.setup();
+    render(<ProjectHome />);
+    await user.type(screen.getByRole('searchbox', { name: '搜索项目' }), '/stories/summer');
+    expect(screen.getByRole('button', { name: '打开项目 下一站夏天' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '打开项目 雨后站台' })).not.toBeInTheDocument();
+    await user.type(screen.getByRole('searchbox'), '-missing');
+    expect(screen.getByText('没有找到匹配的项目')).toBeInTheDocument();
+    await user.click(screen.getAllByRole('button', { name: '清除搜索' })[0]);
+    expect(screen.getByRole('button', { name: '打开项目 雨后站台' })).toBeInTheDocument();
   });
 
-  it('does not restore a permanently removed project after opening finishes', async () => {
-    localStorage.setItem('webgal-projects', JSON.stringify([projects[0], { ...projects[1], deleted: true }]));
-    const finishOpening = await startOpening(entry);
-    fireEvent.click(screen.getByRole('button', { name: /\u56de\u6536\u7ad9/ }));
-    fireEvent.click(record('B').getByRole('button', { name: '\u6c38\u4e45\u5220\u9664\u9879\u76ee' }));
-    await finishOpening();
-
-    expect(screen.getByText('Editor')).toBeInTheDocument();
-    expect(savedProjects().map((p) => p.id)).toEqual(['A']);
-    expect(localStorage.getItem('project-path-B')).toBeNull();
+  it('keeps card actions separate from project opening and persists favorites', async () => {
+    const user = userEvent.setup();
+    render(<ProjectHome />);
+    await user.click(screen.getByRole('button', { name: '收藏 雨后站台' }));
+    await user.click(screen.getByRole('button', { name: '收藏（2）' }));
+    expect(screen.getByRole('button', { name: '打开项目 雨后站台' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '取消收藏 雨后站台' }));
+    expect(screen.queryByRole('button', { name: '打开项目 雨后站台' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '打开项目 下一站夏天' })).toBeInTheDocument();
+    expect(navigate).not.toHaveBeenCalled();
   });
 
-  it('cancels opening a target permanently removed during the request', async () => {
-    const finishOpening = await startOpening(entry);
-    fireEvent.click(record('A').getByRole('button', { name: '\u5220\u9664\u9879\u76ee' }));
-    fireEvent.click(screen.getByRole('button', { name: /\u56de\u6536\u7ad9/ }));
-    fireEvent.click(record('A').getByRole('button', { name: '\u6c38\u4e45\u5220\u9664\u9879\u76ee' }));
-    await finishOpening();
-
-    expect(screen.queryByText('Editor')).not.toBeInTheDocument();
-    expect(savedProjects().map((p) => p.id)).toEqual(['B']);
-    expect(localStorage.getItem('project-path-A')).toBeNull();
+  it('restores a recycled project from its card without opening it', async () => {
+    const user = userEvent.setup();
+    render(<ProjectHome />);
+    await user.click(screen.getByRole('button', { name: '回收站（1）' }));
+    expect(screen.getByRole('button', { name: '打开项目 旧日来信' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: '还原项目 旧日来信' }));
+    expect(screen.getByText('回收站是空的')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '项目（3）' }));
+    expect(screen.getByRole('button', { name: '打开项目 旧日来信' })).toBeEnabled();
+    expect(navigate).not.toHaveBeenCalled();
   });
 
-  if (entry === 'folder') it('restores a project that was already in trash when selected', async () => {
-    localStorage.setItem('webgal-projects', JSON.stringify([{ ...projects[0], deleted: true }, projects[1]]));
-    const finishOpening = await startOpening(entry);
-    await finishOpening();
+  it('edits project details from its card and supports Escape to dismiss creation', async () => {
+    const user = userEvent.setup();
+    render(<ProjectHome />);
+    await user.click(screen.getByRole('button', { name: '编辑项目 雨后站台' }));
+    const dialog = within(screen.getByRole('dialog', { name: '编辑项目信息' }));
+    await user.clear(dialog.getByLabelText('项目名称'));
+    await user.type(dialog.getByLabelText('项目名称'), '雨后重逢');
+    await user.click(dialog.getByRole('button', { name: '保存修改' }));
+    expect(screen.getByRole('button', { name: '打开项目 雨后重逢' })).toBeInTheDocument();
+    expect(navigate).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: /^新建项目/ }));
+    expect(screen.getByRole('dialog', { name: '新建项目' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '创建项目' })).toBeDisabled();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
 
-    expect(screen.getByText('Editor')).toBeInTheDocument();
-    expect(savedProjects().find((p) => p.id === 'A')?.deleted).toBe(false);
+  it('shows a recoverable error if the native folder picker is unavailable', async () => {
+    const user = userEvent.setup();
+    vi.mocked(open).mockRejectedValueOnce(new Error('native dialog unavailable'));
+    render(<ProjectHome />);
+    await user.click(screen.getByRole('button', { name: /^打开已有项目/ }));
+    expect(screen.getByRole('alert')).toHaveTextContent('无法打开项目');
+    await user.click(screen.getByRole('button', { name: '关闭错误提示' }));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });
