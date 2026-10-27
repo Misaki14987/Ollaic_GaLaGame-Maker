@@ -3,7 +3,6 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "prototype": "pnpm --dir apps/desktop dev --open \"/#/editor/prototype?prototype=1&variant=A\"",
     "dev": "pnpm --dir apps/desktop dev",
     "build": "pnpm --dir apps/desktop build",
     "lint": "pnpm --dir apps/desktop lint",
